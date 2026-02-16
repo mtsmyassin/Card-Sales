@@ -44,4 +44,16 @@ lockout_state.json.tmp
 *.xlsx
 
 # Claude AI
-.claude/ 
+.claude/
+
+# Old backup files with hardcoded secrets (SECURITY)
+old.*.py
+*_backup.py
+app_v*.py
+
+# Node modules and Playwright
+node_modules/
+package-lock.json
+playwright-report/
+test-results/
+playwright/.cache/ 
