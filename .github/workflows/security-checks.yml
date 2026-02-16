@@ -1,0 +1,98 @@
+name: Security & Quality Checks
+
+on:
+  push:
+    branches: [ main, develop, 'copilot/**' ]
+  pull_request:
+    branches: [ main, develop ]
+
+permissions:
+  contents: read
+
+jobs:
+  security-tests:
+    name: Security Test Suite
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd Pharmacy_Arc
+        pip install -r requirements.txt
+    
+    - name: Create test .env file
+      run: |
+        cd Pharmacy_Arc
+        cat > .env << 'EOF'
+        FLASK_SECRET_KEY=test-secret-key-32-characters-minimum-length-required
+        FLASK_PORT=5013
+        FLASK_DEBUG=false
+        SUPABASE_URL=https://test.supabase.co
+        SUPABASE_KEY=test-key
+        EMERGENCY_ADMIN_SUPER=super:$2b$12$test
+        EMERGENCY_ADMIN_BASIC=admin:$2b$12$test
+        SESSION_TIMEOUT_MINUTES=30
+        MAX_LOGIN_ATTEMPTS=5
+        LOCKOUT_DURATION_MINUTES=15
+        REQUIRE_HTTPS=false
+        BACKUP_ENABLED=true
+        LOG_LEVEL=INFO
+        LOG_FILE=pharmacy_app.log
+        EOF
+    
+    - name: Run security tests
+      run: |
+        cd Pharmacy_Arc
+        python test_security.py
+    
+    - name: Validate configuration
+      run: |
+        cd Pharmacy_Arc
+        python -c "from config import Config; Config.startup_check()"
+    
+    - name: Test password hashing CLI
+      run: |
+        cd Pharmacy_Arc
+        python security.py genkey
+        python security.py hash "testpassword"
+    
+    - name: Test audit log utilities
+      run: |
+        cd Pharmacy_Arc
+        python -c "from audit_log import audit_log; audit_log('TEST', 'ci_user', 'admin', 'TEST_ENTITY', entity_id='1', success=True)"
+        python audit_log.py verify
+        python audit_log.py view --limit 5
+        python audit_log.py stats
+
+  secret-scanning:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Check for secrets in code
+      run: |
+        echo "Checking for potential secrets..."
+        
+        # Check for hardcoded passwords (allow in comments and config references)
+        if grep -r "password.*=.*['\"]" --include="*.py" Pharmacy_Arc/ | grep -v "password_hash" | grep -v "password.startswith" | grep -v "Config" | grep -v "request.json" | grep -v "# " | grep -v "\"\"\""; then
+          echo "⚠️ Warning: Found potential hardcoded passwords"
+        else
+          echo "✅ No hardcoded passwords found"
+        fi
