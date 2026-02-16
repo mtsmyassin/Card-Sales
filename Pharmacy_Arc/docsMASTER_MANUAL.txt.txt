@@ -1,0 +1,59 @@
+================================================================================
+          FARMACIA CARIMAS MANAGEMENT SUITE — MASTER DOCUMENTATION
+================================================================================
+VERSION:        v43 (Stable Release)
+DATE:           February 11, 2026
+TYPE:           Desktop Application (Python/Flask + Windows Executable)
+DATABASE:       Supabase (Cloud)
+PORT:           5016
+
+================================================================================
+1. SECURITY CREDENTIALS (DO NOT DISTRIBUTE)
+================================================================================
+The system uses a hybrid auth model. These "Backdoor" accounts are hardcoded 
+into the software and work even if the database is offline.
+
+[SUPER ADMIN] (God Mode - Can Unlock Days)
+ Username: super
+ Password: 9517535m3N@
+
+[ADMIN] (Full Access - Cannot Unlock Days)
+ Username: admin
+ Password: 1q2w3e4rM3n@
+
+[CLOUD DATABASE KEYS]
+ URL: https://nnvksawtfthbrcijwbpk.supabase.co
+ KEY: sb_publishable_oBnDva4802DVrBagVX05Fw_40ZVEPiJ
+
+================================================================================
+2. OPERATIONAL WORKFLOWS
+================================================================================
+[A] DAILY ENTRY
+ 1. Staff logs in.
+ 2. Enters Revenue (Cash/Cards), Taxes, and Payouts.
+ 3. Clicks "Finalize".
+
+[B] MANAGER CLOSING
+ 1. Manager logs in and goes to "History".
+ 2. Reviews entries. Approves any "Pending Payouts".
+ 3. Clicks blue "Close Day" button.
+ 4. Confirms "Close & Lock". The day is now read-only.
+
+[C] OFFLINE MODE
+ - If internet fails, the app alerts the user.
+ - Data saves to 'offline_queue.json' on the local computer.
+ - When internet returns, click the yellow "SYNC" button in the header.
+
+================================================================================
+3. BUILD INSTRUCTIONS (CREATE .EXE)
+================================================================================
+To compile the source code into a file that runs on any Windows PC:
+
+1. Install Python 3.
+2. Install Libraries via build_tools/requirements.txt.
+3. Run build_tools/build.bat.
+4. The file 'app.exe' will appear in the 'dist' folder.
+
+================================================================================
+END OF DOCUMENT
+================================================================================

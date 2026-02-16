@@ -1,0 +1,17 @@
+FarmaciaCarimas_Archive/
+│
+├── src/
+│   └── app.py                  # The Main Logic + Embedded Frontend (Single-File Architecture)
+│
+├── assets/
+│   ├── logo.png                # [ACTION REQUIRED] You must copy your logo here
+│   └── carthage.png            # [ACTION REQUIRED] You must copy the carthage logo here
+│
+├── docs/
+│   └── FARMACIA_CARIMAS_MASTER_MANUAL.txt
+│
+├── build_tools/
+│   ├── requirements.txt        # Dependency list
+│   └── build_executable.bat    # One-click setup & build script
+│
+└── dist/                       # (Created automatically) Where the final .exe appears
