@@ -1,0 +1,81 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main, copilot/verify-security-and-fix-features ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install Python dependencies
+      run: |
+        cd Pharmacy_Arc
+        pip install -r requirements.txt
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Install Playwright
+      run: |
+        npm install
+        npx playwright install --with-deps chromium
+    
+    - name: Create test .env file
+      run: |
+        cd Pharmacy_Arc
+        cat > .env << EOF
+        FLASK_SECRET_KEY=${{ secrets.TEST_FLASK_SECRET_KEY || 'test-secret-key-for-ci-minimum-32-chars-long' }}
+        FLASK_PORT=5013
+        FLASK_DEBUG=false
+        SUPABASE_URL=${{ secrets.TEST_SUPABASE_URL }}
+        SUPABASE_KEY=${{ secrets.TEST_SUPABASE_KEY }}
+        EMERGENCY_ADMIN_SUPER=super:\$2b\$12\$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7hlZiOXE4u
+        EMERGENCY_ADMIN_BASIC=admin:\$2b\$12\$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7hlZiOXE4u
+        SESSION_TIMEOUT_MINUTES=30
+        MAX_LOGIN_ATTEMPTS=5
+        LOCKOUT_DURATION_MINUTES=15
+        REQUIRE_HTTPS=false
+        LOG_LEVEL=INFO
+        LOG_FILE=pharmacy_app.log
+        EOF
+    
+    - name: Seed test data
+      run: |
+        python3 seed-test-data.py seed
+      env:
+        SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.TEST_SUPABASE_KEY }}
+    
+    - name: Run Playwright tests
+      run: npm test
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: playwright-report
+        path: playwright-report/
+        retention-days: 30
+    
+    - name: Cleanup test data
+      if: always()
+      run: |
+        python3 seed-test-data.py cleanup
+      env:
+        SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.TEST_SUPABASE_KEY }}

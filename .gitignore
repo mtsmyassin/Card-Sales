@@ -49,4 +49,11 @@ lockout_state.json.tmp
 # Old backup files with hardcoded secrets (SECURITY)
 old.*.py
 *_backup.py
-app_v*.py 
+app_v*.py
+
+# Node modules and Playwright
+node_modules/
+package-lock.json
+playwright-report/
+test-results/
+playwright/.cache/ 
