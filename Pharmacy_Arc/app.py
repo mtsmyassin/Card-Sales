@@ -1,24 +1,65 @@
 import json, webbrowser, os, sys, base64
+import logging
 from functools import wraps
 from threading import Timer
+from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, session
 from supabase import create_client, Client
 
-# --- FORCE NEW PORT TO KILL CACHE ---
-PORT = 5013
-print(f"--- LAUNCHING VERSION 39 (MATH PERFECT) ON PORT {PORT} ---")
+# Import our security and config modules
+try:
+    from config import Config
+    from security import PasswordHasher, LoginAttemptTracker
+    from audit_log import audit_log, get_audit_logger
+except ImportError as e:
+    print(f"CRITICAL ERROR: Failed to import required modules: {e}")
+    print("Please run: pip install -r requirements.txt")
+    sys.exit(1)
+
+# --- CONFIGURATION VALIDATION ---
+Config.startup_check()
+
+# --- LOGGING SETUP ---
+logging.basicConfig(
+    level=getattr(logging, Config.LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(Config.LOG_FILE),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# --- FLASK APP INITIALIZATION ---
+PORT = Config.PORT
+VERSION = "v40-SECURE"
+print(f"--- LAUNCHING {VERSION} ON PORT {PORT} ---")
 
 app = Flask(__name__)
-app.secret_key = 'carimas_v39_final_math'
+app.secret_key = Config.SECRET_KEY
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=Config.SESSION_TIMEOUT_MINUTES)
+
+# --- SECURITY COMPONENTS ---
+password_hasher = PasswordHasher()
+login_tracker = LoginAttemptTracker(
+    max_attempts=Config.MAX_LOGIN_ATTEMPTS,
+    lockout_duration_minutes=Config.LOCKOUT_DURATION_MINUTES
+)
+
+# Emergency admin accounts (hashed passwords)
+EMERGENCY_ACCOUNTS = Config.load_emergency_accounts()
+logger.info(f"Loaded {len(EMERGENCY_ACCOUNTS)} emergency admin account(s)")
 
 # --- 1. CLOUD & LOCAL CONFIGURATION ---
-SUPABASE_URL = "https://nnvksawtfthbrcijwbpk.supabase.co"
-SUPABASE_KEY = "sb_publishable_oBnDva4802DVrBagVX05Fw_40ZVEPiJ"
-OFFLINE_FILE = 'offline_queue.json'
+SUPABASE_URL = Config.SUPABASE_URL
+SUPABASE_KEY = Config.SUPABASE_KEY
+OFFLINE_FILE = Config.OFFLINE_FILE
 
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("Successfully connected to Supabase")
 except Exception as e:
+    logger.critical(f"Cloud Client Init Failed: {e}")
     print(f"CRITICAL ERROR: Cloud Client Init Failed. {e}")
 
 # --- 2. PATHS & ASSETS ---
@@ -72,51 +113,260 @@ def api_get_logo():
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    u = request.json.get('username')
-    p = request.json.get('password')
-    
-    # --- HARDCODED BACKDOORS ---
-    if u == 'super' and p == '9517535m3N@':
-        session['logged_in'] = True; session['user'] = u; session['role'] = 'super_admin'; session['store'] = 'All'
-        return jsonify(status="ok", role='super_admin', store='All')
-
-    if u == 'admin' and p == '1q2w3e4rM3n@':
-        session['logged_in'] = True; session['user'] = u; session['role'] = 'admin'; session['store'] = 'All'
-        return jsonify(status="ok", role='admin', store='All')
-
+    """
+    Authenticate user with password hashing and brute-force protection.
+    Logs all login attempts (success and failure) to audit log.
+    """
     try:
-        res = supabase.table("users").select("*").eq("username", u).execute()
-        if res.data:
-            user = res.data[0]
-            if user['password'] == p:
+        u = request.json.get('username', '').strip()
+        p = request.json.get('password', '')
+        
+        if not u or not p:
+            logger.warning("Login attempt with empty username or password")
+            return jsonify(status="fail", error="Username and password required"), 400
+        
+        # Check if account is locked out
+        if login_tracker.is_locked_out(u):
+            remaining = login_tracker.get_lockout_remaining(u)
+            logger.warning(f"Login attempt for locked out account: {u}")
+            audit_log(
+                action="LOGIN_BLOCKED",
+                actor=u,
+                role="UNKNOWN",
+                entity_type="SESSION",
+                success=False,
+                error=f"Account locked out ({remaining}s remaining)",
+                context={"ip": request.remote_addr}
+            )
+            return jsonify(
+                status="fail",
+                error=f"Account locked due to too many failed attempts. Try again in {remaining} seconds."
+            ), 429
+        
+        # --- CHECK EMERGENCY BACKDOOR ACCOUNTS (HASHED) ---
+        if u in EMERGENCY_ACCOUNTS:
+            stored_hash = EMERGENCY_ACCOUNTS[u]
+            if password_hasher.verify_password(p, stored_hash):
+                # Determine role based on username
+                role = 'super_admin' if u == 'super' else 'admin'
+                
+                session.permanent = True
                 session['logged_in'] = True
                 session['user'] = u
-                session['role'] = user['role']
-                session['store'] = user['store']
-                return jsonify(status="ok", role=user['role'], store=user['store'])
-    except: pass
-
-    return jsonify(status="fail"), 401
+                session['role'] = role
+                session['store'] = 'All'
+                session['login_time'] = datetime.utcnow().isoformat()
+                
+                login_tracker.record_successful_login(u)
+                
+                logger.info(f"Emergency account login: {u} as {role}")
+                audit_log(
+                    action="LOGIN_SUCCESS",
+                    actor=u,
+                    role=role,
+                    entity_type="SESSION",
+                    success=True,
+                    context={"ip": request.remote_addr, "account_type": "emergency"}
+                )
+                
+                return jsonify(status="ok", role=role, store='All')
+        
+        # --- CHECK DATABASE ACCOUNTS ---
+        try:
+            res = supabase.table("users").select("*").eq("username", u).execute()
+            if res.data:
+                user = res.data[0]
+                
+                # Check if password is hashed (starts with $2b$ for bcrypt)
+                if user['password'].startswith('$2b$'):
+                    # Hashed password - verify properly
+                    password_valid = password_hasher.verify_password(p, user['password'])
+                else:
+                    # Legacy plaintext password - still support but warn
+                    logger.warning(f"User {u} still using plaintext password!")
+                    password_valid = (user['password'] == p)
+                
+                if password_valid:
+                    session.permanent = True
+                    session['logged_in'] = True
+                    session['user'] = u
+                    session['role'] = user['role']
+                    session['store'] = user['store']
+                    session['login_time'] = datetime.utcnow().isoformat()
+                    
+                    login_tracker.record_successful_login(u)
+                    
+                    logger.info(f"User login: {u} as {user['role']}")
+                    audit_log(
+                        action="LOGIN_SUCCESS",
+                        actor=u,
+                        role=user['role'],
+                        entity_type="SESSION",
+                        success=True,
+                        context={"ip": request.remote_addr, "store": user['store']}
+                    )
+                    
+                    return jsonify(status="ok", role=user['role'], store=user['store'])
+        
+        except Exception as e:
+            logger.error(f"Database error during login for {u}: {e}")
+            # Continue to failed login handling
+        
+        # --- FAILED LOGIN ---
+        is_locked, remaining_attempts = login_tracker.record_failed_attempt(u)
+        
+        logger.warning(f"Failed login attempt for: {u} (remaining attempts: {remaining_attempts})")
+        audit_log(
+            action="LOGIN_FAILED",
+            actor=u,
+            role="UNKNOWN",
+            entity_type="SESSION",
+            success=False,
+            error="Invalid credentials",
+            context={"ip": request.remote_addr, "remaining_attempts": remaining_attempts}
+        )
+        
+        if is_locked:
+            lockout_duration = login_tracker.get_lockout_remaining(u)
+            return jsonify(
+                status="fail",
+                error=f"Too many failed attempts. Account locked for {lockout_duration} seconds."
+            ), 429
+        else:
+            return jsonify(
+                status="fail",
+                error=f"Invalid credentials. {remaining_attempts} attempts remaining."
+            ), 401
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in login: {e}", exc_info=True)
+        return jsonify(status="error", error="Internal server error"), 500
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
+    """Log out user and record in audit log."""
+    username = session.get('user', 'unknown')
+    role = session.get('role', 'unknown')
+    
+    logger.info(f"User logout: {username}")
+    audit_log(
+        action="LOGOUT",
+        actor=username,
+        role=role,
+        entity_type="SESSION",
+        success=True,
+        context={"ip": request.remote_addr}
+    )
+    
     session.clear()
     return jsonify(status="ok")
 
+
+# --- RBAC DECORATOR ---
+def require_auth(allowed_roles=None):
+    """
+    Decorator to enforce authentication and role-based access control.
+    
+    Args:
+        allowed_roles: List of roles allowed to access this endpoint.
+                      If None, any authenticated user is allowed.
+    
+    Usage:
+        @require_auth()  # Any authenticated user
+        @require_auth(['admin', 'super_admin'])  # Only admins
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Check authentication
+            if not session.get('logged_in'):
+                logger.warning(f"Unauthorized access attempt to {request.endpoint}")
+                return jsonify(error="Authentication required"), 401
+            
+            # Check role if specified
+            if allowed_roles:
+                user_role = session.get('role')
+                if user_role not in allowed_roles:
+                    username = session.get('user', 'unknown')
+                    logger.warning(
+                        f"Access denied: {username} ({user_role}) "
+                        f"attempted to access {request.endpoint} "
+                        f"(requires: {allowed_roles})"
+                    )
+                    audit_log(
+                        action="ACCESS_DENIED",
+                        actor=username,
+                        role=user_role,
+                        entity_type="ENDPOINT",
+                        entity_id=request.endpoint,
+                        success=False,
+                        error=f"Insufficient permissions (requires: {allowed_roles})",
+                        context={"ip": request.remote_addr}
+                    )
+                    return jsonify(error="Insufficient permissions"), 403
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
 @app.route('/api/save', methods=['POST'])
+@require_auth()
 def save():
-    if not session.get('logged_in'): return "Auth Required", 401
-    d = request.json
-    record = {
-        "date": d['date'], "reg": d['reg'], "staff": d['staff'], "store": d.get('store', 'Main'),
-        "gross": d['gross'], "net": d['net'], "variance": float(d['variance']), "payload": d
-    }
+    """Create a new audit entry with audit logging."""
     try:
-        supabase.table("audits").insert(record).execute()
-        return jsonify(status="success")
-    except:
-        save_to_queue(record)
-        return jsonify(status="offline")
+        d = request.json
+        username = session.get('user')
+        role = session.get('role')
+        
+        record = {
+            "date": d['date'], 
+            "reg": d['reg'], 
+            "staff": d['staff'], 
+            "store": d.get('store', 'Main'),
+            "gross": d['gross'], 
+            "net": d['net'], 
+            "variance": float(d['variance']), 
+            "payload": d
+        }
+        
+        try:
+            result = supabase.table("audits").insert(record).execute()
+            
+            # Log successful creation
+            audit_log(
+                action="CREATE",
+                actor=username,
+                role=role,
+                entity_type="AUDIT_ENTRY",
+                entity_id=str(result.data[0]['id']) if result.data else None,
+                after={"date": d['date'], "store": d.get('store'), "gross": d['gross']},
+                success=True,
+                context={"ip": request.remote_addr}
+            )
+            
+            logger.info(f"Audit entry created by {username}: date={d['date']}, store={d.get('store')}")
+            return jsonify(status="success")
+        
+        except Exception as e:
+            logger.warning(f"Failed to save to database, queuing offline: {e}")
+            save_to_queue(record)
+            
+            # Log offline save
+            audit_log(
+                action="CREATE_OFFLINE",
+                actor=username,
+                role=role,
+                entity_type="AUDIT_ENTRY",
+                after={"date": d['date'], "store": d.get('store'), "gross": d['gross']},
+                success=True,
+                context={"ip": request.remote_addr, "reason": "database_unavailable"}
+            )
+            
+            return jsonify(status="offline")
+    
+    except Exception as e:
+        logger.error(f"Error in save endpoint: {e}", exc_info=True)
+        return jsonify(error="Internal server error"), 500
 
 @app.route('/api/sync', methods=['POST'])
 def sync():
@@ -138,79 +388,412 @@ def sync():
     return jsonify(status="success", count=success_count, remaining=len(failed_items))
 
 @app.route('/api/update', methods=['POST'])
+@require_auth()
 def update():
-    if not session.get('logged_in'): return "Auth Required", 401
-    if session['role'] == 'staff': return "Permission Denied", 403
-    d = request.json
-    uid = d.get('id')
-    record = {
-        "date": d['date'], "reg": d['reg'], "staff": d['staff'], "store": d.get('store', 'Main'),
-        "gross": d['gross'], "net": d['net'], "variance": float(d['variance']), "payload": d
-    }
+    """Update an audit entry with RBAC and audit logging."""
+    username = session.get('user')
+    role = session.get('role')
+    
+    # Staff cannot edit
+    if role == 'staff':
+        logger.warning(f"Staff user {username} attempted to edit entry")
+        audit_log(
+            action="UPDATE_DENIED",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            success=False,
+            error="Staff role cannot edit entries",
+            context={"ip": request.remote_addr}
+        )
+        return jsonify(error="Permission Denied: Staff cannot edit entries"), 403
+    
     try:
+        d = request.json
+        uid = d.get('id')
+        
+        # Get current record for audit trail
+        try:
+            old_record = supabase.table("audits").select("*").eq("id", uid).execute()
+            before_state = old_record.data[0] if old_record.data else None
+        except:
+            before_state = None
+        
+        record = {
+            "date": d['date'], 
+            "reg": d['reg'], 
+            "staff": d['staff'], 
+            "store": d.get('store', 'Main'),
+            "gross": d['gross'], 
+            "net": d['net'], 
+            "variance": float(d['variance']), 
+            "payload": d
+        }
+        
         supabase.table("audits").update(record).eq("id", uid).execute()
+        
+        # Log successful update
+        audit_log(
+            action="UPDATE",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            entity_id=str(uid),
+            before={"date": before_state['date'], "gross": before_state['gross']} if before_state else None,
+            after={"date": d['date'], "gross": d['gross']},
+            success=True,
+            context={"ip": request.remote_addr}
+        )
+        
+        logger.info(f"Audit entry {uid} updated by {username}")
         return jsonify(status="success")
+    
     except Exception as e:
+        logger.error(f"Error updating entry {uid}: {e}", exc_info=True)
+        
+        audit_log(
+            action="UPDATE",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            entity_id=str(uid) if uid else None,
+            success=False,
+            error=str(e),
+            context={"ip": request.remote_addr}
+        )
+        
         return jsonify(error=str(e)), 500
 
 @app.route('/api/delete', methods=['POST'])
+@require_auth()
 def delete():
-    if not session.get('logged_in'): return "Auth Required", 401
-    if session['role'] == 'staff': return "Permission Denied", 403
+    """Delete an audit entry with RBAC and audit logging."""
+    username = session.get('user')
+    role = session.get('role')
+    
+    # Staff cannot delete
+    if role == 'staff':
+        logger.warning(f"Staff user {username} attempted to delete entry")
+        audit_log(
+            action="DELETE_DENIED",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            success=False,
+            error="Staff role cannot delete entries",
+            context={"ip": request.remote_addr}
+        )
+        return jsonify(error="Permission Denied: Staff cannot delete entries"), 403
+    
     try:
-        supabase.table("audits").delete().eq("id", request.json['id']).execute()
+        uid = request.json['id']
+        
+        # Get current record for audit trail
+        try:
+            old_record = supabase.table("audits").select("*").eq("id", uid).execute()
+            before_state = old_record.data[0] if old_record.data else None
+        except:
+            before_state = None
+        
+        supabase.table("audits").delete().eq("id", uid).execute()
+        
+        # Log successful deletion
+        audit_log(
+            action="DELETE",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            entity_id=str(uid),
+            before={"date": before_state['date'], "gross": before_state['gross'], "store": before_state['store']} if before_state else None,
+            success=True,
+            context={"ip": request.remote_addr}
+        )
+        
+        logger.info(f"Audit entry {uid} deleted by {username}")
         return jsonify(status="success")
+    
     except Exception as e:
+        logger.error(f"Error deleting entry: {e}", exc_info=True)
+        
+        audit_log(
+            action="DELETE",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            entity_id=str(request.json.get('id')) if request.json.get('id') else None,
+            success=False,
+            error=str(e),
+            context={"ip": request.remote_addr}
+        )
+        
         return jsonify(error=str(e)), 500
 
 @app.route('/api/list')
+@require_auth()
 def list_audits():
+    """List audit entries filtered by user's store access."""
     try:
         response = supabase.table("audits").select("*").order("date", desc=True).limit(2000).execute()
         clean_rows = []
         user_store = session.get('store')
         user_role = session.get('role')
         for r in response.data:
-            if user_role not in ['admin', 'super_admin'] and r.get('store') != user_store: continue
+            if user_role not in ['admin', 'super_admin'] and r.get('store') != user_store: 
+                continue
             merged = r['payload']
             merged['id'] = r['id']
             merged['store'] = r.get('store', 'Main')
             clean_rows.append(merged)
         return jsonify(clean_rows)
-    except: return jsonify([])
+    except Exception as e:
+        logger.error(f"Error listing audits: {e}")
+        return jsonify([])
+
+
+# --- DIAGNOSTIC ENDPOINT ---
+@app.route('/api/diagnostics')
+@require_auth(['admin', 'super_admin'])
+def diagnostics():
+    """
+    System diagnostics endpoint (admin only).
+    Returns system health, version, and configuration status.
+    """
+    try:
+        # Check database connectivity
+        db_status = "connected"
+        try:
+            supabase.table("users").select("username").limit(1).execute()
+        except Exception as e:
+            db_status = f"error: {str(e)}"
+        
+        # Check audit log integrity
+        audit_logger = get_audit_logger()
+        audit_valid, audit_errors = audit_logger.verify_integrity()
+        
+        # Count pending offline queue
+        offline_count = len(load_queue())
+        
+        # Get session info
+        session_info = {
+            "user": session.get('user'),
+            "role": session.get('role'),
+            "store": session.get('store'),
+            "login_time": session.get('login_time'),
+        }
+        
+        diagnostics_data = {
+            "version": VERSION,
+            "port": PORT,
+            "database": {
+                "status": db_status,
+                "url": SUPABASE_URL[:30] + "..." if len(SUPABASE_URL) > 30 else SUPABASE_URL,
+            },
+            "audit_log": {
+                "integrity": "valid" if audit_valid else "FAILED",
+                "errors": audit_errors if not audit_valid else [],
+                "entry_count": len(audit_logger.get_entries()),
+            },
+            "offline_queue": {
+                "pending": offline_count,
+            },
+            "security": {
+                "session_timeout_minutes": Config.SESSION_TIMEOUT_MINUTES,
+                "max_login_attempts": Config.MAX_LOGIN_ATTEMPTS,
+                "emergency_accounts": len(EMERGENCY_ACCOUNTS),
+            },
+            "session": session_info,
+        }
+        
+        logger.info(f"Diagnostics accessed by {session.get('user')}")
+        return jsonify(diagnostics_data)
+    
+    except Exception as e:
+        logger.error(f"Error in diagnostics endpoint: {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
 
 @app.route('/api/users/list')
+@require_auth(['admin', 'super_admin'])
 def list_users():
-    if session.get('role') not in ['admin', 'super_admin']: return jsonify([])
-    try: return jsonify(supabase.table("users").select("*").execute().data)
-    except: return jsonify([])
+    """List all users (admin only)."""
+    try:
+        result = supabase.table("users").select("*").execute()
+        logger.info(f"User list accessed by {session.get('user')}")
+        return jsonify(result.data)
+    except Exception as e:
+        logger.error(f"Error listing users: {e}")
+        return jsonify([])
 
 @app.route('/api/users/save', methods=['POST'])
+@require_auth(['admin', 'super_admin'])
 def save_user():
-    if session.get('role') not in ['admin', 'super_admin']: return "Denied", 403
-    u = request.json
+    """Create or update a user (admin only) with password hashing."""
+    username = session.get('user')
+    role = session.get('role')
+    
     try:
-        supabase.table("users").upsert({"username": u['username'], "password": u['password'], "role": u['role'], "store": u['store']}).execute()
+        u = request.json
+        user_to_save = u['username']
+        password = u['password']
+        new_role = u['role']
+        new_store = u['store']
+        
+        # Check if user exists to determine if this is create or update
+        try:
+            existing = supabase.table("users").select("*").eq("username", user_to_save).execute()
+            is_update = len(existing.data) > 0
+            before_state = existing.data[0] if is_update else None
+        except:
+            is_update = False
+            before_state = None
+        
+        # Hash the password if it's not already hashed
+        if not password.startswith('$2b$'):
+            hashed_password = password_hasher.hash_password(password)
+            logger.info(f"Password hashed for user: {user_to_save}")
+        else:
+            hashed_password = password
+        
+        user_data = {
+            "username": user_to_save,
+            "password": hashed_password,
+            "role": new_role,
+            "store": new_store
+        }
+        
+        supabase.table("users").upsert(user_data).execute()
+        
+        # Log the action
+        action = "USER_UPDATE" if is_update else "USER_CREATE"
+        audit_log(
+            action=action,
+            actor=username,
+            role=role,
+            entity_type="USER",
+            entity_id=user_to_save,
+            before={"role": before_state['role'], "store": before_state['store']} if before_state else None,
+            after={"role": new_role, "store": new_store},
+            success=True,
+            context={"ip": request.remote_addr}
+        )
+        
+        logger.info(f"User {user_to_save} {'updated' if is_update else 'created'} by {username}")
         return jsonify(status="success")
-    except Exception as e: return jsonify(error=str(e)), 500
+    
+    except Exception as e:
+        logger.error(f"Error saving user: {e}", exc_info=True)
+        
+        audit_log(
+            action="USER_SAVE_FAILED",
+            actor=username,
+            role=role,
+            entity_type="USER",
+            entity_id=u.get('username') if 'u' in locals() else None,
+            success=False,
+            error=str(e),
+            context={"ip": request.remote_addr}
+        )
+        
+        return jsonify(error=str(e)), 500
 
 @app.route('/api/users/delete', methods=['POST'])
+@require_auth(['admin', 'super_admin'])
 def delete_user():
-    if session.get('role') not in ['admin', 'super_admin']: return "Denied", 403
+    """Delete a user (admin only) with audit logging."""
+    username = session.get('user')
+    role = session.get('role')
+    
     try:
-        supabase.table("users").delete().eq("username", request.json['username']).execute()
+        user_to_delete = request.json['username']
+        
+        # Get user details before deletion
+        try:
+            existing = supabase.table("users").select("*").eq("username", user_to_delete).execute()
+            before_state = existing.data[0] if existing.data else None
+        except:
+            before_state = None
+        
+        supabase.table("users").delete().eq("username", user_to_delete).execute()
+        
+        # Log deletion
+        audit_log(
+            action="USER_DELETE",
+            actor=username,
+            role=role,
+            entity_type="USER",
+            entity_id=user_to_delete,
+            before={"role": before_state['role'], "store": before_state['store']} if before_state else None,
+            success=True,
+            context={"ip": request.remote_addr}
+        )
+        
+        logger.info(f"User {user_to_delete} deleted by {username}")
         return jsonify(status="success")
-    except: return jsonify(status="error"), 500
+    
+    except Exception as e:
+        logger.error(f"Error deleting user: {e}", exc_info=True)
+        
+        audit_log(
+            action="USER_DELETE_FAILED",
+            actor=username,
+            role=role,
+            entity_type="USER",
+            entity_id=request.json.get('username') if request.json else None,
+            success=False,
+            error=str(e),
+            context={"ip": request.remote_addr}
+        )
+        
+        return jsonify(status="error"), 500
 
 # --- 4. FRONTEND UI ---
 LOGIN_UI = """<!DOCTYPE html><html><body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;">
 <div style="background:#1e293b;padding:40px;border-radius:20px;text-align:center;width:320px;border:1px solid #334155;">
 {% if logo %}<img src="data:image/png;base64,{{logo}}" style="max-width:140px;margin-bottom:20px">{% endif %}
-<h2>System Login</h2><small style="color:#0097b2;font-weight:900;font-size:14px">v39 (PORT 5013)</small><br><br>
+<h2>System Login</h2><small style="color:#0097b2;font-weight:900;font-size:14px">""" + VERSION + """</small><br><br>
+<div id="errorMsg" style="display:none;background:#fee2e2;color:#991b1b;padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;font-weight:600;"></div>
 <input type="text" id="u" placeholder="Username" style="width:90%;padding:12px;margin-bottom:10px;border-radius:8px;border:none;text-align:center;font-weight:bold;font-size:16px;">
 <input type="password" id="p" placeholder="Password" style="width:90%;padding:12px;margin-bottom:20px;border-radius:8px;border:none;text-align:center;font-weight:bold;font-size:16px;">
-<button onclick="l()" style="width:100%;padding:12px;background:#0097b2;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">Login</button>
-</div><script>function l(){fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:document.getElementById('u').value,password:document.getElementById('p').value})}).then(r=>r.json()).then(d=>{if(d.status==='ok'){localStorage.setItem('role',d.role);localStorage.setItem('store',d.store);location.reload()}else{alert('Invalid Credentials')}})}</script></body></html>"""
+<button onclick="l()" id="loginBtn" style="width:100%;padding:12px;background:#0097b2;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">Login</button>
+</div><script>
+function l(){
+    const btn = document.getElementById('loginBtn');
+    const errDiv = document.getElementById('errorMsg');
+    btn.disabled = true;
+    btn.innerText = 'Logging in...';
+    errDiv.style.display = 'none';
+    
+    fetch('/api/login',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+            username:document.getElementById('u').value,
+            password:document.getElementById('p').value
+        })
+    })
+    .then(r => r.json().then(d => ({status: r.status, data: d})))
+    .then(({status, data}) => {
+        if(data.status==='ok'){
+            localStorage.setItem('role',data.role);
+            localStorage.setItem('store',data.store);
+            location.reload();
+        } else {
+            errDiv.innerText = data.error || 'Invalid credentials';
+            errDiv.style.display = 'block';
+            btn.disabled = false;
+            btn.innerText = 'Login';
+        }
+    })
+    .catch(e => {
+        errDiv.innerText = 'Connection error. Please try again.';
+        errDiv.style.display = 'block';
+        btn.disabled = false;
+        btn.innerText = 'Login';
+    });
+}
+document.getElementById('p').addEventListener('keypress', function(e){
+    if(e.key === 'Enter') l();
+});
+</script></body></html>"""
 
 MAIN_UI = """<!DOCTYPE html><html><head><title>Pharmacy Director</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
