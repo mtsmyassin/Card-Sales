@@ -938,7 +938,42 @@ input,select{width:100%;padding:12px;border:1px solid #e2e8f0;border-radius:8px;
 
 table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;border-bottom:1px solid #f1f5f9; font-weight:600;}
 .hidden{display:none !important;}
+
+/* Loading Overlay */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255,255,255,0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    font-weight: 800;
+    font-size: 18px;
+    color: #0097b2;
+}
+.loading-spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid #e2e8f0;
+    border-top-color: #0097b2;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 10px;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
 </style></head><body>
+
+<div id="loadingOverlay" class="loading-overlay" style="display:none;">
+    <div class="loading-spinner"></div>
+    Loading...
+</div>
 
 <img src="data:image/png;base64,{{logo}}" class="watermark">
 
@@ -1167,6 +1202,21 @@ const app = {
         }
     },
     checkPending: () => { if({{ 'true' if pending else 'false' }}) document.getElementById('syncBtn').style.display = 'block'; },
+    showLoading: () => { document.getElementById('loadingOverlay').style.display = 'flex'; },
+    hideLoading: () => { document.getElementById('loadingOverlay').style.display = 'none'; },
+    fetchWithRetry: async (url, options = {}, retries = 3) => {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const response = await fetch(url, options);
+                if (response.ok) return await response.json();
+                if (response.status >= 500) throw new Error(`Server error: ${response.status}`);
+                return await response.json();
+            } catch (e) {
+                if (i === retries - 1) throw e;
+                await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+            }
+        }
+    },
     sync: async () => {
         document.getElementById('syncBtn').innerText = "Syncing...";
         const d = await (await fetch('/api/sync', {method:'POST'})).json();
@@ -1179,19 +1229,27 @@ const app = {
         fetch('/api/get_logo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({store:s})}).then(r=>r.json()).then(d=>{if(d.logo)document.getElementById('appLogo').src='data:image/png;base64,'+d.logo});
     },
     save: async () => {
-        const getVal = (id) => parseFloat(document.getElementById(id).value || 0);
-        const cash = getVal('cash'), cards = getVal('ath')+getVal('athm')+getVal('visa')+getVal('mc')+getVal('amex')+getVal('disc')+getVal('wic')+getVal('mcs')+getVal('sss');
-        let payouts = 0, payoutList = [];
-        document.querySelectorAll('.payout-row').forEach(row => { const a = parseFloat(row.querySelector('.p-amt').value||0); if(a>0){payouts+=a; payoutList.push({r:row.querySelector('.p-reason').value, a:a});}});
-        const payload = {
-            date: document.getElementById('date').value, reg: document.getElementById('reg').value, staff: document.getElementById('staff').value, store: document.getElementById('storeLoc').value,
-            gross: cash + cards, net: (cash + cards) - payouts, variance: ((getVal('actual') - getVal('float')) - (cash - payouts)).toFixed(2),
-            breakdown: { cash: cash, ath: getVal('ath'), sss: getVal('sss'), visa: getVal('visa'), mc: getVal('mc'), amex: getVal('amex'), disc: getVal('disc'), wic: getVal('wic'), mcs: getVal('mcs'), athm: getVal('athm'), payouts: payouts, payoutList: payoutList, taxState: getVal('taxState'), taxCity: getVal('taxCity'), float: getVal('float'), actual: getVal('actual'), ccTips: getVal('ccTips') }
-        };
-        const editId = document.getElementById('editId').value;
-        const res = await fetch(editId ? '/api/update' : '/api/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(editId ? {...payload, id:editId} : payload)});
-        const r = await res.json();
-        if(res.ok && (r.status === 'success' || r.status === 'offline')) { alert(r.status==='offline'?'Offline Mode: Saved to Queue':'Saved!'); app.resetForm(); app.fetch(); app.tab('logs'); if(r.status==='offline') document.getElementById('syncBtn').style.display='block'; } else alert('Error');
+        app.showLoading();
+        try {
+            const getVal = (id) => parseFloat(document.getElementById(id).value || 0);
+            const cash = getVal('cash'), cards = getVal('ath')+getVal('athm')+getVal('visa')+getVal('mc')+getVal('amex')+getVal('disc')+getVal('wic')+getVal('mcs')+getVal('sss');
+            let payouts = 0, payoutList = [];
+            document.querySelectorAll('.payout-row').forEach(row => { const a = parseFloat(row.querySelector('.p-amt').value||0); if(a>0){payouts+=a; payoutList.push({r:row.querySelector('.p-reason').value, a:a});}});
+            const payload = {
+                date: document.getElementById('date').value, reg: document.getElementById('reg').value, staff: document.getElementById('staff').value, store: document.getElementById('storeLoc').value,
+                gross: cash + cards, net: (cash + cards) - payouts, variance: ((getVal('actual') - getVal('float')) - (cash - payouts)).toFixed(2),
+                breakdown: { cash: cash, ath: getVal('ath'), sss: getVal('sss'), visa: getVal('visa'), mc: getVal('mc'), amex: getVal('amex'), disc: getVal('disc'), wic: getVal('wic'), mcs: getVal('mcs'), athm: getVal('athm'), payouts: payouts, payoutList: payoutList, taxState: getVal('taxState'), taxCity: getVal('taxCity'), float: getVal('float'), actual: getVal('actual'), ccTips: getVal('ccTips') }
+            };
+            const editId = document.getElementById('editId').value;
+            const res = await fetch(editId ? '/api/update' : '/api/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(editId ? {...payload, id:editId} : payload)});
+            const r = await res.json();
+            if(res.ok && (r.status === 'success' || r.status === 'offline')) { alert(r.status==='offline'?'Offline Mode: Saved to Queue':'Saved!'); app.resetForm(); app.fetch(); app.tab('logs'); if(r.status==='offline') document.getElementById('syncBtn').style.display='block'; } else alert('Error');
+        } catch(e) {
+            console.error('Failed to save:', e);
+            alert('Failed to save. Please try again.');
+        } finally {
+            app.hideLoading();
+        }
     },
     logout: () => fetch('/api/logout', {method:'POST'}).then(()=>location.reload()),
     tab: (id) => { 
@@ -1207,9 +1265,21 @@ const app = {
     openCount: () => document.getElementById('modalCount').style.display='flex',
     applyCount: () => { document.getElementById('actual').value=document.getElementById('billTotal').innerText.replace('$',''); document.getElementById('modalCount').style.display='none'; },
     resetForm: () => { document.getElementById('editId').value=''; document.getElementById('saveBtn').innerText="Finalize & Upload"; document.getElementById('saveBtn').style.background="#0097b2"; document.getElementById('cancelBtn').style.display="none"; document.getElementById('dashPanel').classList.remove('edit-mode'); document.getElementById('modeLabel').innerText="1. Store & Metadata"; document.querySelectorAll('input[type="number"]').forEach(i=>i.value=''); document.getElementById('float').value='150.00'; document.getElementById('payoutList').innerHTML=''; app.checkStore(); },
-    editAudit: (idx) => { const d=app.data[idx], b=d.breakdown; document.getElementById('editId').value=d.id; document.getElementById('date').value=d.date; document.getElementById('storeLoc').value=d.store; app.checkStore(); document.getElementById('reg').value=d.reg; document.getElementById('staff').value=d.staff; Object.keys(b).forEach(k=>{if(document.getElementById(k))document.getElementById(k).value=b[k]}); document.getElementById('payoutList').innerHTML=''; (b.payoutList||[]).forEach(p=>app.addPayout(p.r,p.a)); document.getElementById('saveBtn').innerText="Update Record"; document.getElementById('saveBtn').style.background="#f59e0b"; document.getElementById('cancelBtn').style.display="inline-block"; document.getElementById('dashPanel').classList.add('edit-mode'); document.getElementById('modeLabel').innerText="EDITING RECORD #"+d.id; app.tab('dash'); },
+    editAudit: (idx) => { const d=app.data[idx], b=d.breakdown; document.getElementById('editId').value=d.id; document.getElementById('date').value=d.date; document.getElementById('storeLoc').value=d.store; app.checkStore(); document.getElementById('reg').value=d.reg; document.getElementById('staff').value=d.staff; Object.keys(b).forEach(k=>{if(document.getElementById(k))document.getElementById(k).value=b[k]}); document.getElementById('payoutList').innerHTML=''; (b.payoutList||[]).forEach(p=>app.addPayout(p.r,p.a)); document.getElementById('saveBtn').innerText="Update Record"; document.getElementById('saveBtn').style.background="#f59e0b"; document.getElementById('cancelBtn').style.display="inline-block"; document.getElementById('dashPanel').classList.add('edit-mode'); document.getElementById('modeLabel').innerText="EDITING RECORD #"+d.id; app.tab('dash'); window.scrollTo({ top: 0, behavior: 'smooth' }); document.getElementById('dashPanel').style.boxShadow = '0 0 20px rgba(245, 158, 11, 0.5)'; setTimeout(() => { document.getElementById('dashPanel').style.boxShadow = ''; }, 2000); },
     deleteAudit: async (id) => { if(confirm("Permanently Delete?")) { await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}); app.fetch(); } },
-    fetch: async () => { app.data = await (await fetch('/api/list')).json(); app.renderLogs(); },
+    fetch: async () => { 
+        app.showLoading();
+        try {
+            app.data = await (await fetch('/api/list')).json(); 
+            app.renderLogs();
+        } catch(e) {
+            console.error('Failed to fetch:', e);
+            alert('Connection error. Please check your internet and try again.');
+        } finally {
+            app.hideLoading();
+        }
+    },
+    renderLogs: () => { app.filterHistory(); },
     filterHistory: () => { const r=document.getElementById('histRange').value, d=document.getElementById('historyFilter').value, s=(app.role!=='staff')?document.getElementById('histStoreFilter').value:app.store; let f=app.data; if(s&&s!=='All')f=f.filter(x=>x.store===s); if(r==='custom'){if(d)f=f.filter(x=>x.date===d)}else{const days=parseInt(r), cut=new Date(); cut.setDate(cut.getDate()-days); if(days===0)f=f.filter(x=>x.date===new Date().toISOString().split('T')[0]); else if(days!==9999)f=f.filter(x=>new Date(x.date)>=cut);} app.renderTable(f); },
     renderTable: (rows) => { let h='<table><tr><th>Date</th><th>Store</th><th>Gross</th><th>Var</th><th>Actions</th></tr>'; rows.forEach(d=>{ const i=app.data.indexOf(d), acts=(app.role==='staff')?`<button onclick="app.print(${i})" class="action-btn btn-print">🖨 Print</button>`:`<button onclick="app.print(${i})" class="action-btn btn-print">🖨</button><button onclick="app.editAudit(${i})" class="action-btn btn-edit">✏️</button><button onclick="app.deleteAudit(${d.id})" class="action-btn btn-del">🗑</button>`; h+=`<tr><td>${d.date}</td><td>${d.store}</td><td>$${(d.gross||0).toFixed(2)}</td><td style="color:${d.variance<0?'#be123c':'#047857'};font-weight:800">$${d.variance}</td><td>${acts}</td></tr>`;}); document.getElementById('logTable').innerHTML=h+'</table>'; },
     print: async (idx) => { const d=app.data[idx], b=d.breakdown||{}, val=v=>(v||0).toFixed(2), logo='data:image/png;base64,'+(await(await fetch('/api/get_logo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({store:d.store})})).json()).logo; const w=window.open('','','height=700,width=500'); w.document.write(`<html><head><style>body{font-family:monospace;padding:20px;font-weight:bold}.row{display:flex;justify-content:space-between;border-bottom:1px dotted #ccc;padding:5px 0}h2,h4{text-align:center;margin:5px 0}</style></head><body><div style="text-align:center;margin-bottom:10px"><img src="${logo}" style="max-height:80px;display:block;margin:0 auto"></div><h2>${d.store==='Carthage'?'Carthage Express':'Farmacia Carimas'}</h2><h4>${d.store} Audit</h4><br><div class="row"><span>Date:</span><span>${d.date}</span></div><div class="row"><span>Staff:</span><span>${d.staff||'N/A'}</span></div><br><div class="row"><strong>Cash Sales:</strong><span>$${val(b.cash)}</span></div><div class="row"><span>Cards (Combined):</span><span>$${val((d.gross||0)-(b.cash||0))}</span></div><br><div class="row"><span>State Tax:</span><span>$${val(b.taxState)}</span></div><div class="row"><span>City Tax:</span><span>$${val(b.taxCity)}</span></div>${(b.payoutList||[]).map(p=>`<div class="row"><span>${p.r}</span><span>$${val(p.a)}</span></div>`).join('')}<br><div class="row"><strong>Total Payouts:</strong><span>$${val(b.payouts)}</span></div><div class="row"><strong>Actual Cash:</strong><span>$${val(b.actual)}</span></div><br><div class="row" style="border-top:2px solid black;font-size:1.2em"><strong>VARIANCE:</strong><strong>$${d.variance}</strong></div><br><br><br><div style="text-align:center">________________________<br>Manager Signature</div></body></html>`); w.document.close(); setTimeout(()=>w.print(),500); },
@@ -1337,9 +1407,38 @@ const app = {
         window.payC=new Chart(cp2, {type:'bar', indexAxis:'y', data:{labels:sortPay.map(x=>x[0]), datasets:[{data:sortPay.map(x=>x[1]), backgroundColor:'#be123c', borderRadius:4, maxBarThickness: 40}]}, options:{...commonOpt, plugins:{legend:{display:false}, datalabels:{display:false}}}});
     },
     
-    fetchUsers: async () => { const u = await (await fetch('/api/users/list')).json(); app.users=u; document.getElementById('userTable').innerHTML='<table><tr><th>User</th><th>Role</th><th>Store</th><th>Pass</th><th>Actions</th></tr>'+u.map(x=>`<tr><td>${x.username}</td><td>${x.role}</td><td>${x.store}</td><td>${app.role==='super_admin'?x.password:'••••'}</td><td><button onclick="app.editUser('${x.username}')" class="action-btn btn-edit">✏️</button><button onclick="app.deleteUser('${x.username}')" class="action-btn btn-del">🗑</button></td></tr>`).join('')+'</table>'; },
+    fetchUsers: async () => { 
+        app.showLoading();
+        try {
+            const u = await (await fetch('/api/users/list')).json(); 
+            app.users=u; 
+            document.getElementById('userTable').innerHTML='<table><tr><th>User</th><th>Role</th><th>Store</th><th>Pass</th><th>Actions</th></tr>'+u.map(x=>`<tr><td>${x.username}</td><td>${x.role}</td><td>${x.store}</td><td>${app.role==='super_admin'?x.password:'••••'}</td><td><button onclick="app.editUser('${x.username}')" class="action-btn btn-edit">✏️</button><button onclick="app.deleteUser('${x.username}')" class="action-btn btn-del">🗑</button></td></tr>`).join('')+'</table>'; 
+        } catch(e) {
+            console.error('Failed to fetch users:', e);
+            alert('Failed to load users. Please refresh the page.');
+        } finally {
+            app.hideLoading();
+        }
+    },
     editUser: (n) => { const u=app.users.find(x=>x.username===n); if(!u)return; document.getElementById('u_name').value=u.username; document.getElementById('u_pass').value=u.password; document.getElementById('u_role').value=u.role; document.getElementById('u_store').value=u.store; const b=document.getElementById('userSaveBtn'); b.innerText="Update User"; b.style.background="#f59e0b"; window.scrollTo({top:0,behavior:'smooth'}); },
-    saveUser: async () => { const u={username:document.getElementById('u_name').value,password:document.getElementById('u_pass').value,role:document.getElementById('u_role').value,store:document.getElementById('u_store').value}; if(!u.username||!u.password)return alert('Fill all'); if((await fetch('/api/users/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(u)})).ok){alert('Saved');app.fetchUsers();document.getElementById('userSaveBtn').innerText="Create User";document.getElementById('userSaveBtn').style.background="#0097b2";}else alert('Error'); },
+    saveUser: async () => { 
+        app.showLoading();
+        try {
+            const u={username:document.getElementById('u_name').value,password:document.getElementById('u_pass').value,role:document.getElementById('u_role').value,store:document.getElementById('u_store').value}; 
+            if(!u.username||!u.password)return alert('Fill all'); 
+            if((await fetch('/api/users/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(u)})).ok){
+                alert('Saved');
+                app.fetchUsers();
+                document.getElementById('userSaveBtn').innerText="Create User";
+                document.getElementById('userSaveBtn').style.background="#0097b2";
+            }else alert('Error'); 
+        } catch(e) {
+            console.error('Failed to save user:', e);
+            alert('Failed to save user. Please try again.');
+        } finally {
+            app.hideLoading();
+        }
+    },
     deleteUser: async (n) => { if(confirm('Delete?')) { await fetch('/api/users/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:n})}); app.fetchUsers(); } }
 };
 app.init();
