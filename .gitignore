@@ -1,12 +1,45 @@
-"venv/" 
-"__pycache__/" 
-".env" 
-"*.pyc" 
-"*.exe" 
-"*.docx" 
-"build/" 
-"dist/" 
-"__pycache__/" 
-"*.exe" 
-"*.pyc" 
-".claude/" 
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Environment and secrets
+.env
+.env.local
+*.key
+*.pem
+
+# Build artifacts
+*.exe
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Application specific
+offline_queue.json
+audit_log.jsonl
+pharmacy_app.log
+*.log
+
+# Office files
+*.docx
+*.xlsx
+
+# Claude AI
+.claude/ 
