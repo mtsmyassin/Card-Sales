@@ -3,6 +3,8 @@ Security utilities for password hashing and authentication.
 """
 import bcrypt
 import time
+import json
+import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 from threading import Lock
@@ -44,21 +46,77 @@ class PasswordHasher:
 
 
 class LoginAttemptTracker:
-    """Track and limit login attempts to prevent brute-force attacks."""
+    """Track and limit login attempts to prevent brute-force attacks with persistent storage."""
     
-    def __init__(self, max_attempts: int = 5, lockout_duration_minutes: int = 15):
+    def __init__(self, max_attempts: int = 5, lockout_duration_minutes: int = 15, 
+                 state_file: str = 'lockout_state.json'):
         """
-        Initialize the login attempt tracker.
+        Initialize the login attempt tracker with persistent storage.
         
         Args:
             max_attempts: Maximum failed attempts before lockout
             lockout_duration_minutes: Duration of lockout in minutes
+            state_file: Path to file for persisting lockout state
         """
         self.max_attempts = max_attempts
         self.lockout_duration = timedelta(minutes=lockout_duration_minutes)
+        self.state_file = state_file
         self._attempts: Dict[str, list] = {}  # username -> list of attempt timestamps
         self._lockouts: Dict[str, datetime] = {}  # username -> lockout expiry time
         self._lock = Lock()
+        
+        # Load persisted state on initialization
+        self._load_state()
+    
+    def _load_state(self) -> None:
+        """Load lockout state from file if it exists."""
+        try:
+            if os.path.exists(self.state_file):
+                with open(self.state_file, 'r') as f:
+                    data = json.load(f)
+                
+                # Restore attempts (convert ISO strings back to datetime)
+                for username, timestamps in data.get('attempts', {}).items():
+                    self._attempts[username] = [
+                        datetime.fromisoformat(ts) for ts in timestamps
+                    ]
+                
+                # Restore lockouts (convert ISO strings back to datetime)
+                for username, expiry in data.get('lockouts', {}).items():
+                    expiry_time = datetime.fromisoformat(expiry)
+                    # Only restore if not expired
+                    if expiry_time > datetime.now():
+                        self._lockouts[username] = expiry_time
+        except Exception as e:
+            # If state file is corrupted, start fresh
+            print(f"Warning: Could not load lockout state: {e}")
+            self._attempts = {}
+            self._lockouts = {}
+    
+    def _save_state(self) -> None:
+        """Persist lockout state to file."""
+        try:
+            # Convert datetimes to ISO strings for JSON serialization
+            data = {
+                'attempts': {
+                    username: [ts.isoformat() for ts in timestamps]
+                    for username, timestamps in self._attempts.items()
+                },
+                'lockouts': {
+                    username: expiry.isoformat()
+                    for username, expiry in self._lockouts.items()
+                }
+            }
+            
+            # Write atomically (write to temp file, then rename)
+            temp_file = self.state_file + '.tmp'
+            with open(temp_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            
+            # Atomic rename
+            os.replace(temp_file, self.state_file)
+        except Exception as e:
+            print(f"Warning: Could not save lockout state: {e}")
     
     def is_locked_out(self, username: str) -> bool:
         """
@@ -125,8 +183,10 @@ class LoginAttemptTracker:
             attempt_count = len(self._attempts[username])
             if attempt_count >= self.max_attempts:
                 self._lockouts[username] = now + self.lockout_duration
+                self._save_state()  # Persist lockout
                 return True, 0
             
+            self._save_state()  # Persist attempts
             remaining = self.max_attempts - attempt_count
             return False, remaining
     
@@ -142,6 +202,7 @@ class LoginAttemptTracker:
                 del self._attempts[username]
             if username in self._lockouts:
                 del self._lockouts[username]
+            self._save_state()  # Persist cleared state
     
     def get_attempt_count(self, username: str) -> int:
         """

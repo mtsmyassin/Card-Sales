@@ -36,6 +36,8 @@ offline_queue.json
 audit_log.jsonl
 pharmacy_app.log
 *.log
+lockout_state.json
+lockout_state.json.tmp
 
 # Office files
 *.docx

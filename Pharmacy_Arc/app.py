@@ -3,7 +3,7 @@ import logging
 from functools import wraps
 from threading import Timer
 from datetime import datetime, timedelta
-from flask import Flask, render_template_string, request, jsonify, session
+from flask import Flask, render_template_string, request, jsonify, session, redirect
 from supabase import create_client, Client
 
 # Import our security and config modules
@@ -38,6 +38,25 @@ print(f"--- LAUNCHING {VERSION} ON PORT {PORT} ---")
 app = Flask(__name__)
 app.secret_key = Config.SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=Config.SESSION_TIMEOUT_MINUTES)
+
+# --- HTTPS ENFORCEMENT MIDDLEWARE ---
+if Config.REQUIRE_HTTPS:
+    @app.before_request
+    def enforce_https():
+        """Enforce HTTPS if REQUIRE_HTTPS is enabled."""
+        if not request.is_secure and request.url.startswith('http://'):
+            # Allow localhost for development
+            if request.host.startswith('127.0.0.1') or request.host.startswith('localhost'):
+                pass
+            else:
+                url = request.url.replace('http://', 'https://', 1)
+                return redirect(url, code=301)
+    
+    # Set secure cookie flags
+    app.config['SESSION_COOKIE_SECURE'] = True
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    logger.info("HTTPS enforcement enabled")
 
 # --- SECURITY COMPONENTS ---
 password_hasher = PasswordHasher()
@@ -150,6 +169,9 @@ def login():
                 # Determine role based on username
                 role = 'super_admin' if u == 'super' else 'admin'
                 
+                # Regenerate session to prevent fixation
+                old_session = dict(session)
+                session.clear()
                 session.permanent = True
                 session['logged_in'] = True
                 session['user'] = u
@@ -187,6 +209,9 @@ def login():
                     password_valid = (user['password'] == p)
                 
                 if password_valid:
+                    # Regenerate session to prevent fixation
+                    old_session = dict(session)
+                    session.clear()
                     session.permanent = True
                     session['logged_in'] = True
                     session['user'] = u
@@ -369,7 +394,12 @@ def save():
         return jsonify(error="Internal server error"), 500
 
 @app.route('/api/sync', methods=['POST'])
+@require_auth()
 def sync():
+    """Sync offline queue to database (authenticated users only)."""
+    username = session.get('user')
+    role = session.get('role')
+    
     queue = load_queue()
     if not queue: return jsonify(status="empty")
     failed_items = []
@@ -378,6 +408,16 @@ def sync():
         try:
             supabase.table("audits").insert(item).execute()
             success_count += 1
+            
+            # Log successful sync
+            audit_log(
+                action="SYNC",
+                actor=username,
+                role=role,
+                entity_type="OFFLINE_QUEUE",
+                success=True,
+                context={"ip": request.remote_addr, "records": 1}
+            )
         except:
             failed_items.append(item)
     if failed_items:
