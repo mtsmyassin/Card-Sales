@@ -1,4 +1,4 @@
-import json, webbrowser, os, sys, base64
+import json, webbrowser, os, sys, base64, re
 import logging
 from functools import wraps
 from threading import Timer
@@ -40,6 +40,10 @@ app.secret_key = Config.SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=Config.SESSION_TIMEOUT_MINUTES)
 
 # --- HTTPS ENFORCEMENT MIDDLEWARE ---
+# Always set HttpOnly and SameSite flags for session security
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
 if Config.REQUIRE_HTTPS:
     @app.before_request
     def enforce_https():
@@ -52,11 +56,12 @@ if Config.REQUIRE_HTTPS:
                 url = request.url.replace('http://', 'https://', 1)
                 return redirect(url, code=301)
     
-    # Set secure cookie flags
+    # Set secure cookie flag in production
     app.config['SESSION_COOKIE_SECURE'] = True
-    app.config['SESSION_COOKIE_HTTPONLY'] = True
-    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-    logger.info("HTTPS enforcement enabled")
+    logger.info("HTTPS enforcement enabled with secure cookie flags")
+else:
+    app.config['SESSION_COOKIE_SECURE'] = False
+    logger.warning("⚠️  SESSION_COOKIE_SECURE disabled - HTTPS not required. Enable for production!")
 
 # --- SECURITY COMPONENTS ---
 password_hasher = PasswordHasher()
@@ -80,6 +85,93 @@ try:
 except Exception as e:
     logger.critical(f"Cloud Client Init Failed: {e}")
     print(f"CRITICAL ERROR: Cloud Client Init Failed. {e}")
+
+# --- INPUT VALIDATION HELPERS ---
+def validate_audit_entry(data: dict) -> tuple[bool, str]:
+    """
+    Validate audit entry data.
+    Returns (is_valid, error_message).
+    """
+    # Required fields
+    required_fields = ['date', 'reg', 'staff', 'gross', 'net', 'variance']
+    for field in required_fields:
+        if field not in data or data[field] is None or data[field] == '':
+            return False, f"Missing required field: {field}"
+    
+    # Validate date format (YYYY-MM-DD)
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', str(data['date'])):
+        return False, "Invalid date format. Use YYYY-MM-DD"
+    
+    # Validate numeric fields
+    try:
+        gross = float(data['gross'])
+        net = float(data['net'])
+        variance = float(data['variance'])
+        
+        # Range checks
+        if gross < 0 or gross > 1000000:
+            return False, "Gross must be between 0 and 1,000,000"
+        if net < -100000 or net > 1000000:
+            return False, "Net must be between -100,000 and 1,000,000"
+        if abs(variance) > 100000:
+            return False, "Variance must be between -100,000 and 100,000"
+    except (ValueError, TypeError):
+        return False, "Invalid numeric values in gross, net, or variance"
+    
+    # Validate string lengths
+    if len(str(data['reg'])) > 50:
+        return False, "Register name too long (max 50 characters)"
+    if len(str(data['staff'])) > 100:
+        return False, "Staff name too long (max 100 characters)"
+    
+    # Validate store if provided
+    if 'store' in data and data['store']:
+        valid_stores = ['Carimas #1', 'Carimas #2', 'Carimas #3', 'Carimas #4', 'Carthage', 'Main']
+        if data['store'] not in valid_stores:
+            return False, f"Invalid store. Must be one of: {', '.join(valid_stores)}"
+    
+    return True, ""
+
+def validate_user_data(data: dict, is_update: bool = False) -> tuple[bool, str]:
+    """
+    Validate user account data.
+    Returns (is_valid, error_message).
+    """
+    # Username validation
+    if 'username' not in data or not data['username']:
+        return False, "Username is required"
+    
+    username = str(data['username'])
+    if len(username) < 3 or len(username) > 50:
+        return False, "Username must be 3-50 characters"
+    if not re.match(r'^[a-zA-Z0-9_-]+$', username):
+        return False, "Username can only contain letters, numbers, hyphens, and underscores"
+    
+    # Password validation (only for new users or if password is being changed)
+    if 'password' in data and data['password']:
+        password = str(data['password'])
+        # Skip validation if it's already a bcrypt hash
+        if not password.startswith('$2b$'):
+            if len(password) < 8:
+                return False, "Password must be at least 8 characters"
+            if len(password) > 100:
+                return False, "Password must be less than 100 characters"
+    elif not is_update:
+        return False, "Password is required for new users"
+    
+    # Role validation
+    if 'role' in data and data['role']:
+        valid_roles = ['staff', 'manager', 'admin', 'super_admin']
+        if data['role'] not in valid_roles:
+            return False, f"Invalid role. Must be one of: {', '.join(valid_roles)}"
+    
+    # Store validation
+    if 'store' in data and data['store']:
+        valid_stores = ['All', 'Carimas #1', 'Carimas #2', 'Carimas #3', 'Carimas #4', 'Carthage']
+        if data['store'] not in valid_stores:
+            return False, f"Invalid store. Must be one of: {', '.join(valid_stores)}"
+    
+    return True, ""
 
 # --- 2. PATHS & ASSETS ---
 def get_base_path():
@@ -127,8 +219,25 @@ def index():
     return render_template_string(MAIN_UI if session.get('logged_in') else LOGIN_UI, logo=logo_data, pending=has_pending)
 
 @app.route('/api/get_logo', methods=['POST'])
+@require_auth()
 def api_get_logo():
-    return jsonify(logo=get_logo(request.json.get('store')))
+    """Get store logo with authentication and input validation."""
+    try:
+        if not request.json:
+            return jsonify(error="No data provided"), 400
+        
+        store = request.json.get('store', 'carimas')
+        
+        # Whitelist validation to prevent path traversal
+        valid_stores = ['Carimas', 'Carimas #1', 'Carimas #2', 'Carimas #3', 'Carimas #4', 'Carthage', None]
+        if store not in valid_stores:
+            logger.warning(f"Invalid store name requested: {store}")
+            store = None  # Default to Carimas logo
+        
+        return jsonify(logo=get_logo(store))
+    except Exception as e:
+        logger.error(f"Error in get_logo: {e}")
+        return jsonify(error="Internal server error"), 500
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -337,9 +446,18 @@ def require_auth(allowed_roles=None):
 @app.route('/api/save', methods=['POST'])
 @require_auth()
 def save():
-    """Create a new audit entry with audit logging."""
+    """Create a new audit entry with audit logging and input validation."""
     try:
         d = request.json
+        if not d:
+            return jsonify(error="No data provided"), 400
+        
+        # Validate input
+        is_valid, error_msg = validate_audit_entry(d)
+        if not is_valid:
+            logger.warning(f"Invalid audit entry data from {session.get('user')}: {error_msg}")
+            return jsonify(error=error_msg), 400
+        
         username = session.get('user')
         role = session.get('role')
         
@@ -348,8 +466,8 @@ def save():
             "reg": d['reg'], 
             "staff": d['staff'], 
             "store": d.get('store', 'Main'),
-            "gross": d['gross'], 
-            "net": d['net'], 
+            "gross": float(d['gross']), 
+            "net": float(d['net']), 
             "variance": float(d['variance']), 
             "payload": d
         }
@@ -430,7 +548,7 @@ def sync():
 @app.route('/api/update', methods=['POST'])
 @require_auth()
 def update():
-    """Update an audit entry with RBAC and audit logging."""
+    """Update an audit entry with RBAC, input validation, and audit logging."""
     username = session.get('user')
     role = session.get('role')
     
@@ -450,7 +568,19 @@ def update():
     
     try:
         d = request.json
+        if not d:
+            return jsonify(error="No data provided"), 400
+        
+        # Validate ID
         uid = d.get('id')
+        if not uid:
+            return jsonify(error="Missing entry ID"), 400
+        
+        # Validate input
+        is_valid, error_msg = validate_audit_entry(d)
+        if not is_valid:
+            logger.warning(f"Invalid audit entry data from {username}: {error_msg}")
+            return jsonify(error=error_msg), 400
         
         # Get current record for audit trail
         try:
@@ -464,8 +594,8 @@ def update():
             "reg": d['reg'], 
             "staff": d['staff'], 
             "store": d.get('store', 'Main'),
-            "gross": d['gross'], 
-            "net": d['net'], 
+            "gross": float(d['gross']), 
+            "net": float(d['net']), 
             "variance": float(d['variance']), 
             "payload": d
         }
@@ -666,18 +796,20 @@ def list_users():
 @app.route('/api/users/save', methods=['POST'])
 @require_auth(['admin', 'super_admin'])
 def save_user():
-    """Create or update a user (admin only) with password hashing."""
+    """Create or update a user (admin only) with password hashing and input validation."""
     username = session.get('user')
     role = session.get('role')
     
     try:
         u = request.json
-        user_to_save = u['username']
-        password = u['password']
-        new_role = u['role']
-        new_store = u['store']
+        if not u:
+            return jsonify(error="No data provided"), 400
         
         # Check if user exists to determine if this is create or update
+        user_to_save = u.get('username')
+        if not user_to_save:
+            return jsonify(error="Username is required"), 400
+        
         try:
             existing = supabase.table("users").select("*").eq("username", user_to_save).execute()
             is_update = len(existing.data) > 0
@@ -686,12 +818,28 @@ def save_user():
             is_update = False
             before_state = None
         
+        # Validate input
+        is_valid, error_msg = validate_user_data(u, is_update=is_update)
+        if not is_valid:
+            logger.warning(f"Invalid user data from {username}: {error_msg}")
+            return jsonify(error=error_msg), 400
+        
+        password = u.get('password', '')
+        new_role = u['role']
+        new_store = u['store']
+        
         # Hash the password if it's not already hashed
-        if not password.startswith('$2b$'):
+        if password and not password.startswith('$2b$'):
             hashed_password = password_hasher.hash_password(password)
             logger.info(f"Password hashed for user: {user_to_save}")
-        else:
+        elif password:
             hashed_password = password
+        else:
+            # For updates, keep existing password if none provided
+            if is_update and before_state:
+                hashed_password = before_state['password']
+            else:
+                return jsonify(error="Password is required for new users"), 400
         
         user_data = {
             "username": user_to_save,
@@ -738,17 +886,32 @@ def save_user():
 @app.route('/api/users/delete', methods=['POST'])
 @require_auth(['admin', 'super_admin'])
 def delete_user():
-    """Delete a user (admin only) with audit logging."""
+    """Delete a user (admin only) with audit logging and input validation."""
     username = session.get('user')
     role = session.get('role')
     
     try:
+        if not request.json or 'username' not in request.json:
+            return jsonify(error="Username is required"), 400
+        
         user_to_delete = request.json['username']
+        
+        # Validate username format
+        if not user_to_delete or not isinstance(user_to_delete, str):
+            return jsonify(error="Invalid username"), 400
+        if len(user_to_delete) < 3 or len(user_to_delete) > 50:
+            return jsonify(error="Invalid username length"), 400
+        
+        # Prevent self-deletion
+        if user_to_delete == username:
+            return jsonify(error="Cannot delete your own account"), 403
         
         # Get user details before deletion
         try:
             existing = supabase.table("users").select("*").eq("username", user_to_delete).execute()
             before_state = existing.data[0] if existing.data else None
+            if not before_state:
+                return jsonify(error="User not found"), 404
         except:
             before_state = None
         

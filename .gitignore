@@ -44,4 +44,9 @@ lockout_state.json.tmp
 *.xlsx
 
 # Claude AI
-.claude/ 
+.claude/
+
+# Old backup files with hardcoded secrets (SECURITY)
+old.*.py
+*_backup.py
+app_v*.py 
