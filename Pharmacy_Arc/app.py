@@ -1043,7 +1043,7 @@ body{background-color:var(--bg);margin:0;padding:0;color:var(--txt);min-height:1
     padding:24px 20px 16px; border-bottom:1px solid rgba(255,255,255,0.15);
     display:flex; flex-direction:column; align-items:center; gap:10px;
 }
-.sidebar-logo img{max-width:150px; filter:brightness(0) invert(1);}
+.sidebar-logo img{max-width:150px;}
 .sidebar-logo h2{display:none;}
 .sidebar-nav{flex:1; padding:16px 12px; display:flex; flex-direction:column; gap:4px;}
 .tab-btn{
