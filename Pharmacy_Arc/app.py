@@ -1,4 +1,4 @@
-import json, webbrowser, os, sys, base64, re
+import json, webbrowser, os, sys, base64, re, time
 import logging
 from functools import wraps
 from threading import Timer
@@ -969,6 +969,57 @@ def delete_user():
         
         return jsonify(status="error"), 500
 
+
+# ── TELEGRAM BOT WEBHOOK ──────────────────────────────────────────────────────
+
+@app.route('/api/telegram/webhook', methods=['POST'])
+def telegram_webhook():
+    """Receive updates from Telegram and dispatch to bot state machine."""
+    # Verify secret token to reject non-Telegram requests
+    expected_secret = (Config.SECRET_KEY or "")[:32]
+    incoming_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if expected_secret and incoming_secret != expected_secret:
+        logger.warning("Telegram webhook: invalid secret token")
+        return jsonify(ok=False), 403
+
+    update = request.json
+    if not update:
+        return jsonify(ok=False), 400
+
+    try:
+        from telegram_bot import handle_update
+        handle_update(update)
+    except Exception as e:
+        logger.error(f"Telegram webhook handler error: {e}", exc_info=True)
+
+    # Always return 200 to Telegram (prevents retries)
+    return jsonify(ok=True)
+
+
+# ── Z REPORT IMAGE ENDPOINT ───────────────────────────────────────────────────
+
+@app.route('/api/audit/<int:audit_id>/zreport_image')
+@require_auth()
+def get_zreport_image(audit_id: int):
+    """Return a short-lived signed URL for the Z report image of an audit entry."""
+    try:
+        result = supabase.table("audits").select("payload").eq("id", audit_id).execute()
+        if not result.data:
+            return jsonify(error="Not found"), 404
+
+        payload = result.data[0].get("payload", {})
+        image_path = payload.get("z_report_image_path")
+        if not image_path:
+            return jsonify(error="No image for this entry"), 404
+
+        signed = supabase.storage.from_("z-reports").create_signed_url(image_path, 3600)
+        return jsonify(url=signed["signedURL"])
+
+    except Exception as e:
+        logger.error(f"get_zreport_image error: {e}", exc_info=True)
+        return jsonify(error="Internal server error"), 500
+
+
 # --- 4. FRONTEND UI ---
 LOGIN_UI = """<!DOCTYPE html><html><body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;">
 <div style="background:#1e293b;padding:40px;border-radius:20px;text-align:center;width:320px;border:1px solid #334155;">
@@ -1623,6 +1674,13 @@ const app = {
 };
 app.init();
 </script></body></html>"""
+
+# Register Telegram webhook on startup (idempotent — safe on every deploy)
+try:
+    from telegram_bot import register_webhook
+    register_webhook()
+except Exception as _e:
+    logger.warning(f"Could not register Telegram webhook: {_e}")
 
 if __name__ == '__main__':
     # Only open browser when running locally (not on a cloud server)
