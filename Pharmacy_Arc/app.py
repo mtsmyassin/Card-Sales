@@ -1024,45 +1024,51 @@ MAIN_UI = """<!DOCTYPE html><html><head><title>Pharmacy Director</title>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
 <style>
 /* TURQUOISE BRANDING */
-:root{--p:#0097b2;--bg:#f8fafc;--danger:#ef4444;--success:#047857;--txt:#1e293b;--warn:#f59e0b;}
-*{box-sizing:border-box; font-family: 'Segoe UI', system-ui, sans-serif;} 
-body{
-    background-color: var(--bg);
-    margin:0; padding:15px; color:var(--txt);
-    position: relative;
-    min-height: 100vh;
-}
+:root{--p:#0097b2;--sidebar:#00697d;--sidebar-dark:#00525f;--bg:#f0f4f8;--card:#ffffff;--danger:#ef4444;--success:#047857;--txt:#1e293b;--muted:#64748b;--warn:#f59e0b;}
+*{box-sizing:border-box; font-family: 'Segoe UI', system-ui, sans-serif;}
+body{background-color:var(--bg);margin:0;padding:0;color:var(--txt);min-height:100vh;display:flex;}
 /* WATERMARK: Full Color, Visible */
 .watermark {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
     width: 500px; opacity: 0.15; z-index: -1; pointer-events: none;
 }
 
-.header{
-    background:rgba(255,255,255,0.85); backdrop-filter:blur(15px); 
-    padding:12px 25px; border-radius:12px;
-    display:flex; justify-content:space-between; align-items:center;
-    box-shadow:0 4px 20px -5px rgba(0,0,0,0.05); border:1px solid rgba(255,255,255,0.6); 
-    margin-bottom:20px;
+/* SIDEBAR */
+.sidebar{
+    position:fixed; top:0; left:0; width:220px; height:100vh;
+    background:var(--sidebar); display:flex; flex-direction:column;
+    z-index:100; box-shadow:4px 0 20px rgba(0,0,0,0.15);
 }
-.panel{
-    background:rgba(255,255,255,0.85); backdrop-filter:blur(15px); 
-    padding:25px; border-radius:16px; 
-    box-shadow:0 10px 25px -5px rgba(0,0,0,0.05); border:1px solid rgba(255,255,255,0.5); 
-    height:100%;
+.sidebar-logo{
+    padding:24px 20px 16px; border-bottom:1px solid rgba(255,255,255,0.15);
+    display:flex; flex-direction:column; align-items:center; gap:10px;
 }
-
-.tabs{display:flex;gap:8px;margin-bottom:20px;}
+.sidebar-logo img{max-width:120px;}
+.sidebar-logo h2{
+    margin:0; color:white; font-size:14px; font-weight:900;
+    text-align:center; letter-spacing:0.3px; line-height:1.3;
+}
+.sidebar-nav{flex:1; padding:16px 12px; display:flex; flex-direction:column; gap:4px;}
 .tab-btn{
-    padding:10px 24px; background:rgba(255,255,255,0.5); 
-    border-radius:10px; cursor:pointer; border:1px solid transparent; 
-    transition:0.3s; color:#64748b; font-weight:700; font-size:13px;
+    display:flex; align-items:center; gap:10px;
+    padding:11px 14px; border-radius:10px; cursor:pointer;
+    border:none; color:rgba(255,255,255,0.75); font-weight:700; font-size:13px;
+    transition:0.2s; background:transparent; width:100%; text-align:left;
 }
-.tab-btn:hover{background:white; color:var(--p);}
-.tab-btn.active{
-    background:white; color:var(--p); border-color:#e2e8f0; 
-    box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); font-weight:800;
+.tab-btn:hover{background:rgba(255,255,255,0.12); color:white;}
+.tab-btn.active{background:white; color:var(--sidebar); box-shadow:0 2px 8px rgba(0,0,0,0.15);}
+.tab-icon{font-size:16px; width:20px; text-align:center;}
+.sidebar-footer{
+    padding:16px 12px; border-top:1px solid rgba(255,255,255,0.15);
+    display:flex; flex-direction:column; gap:8px;
 }
+.sidebar-user{color:rgba(255,255,255,0.7); font-size:11px; font-weight:800; text-transform:uppercase; padding:0 4px;}
+
+/* MAIN CONTENT */
+.main-content{margin-left:220px; flex:1; padding:30px; min-height:100vh;}
+
+/* PANEL becomes a section card */
+.panel{background:var(--card); padding:28px; border-radius:14px; box-shadow:0 2px 12px rgba(0,0,0,0.07); border:1px solid #e8edf2;}
 
 .view{display:none;} .view.active{display:block;}
 .grid-form{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;}
