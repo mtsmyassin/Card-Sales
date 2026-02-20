@@ -1404,7 +1404,9 @@ const app = {
     checkStore: () => {
         const s = document.getElementById('storeLoc').value;
         if(s === 'Carthage') document.getElementById('tipsSection').classList.remove('hidden'); else { document.getElementById('tipsSection').classList.add('hidden'); document.getElementById('ccTips').value = ''; }
-        fetch('/api/get_logo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({store:s})}).then(r=>r.json()).then(d=>{if(d.logo){document.getElementById('sidebarLogo').src='data:image/png;base64,'+d.logo;}});
+        const logoEl = document.getElementById('sidebarLogo');
+        logoEl.style.filter = s === 'Carthage' ? 'none' : 'brightness(0) invert(1)';
+        fetch('/api/get_logo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({store:s})}).then(r=>r.json()).then(d=>{if(d.logo){logoEl.src='data:image/png;base64,'+d.logo;}});
     },
     save: async () => {
         app.showLoading();
