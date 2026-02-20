@@ -30,8 +30,50 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# --- RBAC DECORATOR (defined early so all routes can use it) ---
+def require_auth(allowed_roles=None):
+    """
+    Decorator to enforce authentication and role-based access control.
+
+    Args:
+        allowed_roles: List of roles allowed to access this endpoint.
+                      If None, any authenticated user is allowed.
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not session.get('logged_in'):
+                logger.warning(f"Unauthorized access attempt to {request.endpoint}")
+                return jsonify(error="Authentication required"), 401
+            if allowed_roles:
+                user_role = session.get('role')
+                if user_role not in allowed_roles:
+                    username = session.get('user', 'unknown')
+                    logger.warning(
+                        f"Access denied: {username} ({user_role}) "
+                        f"attempted to access {request.endpoint} "
+                        f"(requires: {allowed_roles})"
+                    )
+                    audit_log(
+                        action="ACCESS_DENIED",
+                        actor=username,
+                        role=user_role,
+                        entity_type="ENDPOINT",
+                        entity_id=request.endpoint,
+                        success=False,
+                        error=f"Insufficient permissions (requires: {allowed_roles})",
+                        context={"ip": request.remote_addr}
+                    )
+                    return jsonify(error="Insufficient permissions"), 403
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
 # --- FLASK APP INITIALIZATION ---
-PORT = Config.PORT
+# Railway (and most PaaS) inject $PORT — fall back to FLASK_PORT for local dev
+PORT = int(os.getenv('PORT', str(Config.PORT)))
 VERSION = "v40-SECURE"
 print(f"--- LAUNCHING {VERSION} ON PORT {PORT} ---")
 
@@ -79,8 +121,9 @@ SUPABASE_URL = Config.SUPABASE_URL
 SUPABASE_KEY = Config.SUPABASE_KEY
 OFFLINE_FILE = Config.OFFLINE_FILE
 
+supabase = None
 try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     logger.info("Successfully connected to Supabase")
 except Exception as e:
     logger.critical(f"Cloud Client Init Failed: {e}")
@@ -129,7 +172,33 @@ def validate_audit_entry(data: dict) -> tuple[bool, str]:
         valid_stores = ['Carimas #1', 'Carimas #2', 'Carimas #3', 'Carimas #4', 'Carthage', 'Main']
         if data['store'] not in valid_stores:
             return False, f"Invalid store. Must be one of: {', '.join(valid_stores)}"
-    
+
+    # Math cross-check: if breakdown is present, verify gross/net/variance are consistent
+    if 'breakdown' in data and isinstance(data.get('breakdown'), dict):
+        b = data['breakdown']
+        try:
+            card_keys = ['ath', 'athm', 'visa', 'mc', 'amex', 'disc', 'wic', 'mcs', 'sss']
+            cash_sales = float(b.get('cash', 0))
+            card_sales = sum(float(b.get(k, 0)) for k in card_keys)
+            payouts = float(b.get('payouts', 0))
+            float_amount = float(b.get('float', 0))
+            actual = float(b.get('actual', 0))
+            TOLERANCE = 0.02  # 2-cent floating-point tolerance
+
+            expected_gross = cash_sales + card_sales
+            if abs(gross - expected_gross) > TOLERANCE:
+                return False, f"Gross mismatch: got {gross:.2f}, expected {expected_gross:.2f} (cash + cards)"
+
+            expected_net = expected_gross - payouts
+            if abs(net - expected_net) > TOLERANCE:
+                return False, f"Net mismatch: got {net:.2f}, expected {expected_net:.2f} (gross - payouts)"
+
+            expected_variance = (actual - float_amount) - (cash_sales - payouts)
+            if abs(variance - expected_variance) > TOLERANCE:
+                return False, f"Variance mismatch: got {variance:.2f}, expected {expected_variance:.2f}"
+        except (TypeError, ValueError):
+            pass  # Malformed breakdown values are caught by earlier validation
+
     return True, ""
 
 def validate_user_data(data: dict, is_update: bool = False) -> tuple[bool, str]:
@@ -394,54 +463,6 @@ def logout():
     
     session.clear()
     return jsonify(status="ok")
-
-
-# --- RBAC DECORATOR ---
-def require_auth(allowed_roles=None):
-    """
-    Decorator to enforce authentication and role-based access control.
-    
-    Args:
-        allowed_roles: List of roles allowed to access this endpoint.
-                      If None, any authenticated user is allowed.
-    
-    Usage:
-        @require_auth()  # Any authenticated user
-        @require_auth(['admin', 'super_admin'])  # Only admins
-    """
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            # Check authentication
-            if not session.get('logged_in'):
-                logger.warning(f"Unauthorized access attempt to {request.endpoint}")
-                return jsonify(error="Authentication required"), 401
-            
-            # Check role if specified
-            if allowed_roles:
-                user_role = session.get('role')
-                if user_role not in allowed_roles:
-                    username = session.get('user', 'unknown')
-                    logger.warning(
-                        f"Access denied: {username} ({user_role}) "
-                        f"attempted to access {request.endpoint} "
-                        f"(requires: {allowed_roles})"
-                    )
-                    audit_log(
-                        action="ACCESS_DENIED",
-                        actor=username,
-                        role=user_role,
-                        entity_type="ENDPOINT",
-                        entity_id=request.endpoint,
-                        success=False,
-                        error=f"Insufficient permissions (requires: {allowed_roles})",
-                        context={"ip": request.remote_addr}
-                    )
-                    return jsonify(error="Insufficient permissions"), 403
-            
-            return f(*args, **kwargs)
-        return decorated_function
-    return decorator
 
 @app.route('/api/save', methods=['POST'])
 @require_auth()
@@ -1163,7 +1184,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
 <div id="dash" class="view active">
     <div class="panel" id="dashPanel">
         <input type="hidden" id="editId" value="">
-        <div class="section" style="margin-top:0">1. Store & Metadata</div>
+        <div class="section" style="margin-top:0" id="modeLabel">1. Store & Metadata</div>
         <div class="grid-form">
             <div><label>Store Location</label><select id="storeLoc" onchange="app.checkStore()"><option>Carimas #1</option><option>Carimas #2</option><option>Carimas #3</option><option>Carimas #4</option><option>Carthage</option></select></div>
             <div><label>Date</label><input type="date" id="date"></div>
@@ -1367,19 +1388,6 @@ const app = {
     checkPending: () => { if({{ 'true' if pending else 'false' }}) document.getElementById('syncBtn').style.display = 'block'; },
     showLoading: () => { document.getElementById('loadingOverlay').style.display = 'flex'; },
     hideLoading: () => { document.getElementById('loadingOverlay').style.display = 'none'; },
-    fetchWithRetry: async (url, options = {}, retries = 3) => {
-        for (let i = 0; i < retries; i++) {
-            try {
-                const response = await fetch(url, options);
-                if (response.ok) return await response.json();
-                if (response.status >= 500) throw new Error(`Server error: ${response.status}`);
-                return await response.json();
-            } catch (e) {
-                if (i === retries - 1) throw e;
-                await new Promise(r => setTimeout(r, 1000 * (i + 1)));
-            }
-        }
-    },
     sync: async () => {
         document.getElementById('syncBtn').innerText = "Syncing...";
         const d = await (await fetch('/api/sync', {method:'POST'})).json();
@@ -1608,5 +1616,8 @@ app.init();
 </script></body></html>"""
 
 if __name__ == '__main__':
-    Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}")).start()
-    app.run(port=PORT)
+    # Only open browser when running locally (not on a cloud server)
+    import os as _os
+    if not _os.getenv('RAILWAY_ENVIRONMENT') and not _os.getenv('RENDER'):
+        Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}")).start()
+    app.run(host='0.0.0.0', port=PORT)
