@@ -31,6 +31,27 @@ STORE_MENU = (
 _STORE_CHOICE = {"1": "Carimas #1", "2": "Carimas #2", "3": "Carimas #3", "4": "Carthage"}
 
 
+# ── Photo system helpers ───────────────────────────────────────────────────────
+
+def _format_register_id(register) -> str:
+    """Convert register number/string to 'Reg N' format."""
+    if register is None:
+        return "Reg ?"
+    try:
+        return f"Reg {int(register)}"
+    except (TypeError, ValueError):
+        return f"Reg {register}"
+
+
+def _calculate_variance(actual_cash: float, cash_sales: float, payouts: float) -> float:
+    """
+    variance = actual_cash - (cash_sales - payouts)
+    Positive = over (more cash than expected)
+    Negative = short (less cash than expected)
+    """
+    return round(actual_cash - (cash_sales - payouts), 2)
+
+
 def _token() -> str:
     global _BOT_TOKEN
     if _BOT_TOKEN is None:
@@ -143,18 +164,30 @@ def save_bot_user(telegram_id: int, username: str, tg_username: str, store: str)
     }).execute()
 
 
-def upload_image_to_storage(image_bytes: bytes, store: str, date: str, register: int) -> str:
-    """Upload photo to Supabase Storage z-reports bucket. Returns public path."""
+class StorageUploadError(Exception):
+    """Raised when upload to Supabase Storage fails."""
+
+
+def upload_image_to_storage(image_bytes: bytes, store: str, date: str, register) -> str:
+    """
+    Upload photo to Supabase Storage z-reports bucket.
+    Returns storage path string.
+    Raises StorageUploadError on any failure — never returns empty string.
+    """
     from app import supabase
     if supabase is None:
-        return ""
+        raise StorageUploadError("Supabase client not initialized")
     store_slug = store.replace(" ", "_").replace("#", "")
-    path = f"{store_slug}/{date}/reg{register}_{int(time.time())}.jpg"
-    supabase.storage.from_("z-reports").upload(
-        path,
-        image_bytes,
-        {"content-type": "image/jpeg"},
-    )
+    reg_num = int(register) if register else 0
+    path = f"{store_slug}/{date}/reg{reg_num}_{int(time.time())}.jpg"
+    try:
+        supabase.storage.from_("z-reports").upload(
+            path,
+            image_bytes,
+            {"content-type": "image/jpeg"},
+        )
+    except Exception as e:
+        raise StorageUploadError(f"Upload to z-reports failed: {e}") from e
     return path
 
 
