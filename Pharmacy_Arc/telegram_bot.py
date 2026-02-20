@@ -85,31 +85,43 @@ def verify_web_credentials(username: str, password: str) -> dict | None:
     2. Check DB users, supporting both bcrypt and legacy plaintext passwords
     Returns the user row dict if valid, None if invalid.
     """
-    from app import supabase, EMERGENCY_ACCOUNTS, password_hasher
+    try:
+        from app import supabase, EMERGENCY_ACCOUNTS, password_hasher
+    except Exception as e:
+        logger.error(f"verify_web_credentials: import from app failed: {e}")
+        return None
+
     if supabase is None:
+        logger.error("verify_web_credentials: supabase is None")
         return None
     try:
         # Check emergency admin accounts
+        logger.info(f"verify_web_credentials: checking user='{username}', emergency_accounts={list(EMERGENCY_ACCOUNTS.keys())}")
         if username in EMERGENCY_ACCOUNTS:
             stored_hash = EMERGENCY_ACCOUNTS[username]
-            if password_hasher.verify_password(password, stored_hash):
+            valid = password_hasher.verify_password(password, stored_hash)
+            logger.info(f"verify_web_credentials: emergency account match={valid}")
+            if valid:
                 role = "super_admin" if username == "super" else "admin"
                 return {"username": username, "role": role, "store": "All"}
             return None
 
         # Check database accounts
         result = supabase.table("users").select("*").eq("username", username).execute()
+        logger.info(f"verify_web_credentials: DB rows found={len(result.data)}")
         if not result.data:
             return None
         user = result.data[0]
         stored = user.get("password", "")
+        logger.info(f"verify_web_credentials: password is bcrypt={stored.startswith('$2b$')}")
         if stored.startswith("$2b$"):
             valid = password_hasher.verify_password(password, stored)
         else:
             valid = (stored == password)
+        logger.info(f"verify_web_credentials: password valid={valid}")
         return user if valid else None
     except Exception as e:
-        logger.error(f"verify_web_credentials failed: {e}")
+        logger.error(f"verify_web_credentials failed: {e}", exc_info=True)
         return None
 
 
