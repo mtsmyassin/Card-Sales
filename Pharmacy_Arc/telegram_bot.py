@@ -21,12 +21,12 @@ _BOT_TOKEN = None  # loaded lazily from env
 
 KNOWN_STORES = ["Carimas #1", "Carimas #2", "Carimas #3", "Carthage"]
 STORE_MENU = (
-    "¿Para qué tienda es este reporte?\n"
+    "Which store is this report for?\n"
     "1 — Carimas #1\n"
     "2 — Carimas #2\n"
     "3 — Carimas #3\n"
     "4 — Carthage\n"
-    "Responde con el número."
+    "Reply with the number."
 )
 _STORE_CHOICE = {"1": "Carimas #1", "2": "Carimas #2", "3": "Carimas #3", "4": "Carthage"}
 
@@ -41,15 +41,6 @@ def _format_register_id(register) -> str:
         return f"Reg {int(register)}"
     except (TypeError, ValueError):
         return f"Reg {register}"
-
-
-def _calculate_variance(actual_cash: float, cash_sales: float, payouts: float) -> float:
-    """
-    variance = actual_cash - (cash_sales - payouts)
-    Positive = over (more cash than expected)
-    Negative = short (less cash than expected)
-    """
-    return round(actual_cash - (cash_sales - payouts), 2)
 
 
 def _token() -> str:
@@ -295,17 +286,17 @@ def save_photo_record(
 
 
 def _format_preview(data: dict) -> str:
-    """Format OCR result as a Spanish confirmation message."""
+    """Format OCR result as a confirmation message."""
     def fmt(v):
-        return f"${v:.2f}" if v is not None else "❓"
+        return f"${v:.2f}" if v is not None else "?"
 
     return (
-        f"📋 Reporte extraído:\n"
-        f"Registro: #{data.get('register', '?')}  |  Fecha: {data.get('date', '?')}\n"
+        f"Z Report read:\n"
+        f"Register: #{data.get('register', '?')}  |  Date: {data.get('date', '?')}\n"
         f"─────────────────────────\n"
-        f"Efectivo:      {fmt(data.get('cash'))}\n"
+        f"Cash:          {fmt(data.get('cash'))}\n"
         f"ATH:           {fmt(data.get('ath'))}\n"
-        f"ATH Móvil:     {fmt(data.get('athm'))}\n"
+        f"ATH Mobile:    {fmt(data.get('athm'))}\n"
         f"VISA:          {fmt(data.get('visa'))}\n"
         f"Master Card:   {fmt(data.get('mc'))}\n"
         f"American Exp:  {fmt(data.get('amex'))}\n"
@@ -315,32 +306,7 @@ def _format_preview(data: dict) -> str:
         f"Triple-S OTC:  {fmt(data.get('sss'))}\n"
         f"Over/Short:    {fmt(data.get('variance'))}\n"
         f"─────────────────────────\n"
-        f"¿Guardar este reporte? Responde SI o NO"
-    )
-
-
-def _format_full_summary(
-    ocr_data: dict, payouts: float, actual_cash: float, variance: float
-) -> str:
-    """Format the confirmation summary shown before manager says SI/NO."""
-    cash = ocr_data.get("cash") or 0
-    cards = sum(ocr_data.get(f) or 0 for f in
-                ["ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss"])
-    gross = cash + cards
-    var_sign = "+" if variance >= 0 else ""
-    return (
-        f"📋 Resumen del Reporte:\n"
-        f"Registro: #{ocr_data.get('register', '?')}  |  Fecha: {ocr_data.get('date', '?')}\n"
-        f"─────────────────────────\n"
-        f"💵 Ventas efectivo:  ${cash:.2f}\n"
-        f"💳 Ventas tarjetas:  ${cards:.2f}\n"
-        f"📊 Total bruto:      ${gross:.2f}\n"
-        f"─────────────────────────\n"
-        f"💸 Retiros:          ${payouts:.2f}\n"
-        f"🏦 Efectivo real:    ${actual_cash:.2f}\n"
-        f"📐 Varianza:         {var_sign}${abs(variance):.2f}\n"
-        f"─────────────────────────\n"
-        f"¿Guardar este reporte? Responde SI o NO"
+        f"Save this report? Reply YES or NO"
     )
 
 
@@ -366,7 +332,7 @@ def handle_update(update: dict) -> None:
             # Not registered yet — nudge them to register first
             if not is_registered(telegram_id):
                 bot_state[telegram_id] = {"state": "AWAITING_USERNAME", "retry_count": 0}
-                send_message(chat_id, "Para registrarte, introduce tu usuario:")
+                send_message(chat_id, "To register, enter your username:")
                 return
             else:
                 # Reload state from DB on bot restart
@@ -385,12 +351,12 @@ def handle_update(update: dict) -> None:
     # ── text received ─────────────────────────────────────────────────────────
     text = (msg.get("text") or "").strip()
 
-    if current_state == "AWAITING_PAYOUTS":
-        _handle_payouts(telegram_id, chat_id, text, state)
+    if current_state == "AWAITING_DATE":
+        _handle_date(telegram_id, chat_id, text, state)
         return
 
-    if current_state == "AWAITING_CASH":
-        _handle_cash(telegram_id, chat_id, text, state)
+    if current_state == "AWAITING_REGISTER":
+        _handle_register(telegram_id, chat_id, text, state)
         return
 
     if current_state == "AWAITING_CONFIRMATION":
@@ -400,7 +366,7 @@ def handle_update(update: dict) -> None:
     if current_state == "AWAITING_STORE":
         chosen = _STORE_CHOICE.get(text)
         if not chosen:
-            send_message(chat_id, "Responde con 1, 2, 3 o 4.")
+            send_message(chat_id, "Reply with 1, 2, 3, or 4.")
             return
         state["store"] = chosen
         state["state"] = "REGISTERED"
@@ -410,7 +376,7 @@ def handle_update(update: dict) -> None:
         if saved_msg:
             _handle_photo(telegram_id, chat_id, tg_username, saved_msg, state)
         else:
-            send_message(chat_id, f"Tienda: {chosen}. Envía la foto del Reporte Z.")
+            send_message(chat_id, f"Store: {chosen}. Send the Z Report photo.")
         return
 
     if current_state == "AWAITING_PASSWORD":
@@ -421,7 +387,7 @@ def handle_update(update: dict) -> None:
         state["username"] = text
         state["state"] = "AWAITING_PASSWORD"
         bot_state[telegram_id] = state
-        send_message(chat_id, "Introduce tu contraseña:")
+        send_message(chat_id, "Enter your password:")
         return
 
     # ── default: start registration or show help ──────────────────────────────
@@ -433,10 +399,10 @@ def handle_update(update: dict) -> None:
             "username": user_row["username"],
             "retry_count": 0,
         }
-        send_message(chat_id, f"Ya estás registrado en {user_row['store']}. Envía una foto del Reporte Z para empezar.")
+        send_message(chat_id, f"You are registered at {user_row['store']}. Send a Z Report photo to get started.")
     else:
         bot_state[telegram_id] = {"state": "AWAITING_USERNAME", "retry_count": 0}
-        send_message(chat_id, "Hola! Para registrarte, introduce tu usuario:")
+        send_message(chat_id, "Hello! To register, enter your username:")
 
 
 def _handle_password(telegram_id, chat_id, tg_username, password, state):
@@ -447,7 +413,7 @@ def _handle_password(telegram_id, chat_id, tg_username, password, state):
         state["state"] = "AWAITING_USERNAME"
         state.pop("username", None)
         bot_state[telegram_id] = state
-        send_message(chat_id, "Usuario o contraseña incorrectos. Introduce tu usuario:")
+        send_message(chat_id, "Incorrect username or password. Enter your username:")
         return
 
     # Success — register
@@ -460,8 +426,8 @@ def _handle_password(telegram_id, chat_id, tg_username, password, state):
     }
     send_message(
         chat_id,
-        f"✅ Registrado/a. Tienda: {user_row['store']}.\n"
-        f"Ya puedes enviar fotos del Reporte Z."
+        f"Registered. Store: {user_row['store']}.\n"
+        f"You can now send Z Report photos."
     )
 
 
@@ -474,7 +440,7 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
         send_message(chat_id, STORE_MENU)
         return
 
-    send_message(chat_id, "Procesando... ⏳")
+    send_message(chat_id, "Processing... please wait.")
 
     # Pick the largest photo (last in array)
     file_id = msg["photo"][-1]["file_id"]
@@ -483,7 +449,7 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
         image_bytes = download_photo(file_id)
     except Exception as e:
         logger.error(f"Photo download failed: {e}")
-        send_message(chat_id, "No pude descargar la foto. Intenta de nuevo.")
+        send_message(chat_id, "Could not download the photo. Please try again.")
         return
 
     retry_count = state.get("retry_count", 0)
@@ -496,7 +462,7 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
         return
     except Exception as e:
         logger.error(f"OCR unexpected error: {e}")
-        send_message(chat_id, "Error procesando la imagen. Intenta de nuevo.")
+        send_message(chat_id, "Error processing the image. Please try again.")
         return
 
     if has_null_fields(ocr_data):
@@ -506,31 +472,33 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
             bot_state[telegram_id] = state
             send_message(
                 chat_id,
-                f"No se pudo leer: {null_names}.\n"
-                f"No se pudo procesar después de 2 intentos.\n"
-                f"Por favor ingresa este reporte manualmente en el sistema."
+                f"Could not read: {null_names}.\n"
+                f"Failed to process after 2 attempts.\n"
+                f"Please enter this report manually in the system."
             )
             return
         state["retry_count"] = retry_count + 1
         bot_state[telegram_id] = state
         send_message(
             chat_id,
-            f"No pude leer algunos campos: {null_names}.\n"
-            f"Toma la foto más cerca y con mejor iluminación e intenta de nuevo.\n"
-            f"(Intento {retry_count + 1} de 2)"
+            f"Could not read some fields: {null_names}.\n"
+            f"Take the photo closer with better lighting and try again.\n"
+            f"(Attempt {retry_count + 1} of 2)"
         )
         return
 
-    # All fields readable — begin reconciliation flow
-    state["state"] = "AWAITING_PAYOUTS"
+    # All fields readable — ask for date confirmation
+    state["state"] = "AWAITING_DATE"
     state["pending_data"] = ocr_data
     state["pending_image_bytes"] = image_bytes
     state["retry_count"] = 0
     bot_state[telegram_id] = state
+    ocr_date = ocr_data.get("date") or "unknown"
     send_message(
         chat_id,
-        f"✅ Reporte leído: Reg #{ocr_data.get('register', '?')}, {ocr_data.get('date', '?')}\n"
-        f"💸 ¿Hubo retiros del cajón? Ingresa el monto o 0:"
+        f"What is the date of this Z report?\n"
+        f"OCR read: {ocr_date}\n"
+        f"Type the date (MM/DD/YYYY) or reply OK to confirm."
     )
 
 
@@ -540,78 +508,94 @@ def _handle_ocr_failure(telegram_id, chat_id, state, retry_count):
         bot_state[telegram_id] = state
         send_message(
             chat_id,
-            "No se pudo procesar la foto después de 2 intentos.\n"
-            "Por favor ingresa este reporte manualmente en el sistema."
+            "Could not process the photo after 2 attempts.\n"
+            "Please enter this report manually in the system."
         )
     else:
         state["retry_count"] = retry_count + 1
         bot_state[telegram_id] = state
         send_message(
             chat_id,
-            "No pude leer este reporte. Toma la foto más cerca y con mejor "
-            f"iluminación e intenta de nuevo. (Intento {retry_count + 1} de 2)"
+            "Could not read this report. Take the photo closer with better "
+            f"lighting and try again. (Attempt {retry_count + 1} of 2)"
         )
 
 
-def _handle_payouts(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
-    """Handle AWAITING_PAYOUTS state — parse payout amount from manager input."""
-    try:
-        payouts = float(text.replace(",", ".").strip())
-        if payouts < 0:
-            raise ValueError("negative value")
-    except ValueError:
-        send_message(chat_id, "Por favor ingresa un número válido (ej: 25.50 o 0):")
-        return
+def _parse_date(text: str) -> str | None:
+    """
+    Accept MM/DD/YYYY, MM-DD-YYYY, or YYYY-MM-DD.
+    Returns YYYY-MM-DD string or None if unrecognised.
+    """
+    import re
+    text = text.strip()
+    # MM/DD/YYYY or MM-DD-YYYY
+    m = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", text)
+    if m:
+        return f"{m.group(3)}-{m.group(1).zfill(2)}-{m.group(2).zfill(2)}"
+    # YYYY-MM-DD
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", text)
+    if m:
+        return text
+    return None
 
-    state["pending_payouts"] = payouts
-    state["state"] = "AWAITING_CASH"
+
+def _handle_date(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
+    """Handle AWAITING_DATE — let user confirm or override the OCR-read date."""
+    if _ascii_upper(text) in ("OK", "YES", "SI", "CONFIRM"):
+        # Keep OCR date as-is
+        pass
+    else:
+        parsed = _parse_date(text)
+        if parsed is None:
+            send_message(
+                chat_id,
+                "Could not read that date. Please use MM/DD/YYYY (e.g. 02/20/2026) or reply OK to keep the OCR date."
+            )
+            return
+        state["pending_data"]["date"] = parsed
+
+    ocr_reg = state["pending_data"].get("register") or "unknown"
+    state["state"] = "AWAITING_REGISTER"
     bot_state[telegram_id] = state
-    send_message(chat_id, "💵 ¿Cuánto efectivo real hay en el cajón?")
+    send_message(
+        chat_id,
+        f"What is the cash register number?\n"
+        f"OCR read: {ocr_reg}\n"
+        f"Type the number or reply OK to confirm."
+    )
 
 
-def _handle_cash(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
-    """Handle AWAITING_CASH state — parse actual cash, calculate variance, show summary."""
-    try:
-        actual_cash = float(text.replace(",", ".").strip())
-        if actual_cash < 0:
-            raise ValueError("negative value")
-    except ValueError:
-        send_message(chat_id, "Por favor ingresa un número válido (ej: 150.00):")
-        return
+def _handle_register(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
+    """Handle AWAITING_REGISTER — let user confirm or override the OCR-read register."""
+    if _ascii_upper(text) not in ("OK", "YES", "SI", "CONFIRM"):
+        text_stripped = text.strip()
+        try:
+            reg_num = int(text_stripped)
+        except ValueError:
+            send_message(
+                chat_id,
+                "Please enter a register number (e.g. 1) or reply OK to keep the OCR value."
+            )
+            return
+        state["pending_data"]["register"] = reg_num
 
-    ocr_data = state["pending_data"]
-    payouts = state.get("pending_payouts", 0.0)
-    cash_sales = ocr_data.get("cash") or 0
-    variance = _calculate_variance(actual_cash, cash_sales, payouts)
-
-    state["pending_actual_cash"] = actual_cash
-    state["pending_variance"] = variance
     state["state"] = "AWAITING_CONFIRMATION"
     bot_state[telegram_id] = state
-
-    send_message(chat_id, _format_full_summary(ocr_data, payouts, actual_cash, variance))
+    send_message(chat_id, _format_preview(state["pending_data"]))
 
 
 def _ascii_upper(text: str) -> str:
-    """Uppercase and strip accents so 'Sí' == 'SI', 'No' == 'NO', etc."""
+    """Uppercase and strip accents so 'Yes' == 'YES', etc."""
     nfkd = unicodedata.normalize("NFKD", text)
     return "".join(c for c in nfkd if not unicodedata.combining(c)).upper()
 
 
 def _handle_confirmation(telegram_id, chat_id, text, state):
-    if _ascii_upper(text) == "SI":
+    if _ascii_upper(text) == "YES":
         ocr_data = state["pending_data"]
         image_bytes = state["pending_image_bytes"]
         store = state["store"]
         username = state["username"]
-        payouts = state.get("pending_payouts", 0.0)
-        actual_cash = state.get("pending_actual_cash", 0.0)
-        # Use stored variance; fall back to calculation if coming from old flow
-        variance = state.get("pending_variance")
-        if variance is None:
-            variance = _calculate_variance(
-                actual_cash, ocr_data.get("cash") or 0, payouts
-            )
 
         # 1. Upload image (log error but don't block the save)
         storage_path = None
@@ -623,17 +607,14 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
             )
         except Exception as e:
             logger.error(f"Image upload failed: {e}")
-            send_message(chat_id, "⚠️ No se pudo subir la imagen. El reporte se guardará sin foto.")
+            send_message(chat_id, "Warning: Could not upload the photo. The report will be saved without it.")
 
         # 2. Save audit entry → get entry_id
         try:
-            entry_id = save_audit_entry(
-                ocr_data, store, username,
-                payouts=payouts, actual_cash=actual_cash, variance=variance,
-            )
+            entry_id = save_audit_entry(ocr_data, store, username)
         except Exception as e:
             logger.error(f"save_audit_entry failed: {e}")
-            send_message(chat_id, "Error guardando el reporte. Intenta de nuevo o ingresa manualmente.")
+            send_message(chat_id, "Error saving the report. Please try again or enter it manually.")
             return
 
         # 3. Save photo record (only if upload succeeded and we have an entry_id)
@@ -653,25 +634,23 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
         gross = sum(ocr_data.get(f) or 0 for f in
                     ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss"])
         state["state"] = "REGISTERED"
-        for key in ["pending_data", "pending_image_bytes", "pending_payouts",
-                    "pending_actual_cash", "pending_variance"]:
+        for key in ["pending_data", "pending_image_bytes"]:
             state.pop(key, None)
         bot_state[telegram_id] = state
         send_message(
             chat_id,
-            f"✅ Guardado. Reg #{ocr_data.get('register', '?')} — "
-            f"${gross:.2f} bruto, varianza ${variance:+.2f}."
+            f"Saved. Reg #{ocr_data.get('register', '?')} — "
+            f"${gross:.2f} gross."
         )
 
     elif _ascii_upper(text) == "NO":
         state["state"] = "REGISTERED"
-        for key in ["pending_data", "pending_image_bytes", "pending_payouts",
-                    "pending_actual_cash", "pending_variance"]:
+        for key in ["pending_data", "pending_image_bytes"]:
             state.pop(key, None)
         bot_state[telegram_id] = state
-        send_message(chat_id, "Cancelado. Envía otra foto cuando estés listo.")
+        send_message(chat_id, "Cancelled. Send another photo when ready.")
     else:
-        send_message(chat_id, "Responde SI para guardar o NO para cancelar.")
+        send_message(chat_id, "Reply YES to save or NO to cancel.")
 
 
 def register_webhook() -> None:
