@@ -7,6 +7,7 @@ import os
 import io
 import time
 import logging
+import unicodedata
 import requests as http
 
 from ocr import extract_z_report, has_null_fields, NULL_FIELD_NAMES, OCRParseError
@@ -439,8 +440,14 @@ def _handle_ocr_failure(telegram_id, chat_id, state, retry_count):
         )
 
 
+def _ascii_upper(text: str) -> str:
+    """Uppercase and strip accents so 'Sí' == 'SI', 'No' == 'NO', etc."""
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).upper()
+
+
 def _handle_confirmation(telegram_id, chat_id, text, state):
-    if text.upper() == "SI":
+    if _ascii_upper(text) == "SI":
         ocr_data = state["pending_data"]
         image_bytes = state["pending_image_bytes"]
         store = state["store"]
@@ -471,7 +478,7 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
         bot_state[telegram_id] = state
         send_message(chat_id, f"✅ Guardado. Reg #{ocr_data.get('register', '?')} — ${net:.2f} bruto.")
 
-    elif text.upper() == "NO":
+    elif _ascii_upper(text) == "NO":
         state["state"] = "REGISTERED"
         state.pop("pending_data", None)
         state.pop("pending_image_bytes", None)
