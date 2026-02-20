@@ -1043,7 +1043,7 @@ body{background-color:var(--bg);margin:0;padding:0;color:var(--txt);min-height:1
     padding:24px 20px 16px; border-bottom:1px solid rgba(255,255,255,0.15);
     display:flex; flex-direction:column; align-items:center; gap:10px;
 }
-.sidebar-logo img{max-width:150px;}
+.sidebar-logo img{max-width:150px; filter:brightness(0) invert(1);}
 .sidebar-logo h2{display:none;}
 .sidebar-nav{flex:1; padding:16px 12px; display:flex; flex-direction:column; gap:4px;}
 .tab-btn{
@@ -1404,7 +1404,7 @@ const app = {
     checkStore: () => {
         const s = document.getElementById('storeLoc').value;
         if(s === 'Carthage') document.getElementById('tipsSection').classList.remove('hidden'); else { document.getElementById('tipsSection').classList.add('hidden'); document.getElementById('ccTips').value = ''; }
-        fetch('/api/get_logo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({store:s})}).then(r=>r.json()).then(d=>{if(d.logo){const src='data:image/png;base64,'+d.logo; document.getElementById('appLogo').src=src; document.getElementById('sidebarLogo').src=src;}});
+        fetch('/api/get_logo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({store:s})}).then(r=>r.json()).then(d=>{if(d.logo){document.getElementById('sidebarLogo').src='data:image/png;base64,'+d.logo;}});
     },
     save: async () => {
         app.showLoading();
