@@ -1072,10 +1072,13 @@ body{background-color:var(--bg);margin:0;padding:0;color:var(--txt);min-height:1
 
 .view{display:none;} .view.active{display:block;}
 .grid-form{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;}
-input,select{width:100%;padding:12px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:15px;color:#1e293b;background:rgba(255,255,255,0.9);font-weight:700;}
-.btn-main{background:var(--p);color:white;width:100%;padding:14px;border:none;border-radius:10px;cursor:pointer;font-size:15px;font-weight:800;}
+input,select{width:100%;padding:11px 13px;border:1.5px solid #cbd5e1;border-radius:8px;margin-bottom:15px;color:#1e293b;background:#fff;font-weight:600;transition:border-color 0.2s,box-shadow 0.2s;}
+input:focus,select:focus{outline:none;border-color:var(--p);box-shadow:0 0 0 3px rgba(0,151,178,0.12);}
+.btn-main{background:var(--p);color:white;padding:13px 32px;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:800;transition:background 0.2s;width:auto;}
+.btn-main:hover{background:var(--sidebar);}
 
-.section{font-size:12px;color:#64748b;text-transform:uppercase;margin:20px 0 10px;border-bottom:2px solid #e2e8f0;padding-bottom:5px;display:flex;justify-content:space-between;letter-spacing:1px;font-weight:900;}
+.section{font-size:11px;color:var(--sidebar);text-transform:uppercase;margin:24px 0 14px;padding-bottom:8px;border-bottom:2px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;letter-spacing:1.2px;font-weight:900;}
+.section-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:var(--sidebar);color:white;border-radius:50%;font-size:11px;font-weight:900;margin-right:8px;flex-shrink:0;}
 
 /* --- ENTERPRISE ANALYTICS STYLES --- */
 .control-bar { display:flex; justify-content:space-between; align-items:center; background:white; padding:15px 20px; border-radius:12px; border:1px solid #e2e8f0; margin-bottom:25px; flex-wrap:wrap; gap:15px; box-shadow:0 2px 4px rgba(0,0,0,0.02); }
