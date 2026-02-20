@@ -1683,7 +1683,7 @@ const app = {
     deleteUser: async (n) => { if(confirm('Delete?')) { await fetch('/api/users/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:n})}); app.fetchUsers(); } }
 };
 app.init();
-
+</script>
 <!-- Z Report Image Modal -->
 <div id="zreportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
   <div style="position:relative;max-width:90vw;max-height:90vh">
@@ -1691,7 +1691,7 @@ app.init();
     <img id="zreportImg" src="" style="max-width:90vw;max-height:85vh;border-radius:8px;display:block">
   </div>
 </div>
-</script></body></html>"""
+</body></html>"""
 
 # Register Telegram webhook on startup (idempotent — safe on every deploy)
 try:
