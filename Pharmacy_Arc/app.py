@@ -1024,7 +1024,7 @@ MAIN_UI = """<!DOCTYPE html><html><head><title>Pharmacy Director</title>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
 <style>
 /* TURQUOISE BRANDING */
-:root{--p:#0097b2;--sidebar:#00697d;--sidebar-dark:#00525f;--bg:#f0f4f8;--card:#ffffff;--danger:#ef4444;--success:#047857;--txt:#1e293b;--muted:#64748b;--warn:#f59e0b;}
+:root{--p:#0097b2;--sidebar:#00697d;--sidebar-dark:#00525f;--bg:#b8c9d6;--card:#ffffff;--danger:#ef4444;--success:#047857;--txt:#1e293b;--muted:#64748b;--warn:#f59e0b;}
 *{box-sizing:border-box; font-family: 'Segoe UI', system-ui, sans-serif;}
 body{background-color:var(--bg);margin:0;padding:0;color:var(--txt);min-height:100vh;display:flex;}
 /* WATERMARK: Full Color, Visible */
@@ -1043,11 +1043,8 @@ body{background-color:var(--bg);margin:0;padding:0;color:var(--txt);min-height:1
     padding:24px 20px 16px; border-bottom:1px solid rgba(255,255,255,0.15);
     display:flex; flex-direction:column; align-items:center; gap:10px;
 }
-.sidebar-logo img{max-width:120px;}
-.sidebar-logo h2{
-    margin:0; color:white; font-size:14px; font-weight:900;
-    text-align:center; letter-spacing:0.3px; line-height:1.3;
-}
+.sidebar-logo img{max-width:150px; filter:brightness(0) invert(1);}
+.sidebar-logo h2{display:none;}
 .sidebar-nav{flex:1; padding:16px 12px; display:flex; flex-direction:column; gap:4px;}
 .tab-btn{
     display:flex; align-items:center; gap:10px;
@@ -1193,14 +1190,14 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
 <div id="dash" class="view active">
     <div class="panel" id="dashPanel">
         <input type="hidden" id="editId" value="">
-        <div class="section" style="margin-top:0" id="modeLabel">1. Store & Metadata</div>
+        <div class="section" style="margin-top:0" id="modeLabel"><span><span class="section-badge">1</span>Store & Metadata</span></div>
         <div class="grid-form">
             <div><label>Store Location</label><select id="storeLoc" onchange="app.checkStore()"><option>Carimas #1</option><option>Carimas #2</option><option>Carimas #3</option><option>Carimas #4</option><option>Carthage</option></select></div>
             <div><label>Date</label><input type="date" id="date"></div>
             <div><label>Register</label><select id="reg"><option>Reg 1</option><option>Reg 2</option><option>Reg 3</option><option>Reg 4</option><option>Reg 5</option><option>Reg 6</option><option>Reg 7</option><option>Reg 8</option></select></div>
             <div><label>Staff Name</label><input type="text" id="staff" list="staffList" placeholder="Name"><datalist id="staffList"><option>Manager</option><option>Pharmacist</option><option>Clerk</option></datalist></div>
         </div>
-        <div class="section">2. Revenue</div>
+        <div class="section"><span><span class="section-badge">2</span>Revenue</span></div>
         <div style="display:grid;grid-template-columns:1fr 4fr;gap:20px">
             <div><label>Cash Sales</label><input type="number" id="cash" placeholder="0.00"></div>
             <div class="grid-form">
@@ -1212,10 +1209,10 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
         <div id="tipsSection" class="hidden" style="margin-top:5px;background:#ecfdf5;padding:10px;border:1px solid #10b981;border-radius:8px;">
             <div style="color:#047857;font-weight:800;font-size:12px">Carthage Tip Tracker</div><input type="number" id="ccTips" placeholder="Total CC Tips" style="margin:0;width:150px">
         </div>
-        <div class="section">3. Deductions <button onclick="app.calcTax()" style="cursor:pointer;font-size:10px;padding:2px 6px;">Auto 11.5%</button></div>
+        <div class="section"><span><span class="section-badge">3</span>Deductions</span> <button onclick="app.calcTax()" style="cursor:pointer;font-size:10px;padding:2px 8px;border:1px solid #cbd5e1;border-radius:4px;background:white;color:var(--sidebar);font-weight:700;">Auto 11.5%</button></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px"><div><label>State (10.5%)</label><input type="number" id="taxState"></div><div><label>City (1%)</label><input type="number" id="taxCity"></div></div>
-        <div class="section">4. Payouts <button onclick="app.addPayout()" style="cursor:pointer;padding:2px 6px;">+ Add</button></div><div id="payoutList"></div>
-        <div class="section">5. Reconciliation</div>
+        <div class="section"><span><span class="section-badge">4</span>Payouts</span> <button onclick="app.addPayout()" style="cursor:pointer;font-size:10px;padding:2px 8px;border:1px solid #cbd5e1;border-radius:4px;background:white;color:var(--sidebar);font-weight:700;">+ Add</button></div><div id="payoutList"></div>
+        <div class="section"><span><span class="section-badge">5</span>Reconciliation</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px"><div><label>Opening Float</label><input type="number" id="float" value="150.00"></div><div><label>Actual Cash</label><input type="number" id="actual" onclick="app.openCount()"></div></div>
         <div style="display:flex;gap:12px;margin-top:24px;justify-content:flex-start"><button id="saveBtn" class="btn-main" onclick="app.save()">Finalize & Upload</button><button id="cancelBtn" class="btn-main" onclick="app.resetForm()" style="background:#64748b;display:none;">Cancel</button></div>
     </div>
