@@ -191,34 +191,42 @@ def upload_image_to_storage(image_bytes: bytes, store: str, date: str, register)
     return path
 
 
-def save_audit_entry(data: dict, store: str, username: str, image_path: str) -> None:
-    """Save the extracted Z report data to the audits table."""
+def save_audit_entry(
+    data: dict,
+    store: str,
+    username: str,
+    payouts: float = 0.0,
+    actual_cash: float = 0.0,
+    variance: float = None,
+) -> int | None:
+    """
+    Save the extracted Z report data to the audits table.
+    Returns the new entry id (int), or None if saved to offline queue.
+    No longer stores z_report_image_path — photos go in z_report_photos table.
+    """
     from app import supabase, validate_audit_entry, save_to_queue
     if supabase is None:
-        return
+        return None
 
-    # Build payload matching the existing app format
-    reg_str = f"Reg {data['register']}"
-    gross = (
-        (data.get("cash") or 0) + (data.get("ath") or 0) + (data.get("athm") or 0) +
-        (data.get("visa") or 0) + (data.get("mc") or 0) + (data.get("amex") or 0) +
-        (data.get("disc") or 0) + (data.get("wic") or 0) + (data.get("mcs") or 0) +
-        (data.get("sss") or 0)
-    )
-    net = gross  # no payout data from Z report
-    variance = float(data.get("variance") or 0)
+    reg_str = _format_register_id(data.get("register"))
+    gross = sum(data.get(f) or 0 for f in
+                ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss"])
+    net = gross - payouts
+
+    # Use provided variance if given; fall back to OCR-extracted variance
+    if variance is None:
+        variance = float(data.get("variance") or 0)
 
     payload = {
         "date": data["date"],
         "reg": reg_str,
         "staff": username,
         "store": store,
-        "gross": gross,
-        "net": net,
+        "gross": round(gross, 2),
+        "net": round(net, 2),
         "variance": variance,
         "source": "telegram_bot",
         "submitted_by_telegram": username,
-        "z_report_image_path": image_path,
         "breakdown": {
             "cash": data.get("cash") or 0,
             "ath": data.get("ath") or 0,
@@ -230,6 +238,8 @@ def save_audit_entry(data: dict, store: str, username: str, image_path: str) -> 
             "wic": data.get("wic") or 0,
             "mcs": data.get("mcs") or 0,
             "sss": data.get("sss") or 0,
+            "payouts": payouts,
+            "actual_cash": actual_cash,
         },
     }
 
@@ -238,17 +248,50 @@ def save_audit_entry(data: dict, store: str, username: str, image_path: str) -> 
         "reg": reg_str,
         "staff": username,
         "store": store,
-        "gross": gross,
-        "net": net,
+        "gross": round(gross, 2),
+        "net": round(net, 2),
         "variance": variance,
         "payload": payload,
     }
 
     try:
-        supabase.table("audits").insert(record).execute()
+        result = supabase.table("audits").insert(record).execute()
+        return result.data[0]["id"]
     except Exception as e:
         logger.warning(f"DB save failed, queuing offline: {e}")
         save_to_queue(record)
+        return None
+
+
+def save_photo_record(
+    entry_id: int,
+    store: str,
+    business_date: str,
+    register_id: str,
+    uploaded_by: str,
+    storage_path: str,
+    content_type: str = "image/jpeg",
+    source: str = "telegram",
+) -> None:
+    """Insert a photo record into z_report_photos, linked to an audit entry."""
+    from app import supabase
+    if supabase is None:
+        logger.warning("save_photo_record: supabase not available")
+        return
+    try:
+        supabase.table("z_report_photos").insert({
+            "entry_id": entry_id,
+            "store": store,
+            "business_date": business_date,
+            "register_id": register_id,
+            "uploaded_by": uploaded_by,
+            "storage_path": storage_path,
+            "content_type": content_type,
+            "source": source,
+        }).execute()
+    except Exception as e:
+        logger.error(f"save_photo_record failed for entry {entry_id}: {e}")
+        raise
 
 
 def _format_preview(data: dict) -> str:
@@ -271,6 +314,31 @@ def _format_preview(data: dict) -> str:
         f"MCS OTC:       {fmt(data.get('mcs'))}\n"
         f"Triple-S OTC:  {fmt(data.get('sss'))}\n"
         f"Over/Short:    {fmt(data.get('variance'))}\n"
+        f"─────────────────────────\n"
+        f"¿Guardar este reporte? Responde SI o NO"
+    )
+
+
+def _format_full_summary(
+    ocr_data: dict, payouts: float, actual_cash: float, variance: float
+) -> str:
+    """Format the confirmation summary shown before manager says SI/NO."""
+    cash = ocr_data.get("cash") or 0
+    cards = sum(ocr_data.get(f) or 0 for f in
+                ["ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss"])
+    gross = cash + cards
+    var_sign = "+" if variance >= 0 else ""
+    return (
+        f"📋 Resumen del Reporte:\n"
+        f"Registro: #{ocr_data.get('register', '?')}  |  Fecha: {ocr_data.get('date', '?')}\n"
+        f"─────────────────────────\n"
+        f"💵 Ventas efectivo:  ${cash:.2f}\n"
+        f"💳 Ventas tarjetas:  ${cards:.2f}\n"
+        f"📊 Total bruto:      ${gross:.2f}\n"
+        f"─────────────────────────\n"
+        f"💸 Retiros:          ${payouts:.2f}\n"
+        f"🏦 Efectivo real:    ${actual_cash:.2f}\n"
+        f"📐 Varianza:         {var_sign}${abs(variance):.2f}\n"
         f"─────────────────────────\n"
         f"¿Guardar este reporte? Responde SI o NO"
     )
@@ -316,6 +384,14 @@ def handle_update(update: dict) -> None:
 
     # ── text received ─────────────────────────────────────────────────────────
     text = (msg.get("text") or "").strip()
+
+    if current_state == "AWAITING_PAYOUTS":
+        _handle_payouts(telegram_id, chat_id, text, state)
+        return
+
+    if current_state == "AWAITING_CASH":
+        _handle_cash(telegram_id, chat_id, text, state)
+        return
 
     if current_state == "AWAITING_CONFIRMATION":
         _handle_confirmation(telegram_id, chat_id, text, state)
@@ -445,13 +521,17 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
         )
         return
 
-    # All fields readable — show preview
-    state["state"] = "AWAITING_CONFIRMATION"
+    # All fields readable — begin reconciliation flow
+    state["state"] = "AWAITING_PAYOUTS"
     state["pending_data"] = ocr_data
     state["pending_image_bytes"] = image_bytes
     state["retry_count"] = 0
     bot_state[telegram_id] = state
-    send_message(chat_id, _format_preview(ocr_data))
+    send_message(
+        chat_id,
+        f"✅ Reporte leído: Reg #{ocr_data.get('register', '?')}, {ocr_data.get('date', '?')}\n"
+        f"💸 ¿Hubo retiros del cajón? Ingresa el monto o 0:"
+    )
 
 
 def _handle_ocr_failure(telegram_id, chat_id, state, retry_count):
@@ -473,6 +553,45 @@ def _handle_ocr_failure(telegram_id, chat_id, state, retry_count):
         )
 
 
+def _handle_payouts(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
+    """Handle AWAITING_PAYOUTS state — parse payout amount from manager input."""
+    try:
+        payouts = float(text.replace(",", ".").strip())
+        if payouts < 0:
+            raise ValueError("negative value")
+    except ValueError:
+        send_message(chat_id, "Por favor ingresa un número válido (ej: 25.50 o 0):")
+        return
+
+    state["pending_payouts"] = payouts
+    state["state"] = "AWAITING_CASH"
+    bot_state[telegram_id] = state
+    send_message(chat_id, "💵 ¿Cuánto efectivo real hay en el cajón?")
+
+
+def _handle_cash(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
+    """Handle AWAITING_CASH state — parse actual cash, calculate variance, show summary."""
+    try:
+        actual_cash = float(text.replace(",", ".").strip())
+        if actual_cash < 0:
+            raise ValueError("negative value")
+    except ValueError:
+        send_message(chat_id, "Por favor ingresa un número válido (ej: 150.00):")
+        return
+
+    ocr_data = state["pending_data"]
+    payouts = state.get("pending_payouts", 0.0)
+    cash_sales = ocr_data.get("cash") or 0
+    variance = _calculate_variance(actual_cash, cash_sales, payouts)
+
+    state["pending_actual_cash"] = actual_cash
+    state["pending_variance"] = variance
+    state["state"] = "AWAITING_CONFIRMATION"
+    bot_state[telegram_id] = state
+
+    send_message(chat_id, _format_full_summary(ocr_data, payouts, actual_cash, variance))
+
+
 def _ascii_upper(text: str) -> str:
     """Uppercase and strip accents so 'Sí' == 'SI', 'No' == 'NO', etc."""
     nfkd = unicodedata.normalize("NFKD", text)
@@ -485,36 +604,70 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
         image_bytes = state["pending_image_bytes"]
         store = state["store"]
         username = state["username"]
+        payouts = state.get("pending_payouts", 0.0)
+        actual_cash = state.get("pending_actual_cash", 0.0)
+        # Use stored variance; fall back to calculation if coming from old flow
+        variance = state.get("pending_variance")
+        if variance is None:
+            variance = _calculate_variance(
+                actual_cash, ocr_data.get("cash") or 0, payouts
+            )
 
+        # 1. Upload image (log error but don't block the save)
+        storage_path = None
         try:
-            image_path = upload_image_to_storage(
+            storage_path = upload_image_to_storage(
                 image_bytes, store,
                 ocr_data.get("date", "unknown"),
                 ocr_data.get("register", 0),
             )
         except Exception as e:
             logger.error(f"Image upload failed: {e}")
-            image_path = ""
+            send_message(chat_id, "⚠️ No se pudo subir la imagen. El reporte se guardará sin foto.")
 
+        # 2. Save audit entry → get entry_id
         try:
-            save_audit_entry(ocr_data, store, username, image_path)
+            entry_id = save_audit_entry(
+                ocr_data, store, username,
+                payouts=payouts, actual_cash=actual_cash, variance=variance,
+            )
         except Exception as e:
             logger.error(f"save_audit_entry failed: {e}")
             send_message(chat_id, "Error guardando el reporte. Intenta de nuevo o ingresa manualmente.")
             return
 
-        net = sum(ocr_data.get(f) or 0 for f in
-                  ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss"])
+        # 3. Save photo record (only if upload succeeded and we have an entry_id)
+        if storage_path and entry_id:
+            try:
+                save_photo_record(
+                    entry_id=entry_id,
+                    store=store,
+                    business_date=ocr_data.get("date", ""),
+                    register_id=_format_register_id(ocr_data.get("register")),
+                    uploaded_by=username,
+                    storage_path=storage_path,
+                )
+            except Exception as e:
+                logger.error(f"save_photo_record failed (entry still saved): {e}")
+
+        gross = sum(ocr_data.get(f) or 0 for f in
+                    ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss"])
         state["state"] = "REGISTERED"
-        state.pop("pending_data", None)
-        state.pop("pending_image_bytes", None)
+        for key in ["pending_data", "pending_image_bytes", "pending_payouts",
+                    "pending_actual_cash", "pending_variance"]:
+            state.pop(key, None)
         bot_state[telegram_id] = state
-        send_message(chat_id, f"✅ Guardado. Reg #{ocr_data.get('register', '?')} — ${net:.2f} bruto.")
+        send_message(
+            chat_id,
+            f"✅ Guardado. Reg #{ocr_data.get('register', '?')} — "
+            f"${gross:.2f} bruto, varianza ${variance:+.2f}."
+        )
 
     elif _ascii_upper(text) == "NO":
         state["state"] = "REGISTERED"
-        state.pop("pending_data", None)
-        state.pop("pending_image_bytes", None)
+        for key in ["pending_data", "pending_image_bytes", "pending_payouts",
+                    "pending_actual_cash", "pending_variance"]:
+            state.pop(key, None)
         bot_state[telegram_id] = state
         send_message(chat_id, "Cancelado. Envía otra foto cuando estés listo.")
     else:

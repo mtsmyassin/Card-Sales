@@ -97,8 +97,8 @@ def test_already_registered_photo_triggers_ocr():
                 with patch("ocr.has_null_fields", return_value=False):
                     handle_update(make_photo_update(333))
 
-    assert bot_state[333]["state"] == "AWAITING_CONFIRMATION"
-    assert any("guardar" in r.lower() for r in replies)
+    assert bot_state[333]["state"] == "AWAITING_PAYOUTS"
+    assert any("retiro" in r.lower() or "caj" in r.lower() for r in replies)
 
 
 def test_confirmation_si_saves_entry():
