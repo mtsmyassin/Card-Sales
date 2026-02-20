@@ -71,6 +71,13 @@ def require_auth(allowed_roles=None):
     return decorator
 
 
+def _can_access_photo(photo_store: str, user_role: str, user_store: str) -> bool:
+    """Return True if the user is authorized to access a photo from photo_store."""
+    if user_role in ("admin", "super_admin"):
+        return True
+    return photo_store == user_store
+
+
 # --- FLASK APP INITIALIZATION ---
 # Railway (and most PaaS) inject $PORT — fall back to FLASK_PORT for local dev
 PORT = int(os.getenv('PORT', str(Config.PORT)))
@@ -722,19 +729,38 @@ def delete():
 @app.route('/api/list')
 @require_auth()
 def list_audits():
-    """List audit entries filtered by user's store access."""
+    """List audit entries filtered by user's store access, with photo counts."""
     try:
         response = supabase.table("audits").select("*").order("date", desc=True).limit(2000).execute()
-        clean_rows = []
         user_store = session.get('store')
         user_role = session.get('role')
-        for r in response.data:
-            if user_role not in ['admin', 'super_admin'] and r.get('store') != user_store: 
-                continue
+
+        # Filter by store access
+        allowed_rows = [
+            r for r in response.data
+            if user_role in ('admin', 'super_admin') or r.get('store') == user_store
+        ]
+
+        # Batch-fetch photo counts for all allowed entry IDs
+        photo_counts: dict = {}
+        if allowed_rows:
+            entry_ids = [r['id'] for r in allowed_rows]
+            photo_resp = supabase.table("z_report_photos") \
+                .select("entry_id") \
+                .in_("entry_id", entry_ids) \
+                .execute()
+            for p in photo_resp.data:
+                eid = p['entry_id']
+                photo_counts[eid] = photo_counts.get(eid, 0) + 1
+
+        clean_rows = []
+        for r in allowed_rows:
             merged = r['payload']
             merged['id'] = r['id']
             merged['store'] = r.get('store', 'Main')
+            merged['photo_count'] = photo_counts.get(r['id'], 0)
             clean_rows.append(merged)
+
         return jsonify(clean_rows)
     except Exception as e:
         logger.error(f"Error listing audits: {e}")
@@ -794,7 +820,33 @@ def diagnostics():
             },
             "session": session_info,
         }
-        
+
+        # Storage diagnostics
+        storage_info = {
+            "z_reports_bucket": "unknown",
+            "photos_total": 0,
+            "photos_missing_path": 0,
+        }
+        try:
+            supabase.storage.from_("z-reports").list("")
+            storage_info["z_reports_bucket"] = "exists"
+        except Exception as bucket_err:
+            storage_info["z_reports_bucket"] = f"error: {bucket_err}"
+
+        try:
+            count_resp = supabase.table("z_report_photos").select("id", count="exact").execute()
+            storage_info["photos_total"] = count_resp.count or 0
+
+            no_path_resp = supabase.table("z_report_photos") \
+                .select("id", count="exact") \
+                .eq("storage_path", "") \
+                .execute()
+            storage_info["photos_missing_path"] = no_path_resp.count or 0
+        except Exception as diag_err:
+            logger.warning(f"diagnostics storage query failed: {diag_err}")
+
+        diagnostics_data["storage"] = storage_info
+
         logger.info(f"Diagnostics accessed by {session.get('user')}")
         return jsonify(diagnostics_data)
     
@@ -1018,6 +1070,66 @@ def get_zreport_image(audit_id: int):
     except Exception as e:
         logger.error(f"get_zreport_image error: {e}", exc_info=True)
         return jsonify(error="Internal server error"), 500
+
+
+@app.route('/api/zreport/photos')
+@require_auth()
+def get_entry_photos():
+    """Return photo metadata (no URLs) for an audit entry. Store-scoped."""
+    entry_id = request.args.get('entry_id', type=int)
+    if not entry_id:
+        return jsonify(error="entry_id required"), 400
+
+    entry_resp = supabase.table("audits").select("store").eq("id", entry_id).execute()
+    if not entry_resp.data:
+        return jsonify(error="Not found"), 404
+
+    entry_store = entry_resp.data[0]['store']
+    if not _can_access_photo(entry_store, session.get('role'), session.get('store')):
+        logger.warning(
+            f"Access denied: {session.get('user')} tried photos for entry {entry_id} "
+            f"(store={entry_store})"
+        )
+        return jsonify(error="Not authorized"), 403
+
+    photos = supabase.table("z_report_photos") \
+        .select("id, store, business_date, register_id, uploaded_by, uploaded_at, source") \
+        .eq("entry_id", entry_id) \
+        .order("uploaded_at") \
+        .execute()
+
+    return jsonify(photos.data)
+
+
+@app.route('/api/zreport/signed_url')
+@require_auth()
+def get_photo_signed_url():
+    """Return a 1-hour signed URL for a specific photo. Store-scoped IDOR check."""
+    photo_id = request.args.get('photo_id', type=int)
+    if not photo_id:
+        return jsonify(error="photo_id required"), 400
+
+    photo_resp = supabase.table("z_report_photos").select("*").eq("id", photo_id).execute()
+    if not photo_resp.data:
+        return jsonify(error="Not found"), 404
+
+    photo = photo_resp.data[0]
+
+    if not _can_access_photo(photo['store'], session.get('role'), session.get('store')):
+        logger.warning(
+            f"IDOR attempt: {session.get('user')} (store={session.get('store')}) "
+            f"tried signed URL for photo {photo_id} (store={photo['store']})"
+        )
+        return jsonify(error="Not authorized"), 403
+
+    try:
+        signed = supabase.storage.from_("z-reports").create_signed_url(
+            photo['storage_path'], 3600
+        )
+        return jsonify(url=signed["signedURL"])
+    except Exception as e:
+        logger.error(f"create_signed_url failed photo_id={photo_id}: {e}", exc_info=True)
+        return jsonify(error="Could not generate image URL"), 500
 
 
 # --- 4. FRONTEND UI ---
@@ -1512,15 +1624,33 @@ const app = {
     },
     renderLogs: () => { app.filterHistory(); },
     filterHistory: () => { const r=document.getElementById('histRange').value, d=document.getElementById('historyFilter').value, s=(app.role!=='staff')?document.getElementById('histStoreFilter').value:app.store; let f=app.data; if(s&&s!=='All')f=f.filter(x=>x.store===s); if(r==='custom'){if(d)f=f.filter(x=>x.date===d)}else{const days=parseInt(r), cut=new Date(); cut.setDate(cut.getDate()-days); if(days===0)f=f.filter(x=>x.date===new Date().toISOString().split('T')[0]); else if(days!==9999)f=f.filter(x=>new Date(x.date)>=cut);} app.renderTable(f); },
-    renderTable: (rows) => { let h='<table><tr><th>Date</th><th>Store</th><th>Gross</th><th>Var</th><th>Actions</th></tr>'; rows.forEach(d=>{ const i=app.data.indexOf(d), camBtn=d.z_report_image_path?`<button onclick="app.viewZReport(${d.id})" class="action-btn btn-cam" title="Ver Reporte Z">📷</button>`:'', acts=(app.role==='staff')?`<button onclick="app.print(${i})" class="action-btn btn-print">🖨 Print</button>`:`<button onclick="app.print(${i})" class="action-btn btn-print">🖨</button><button onclick="app.editAudit(${i})" class="action-btn btn-edit">✏️</button><button onclick="app.deleteAudit(${d.id})" class="action-btn btn-del">🗑</button>${camBtn}`; h+=`<tr><td>${d.date}</td><td>${d.store}</td><td>$${(d.gross||0).toFixed(2)}</td><td style="color:${d.variance<0?'#be123c':'#047857'};font-weight:800">$${d.variance}</td><td>${acts}</td></tr>`;}); document.getElementById('logTable').innerHTML=h+'</table>'; },
+    renderTable: (rows) => { let h='<table><tr><th>Date</th><th>Store</th><th>Gross</th><th>Var</th><th>Actions</th></tr>'; rows.forEach(d=>{ const i=app.data.indexOf(d), camBtn=d.photo_count>0?`<button onclick="app.viewZReport(${d.id})" class="action-btn btn-cam" title="Ver ${d.photo_count} foto(s)">📷(${d.photo_count})</button>`:'', acts=(app.role==='staff')?`<button onclick="app.print(${i})" class="action-btn btn-print">🖨 Print</button>`:`<button onclick="app.print(${i})" class="action-btn btn-print">🖨</button><button onclick="app.editAudit(${i})" class="action-btn btn-edit">✏️</button><button onclick="app.deleteAudit(${d.id})" class="action-btn btn-del">🗑</button>${camBtn}`; h+=`<tr><td>${d.date}</td><td>${d.store}</td><td>$${(d.gross||0).toFixed(2)}</td><td style="color:${d.variance<0?'#be123c':'#047857'};font-weight:800">$${d.variance}</td><td>${acts}</td></tr>`;}); document.getElementById('logTable').innerHTML=h+'</table>'; },
     viewZReport: async (auditId) => {
         try {
-            const resp = await fetch(`/api/audit/${auditId}/zreport_image`);
-            if (!resp.ok) { alert('No hay imagen para esta entrada.'); return; }
-            const { url } = await resp.json();
-            const modal = document.getElementById('zreportModal');
+            const photosResp = await fetch(`/api/zreport/photos?entry_id=${auditId}`);
+            if (!photosResp.ok) {
+                alert(photosResp.status === 403 ? 'No autorizado.' : 'No hay imagen para esta entrada.');
+                return;
+            }
+            const photos = await photosResp.json();
+            if (!photos.length) { alert('No hay imagen para esta entrada.'); return; }
+            const photo = photos[0];
+            const urlResp = await fetch(`/api/zreport/signed_url?photo_id=${photo.id}`);
+            if (!urlResp.ok) {
+                alert(urlResp.status === 403 ? 'No autorizado.' : 'Error cargando imagen.');
+                return;
+            }
+            const { url } = await urlResp.json();
             document.getElementById('zreportImg').src = url;
-            modal.style.display = 'flex';
+            const meta = document.getElementById('zreportMeta');
+            if (meta) {
+                meta.querySelector('[data-store]').textContent = photo.store;
+                meta.querySelector('[data-register]').textContent = photo.register_id;
+                meta.querySelector('[data-date]').textContent = photo.business_date;
+                meta.querySelector('[data-by]').textContent = photo.uploaded_by;
+                meta.querySelector('[data-at]').textContent = new Date(photo.uploaded_at).toLocaleString('es-PR');
+            }
+            document.getElementById('zreportModal').style.display = 'flex';
         } catch(e) { alert('Error cargando imagen.'); }
     },
     print: async (idx) => { const d=app.data[idx], b=d.breakdown||{}, val=v=>(v||0).toFixed(2), logo='data:image/png;base64,'+(await(await fetch('/api/get_logo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({store:d.store})})).json()).logo; const w=window.open('','','height=700,width=500'); w.document.write(`<html><head><style>body{font-family:monospace;padding:20px;font-weight:bold}.row{display:flex;justify-content:space-between;border-bottom:1px dotted #ccc;padding:5px 0}h2,h4{text-align:center;margin:5px 0}</style></head><body><div style="text-align:center;margin-bottom:10px"><img src="${logo}" style="max-height:80px;display:block;margin:0 auto"></div><h2>${d.store==='Carthage'?'Carthage Express':'Farmacia Carimas'}</h2><h4>${d.store} Audit</h4><br><div class="row"><span>Date:</span><span>${d.date}</span></div><div class="row"><span>Staff:</span><span>${d.staff||'N/A'}</span></div><br><div class="row"><strong>Cash Sales:</strong><span>$${val(b.cash)}</span></div><div class="row"><span>Cards (Combined):</span><span>$${val((d.gross||0)-(b.cash||0))}</span></div><br><div class="row"><span>State Tax:</span><span>$${val(b.taxState)}</span></div><div class="row"><span>City Tax:</span><span>$${val(b.taxCity)}</span></div>${(b.payoutList||[]).map(p=>`<div class="row"><span>${p.r}</span><span>$${val(p.a)}</span></div>`).join('')}<br><div class="row"><strong>Total Payouts:</strong><span>$${val(b.payouts)}</span></div><div class="row"><strong>Actual Cash:</strong><span>$${val(b.actual)}</span></div><br><div class="row" style="border-top:2px solid black;font-size:1.2em"><strong>VARIANCE:</strong><strong>$${d.variance}</strong></div><br><br><br><div style="text-align:center">________________________<br>Manager Signature</div></body></html>`); w.document.close(); setTimeout(()=>w.print(),500); },
@@ -1688,7 +1818,14 @@ app.init();
 <div id="zreportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
   <div style="position:relative;max-width:90vw;max-height:90vh">
     <button onclick="document.getElementById('zreportModal').style.display='none'" style="position:absolute;top:-36px;right:0;background:none;border:none;color:white;font-size:28px;cursor:pointer">✕</button>
-    <img id="zreportImg" src="" style="max-width:90vw;max-height:85vh;border-radius:8px;display:block">
+    <img id="zreportImg" src="" style="max-width:90vw;max-height:72vh;border-radius:8px 8px 0 0;display:block">
+    <div id="zreportMeta" style="background:rgba(255,255,255,0.95);padding:8px 14px;border-radius:0 0 8px 8px;font-size:12px;display:flex;gap:14px;flex-wrap:wrap;color:#1e293b">
+      <span>🏪 <span data-store></span></span>
+      <span>🖩 <span data-register></span></span>
+      <span>📅 <span data-date></span></span>
+      <span>👤 <span data-by></span></span>
+      <span>🕐 <span data-at></span></span>
+    </div>
   </div>
 </div>
 </body></html>"""
