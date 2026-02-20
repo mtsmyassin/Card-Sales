@@ -80,22 +80,34 @@ def get_bot_user(telegram_id: int) -> dict | None:
 
 def verify_web_credentials(username: str, password: str) -> dict | None:
     """
-    Verify username/password against the users table using bcrypt.
+    Verify username/password — mirrors the web app login exactly:
+    1. Check emergency admin accounts first
+    2. Check DB users, supporting both bcrypt and legacy plaintext passwords
     Returns the user row dict if valid, None if invalid.
     """
-    from app import supabase
-    from security import PasswordHasher
+    from app import supabase, EMERGENCY_ACCOUNTS, password_hasher
     if supabase is None:
         return None
     try:
+        # Check emergency admin accounts
+        if username in EMERGENCY_ACCOUNTS:
+            stored_hash = EMERGENCY_ACCOUNTS[username]
+            if password_hasher.verify_password(password, stored_hash):
+                role = "super_admin" if username == "super" else "admin"
+                return {"username": username, "role": role, "store": "All"}
+            return None
+
+        # Check database accounts
         result = supabase.table("users").select("*").eq("username", username).execute()
         if not result.data:
             return None
         user = result.data[0]
-        hasher = PasswordHasher()
-        if hasher.verify_password(password, user["password"]):
-            return user
-        return None
+        stored = user.get("password", "")
+        if stored.startswith("$2b$"):
+            valid = password_hasher.verify_password(password, stored)
+        else:
+            valid = (stored == password)
+        return user if valid else None
     except Exception as e:
         logger.error(f"verify_web_credentials failed: {e}")
         return None
