@@ -18,6 +18,17 @@ bot_state: dict = {}
 
 _BOT_TOKEN = None  # loaded lazily from env
 
+KNOWN_STORES = ["Carimas #1", "Carimas #2", "Carimas #3", "Carthage"]
+STORE_MENU = (
+    "¿Para qué tienda es este reporte?\n"
+    "1 — Carimas #1\n"
+    "2 — Carimas #2\n"
+    "3 — Carimas #3\n"
+    "4 — Carthage\n"
+    "Responde con el número."
+)
+_STORE_CHOICE = {"1": "Carimas #1", "2": "Carimas #2", "3": "Carimas #3", "4": "Carthage"}
+
 
 def _token() -> str:
     global _BOT_TOKEN
@@ -96,29 +107,23 @@ def verify_web_credentials(username: str, password: str) -> dict | None:
         return None
     try:
         # Check emergency admin accounts
-        logger.info(f"verify_web_credentials: checking user='{username}', emergency_accounts={list(EMERGENCY_ACCOUNTS.keys())}")
         if username in EMERGENCY_ACCOUNTS:
             stored_hash = EMERGENCY_ACCOUNTS[username]
-            valid = password_hasher.verify_password(password, stored_hash)
-            logger.info(f"verify_web_credentials: emergency account match={valid}")
-            if valid:
+            if password_hasher.verify_password(password, stored_hash):
                 role = "super_admin" if username == "super" else "admin"
                 return {"username": username, "role": role, "store": "All"}
             return None
 
         # Check database accounts
         result = supabase.table("users").select("*").eq("username", username).execute()
-        logger.info(f"verify_web_credentials: DB rows found={len(result.data)}")
         if not result.data:
             return None
         user = result.data[0]
         stored = user.get("password", "")
-        logger.info(f"verify_web_credentials: password is bcrypt={stored.startswith('$2b$')}")
         if stored.startswith("$2b$"):
             valid = password_hasher.verify_password(password, stored)
         else:
             valid = (stored == password)
-        logger.info(f"verify_web_credentials: password valid={valid}")
         return user if valid else None
     except Exception as e:
         logger.error(f"verify_web_credentials failed: {e}", exc_info=True)
@@ -282,6 +287,22 @@ def handle_update(update: dict) -> None:
         _handle_confirmation(telegram_id, chat_id, text, state)
         return
 
+    if current_state == "AWAITING_STORE":
+        chosen = _STORE_CHOICE.get(text)
+        if not chosen:
+            send_message(chat_id, "Responde con 1, 2, 3 o 4.")
+            return
+        state["store"] = chosen
+        state["state"] = "REGISTERED"
+        bot_state[telegram_id] = state
+        # Now process the saved photo
+        saved_msg = state.pop("pending_photo_msg", None)
+        if saved_msg:
+            _handle_photo(telegram_id, chat_id, tg_username, saved_msg, state)
+        else:
+            send_message(chat_id, f"Tienda: {chosen}. Envía la foto del Reporte Z.")
+        return
+
     if current_state == "AWAITING_PASSWORD":
         _handle_password(telegram_id, chat_id, tg_username, text, state)
         return
@@ -335,6 +356,14 @@ def _handle_password(telegram_id, chat_id, tg_username, password, state):
 
 
 def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
+    # If user has "All" store access, ask which store before processing
+    if state.get("store") == "All":
+        state["pending_photo_msg"] = msg
+        state["state"] = "AWAITING_STORE"
+        bot_state[telegram_id] = state
+        send_message(chat_id, STORE_MENU)
+        return
+
     send_message(chat_id, "Procesando... ⏳")
 
     # Pick the largest photo (last in array)
