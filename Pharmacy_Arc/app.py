@@ -1189,6 +1189,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
     </div>
 </div>
 
+<div class="main-content">
 <div id="dash" class="view active">
     <div class="panel" id="dashPanel">
         <input type="hidden" id="editId" value="">
@@ -1216,7 +1217,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
         <div class="section">4. Payouts <button onclick="app.addPayout()" style="cursor:pointer;padding:2px 6px;">+ Add</button></div><div id="payoutList"></div>
         <div class="section">5. Reconciliation</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px"><div><label>Opening Float</label><input type="number" id="float" value="150.00"></div><div><label>Actual Cash</label><input type="number" id="actual" onclick="app.openCount()"></div></div>
-        <div style="display:flex;gap:10px;margin-top:20px"><button id="saveBtn" class="btn-main" onclick="app.save()">Finalize & Upload</button><button id="cancelBtn" class="btn-main" onclick="app.resetForm()" style="background:#64748b;display:none;">Cancel</button></div>
+        <div style="display:flex;gap:12px;margin-top:24px;justify-content:flex-start"><button id="saveBtn" class="btn-main" onclick="app.save()">Finalize & Upload</button><button id="cancelBtn" class="btn-main" onclick="app.resetForm()" style="background:#64748b;display:none;">Cancel</button></div>
     </div>
 </div>
 
@@ -1360,6 +1361,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
         <br><br><div id="userTable"></div>
     </div>
 </div>
+</div><!-- end .main-content -->
 
 <div id="modalCount" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);justify-content:center;align-items:center;z-index:9999;">
     <div style="background:white;padding:30px;border-radius:15px;width:350px;border:2px solid var(--p);">
