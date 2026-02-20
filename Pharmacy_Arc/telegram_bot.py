@@ -387,11 +387,7 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
         return
     except Exception as e:
         logger.error(f"OCR unexpected error: {e}")
-        err_type = type(e).__name__
-        if "auth" in str(e).lower() or "api_key" in str(e).lower() or "authentication" in str(e).lower():
-            send_message(chat_id, f"[DEBUG] Error de API key: {err_type}. Verifica ANTHROPIC_API_KEY en Railway.")
-        else:
-            send_message(chat_id, f"[DEBUG] Error OCR ({err_type}): {str(e)[:200]}")
+        send_message(chat_id, "Error procesando la imagen. Intenta de nuevo.")
         return
 
     if has_null_fields(ocr_data):
