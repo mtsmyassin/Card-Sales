@@ -1024,7 +1024,7 @@ MAIN_UI = """<!DOCTYPE html><html><head><title>Pharmacy Director</title>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
 <style>
 /* TURQUOISE BRANDING */
-:root{--p:#0097b2;--sidebar:#00697d;--sidebar-dark:#00525f;--bg:#b8c9d6;--card:#ffffff;--danger:#ef4444;--success:#047857;--txt:#1e293b;--muted:#64748b;--warn:#f59e0b;}
+:root{--p:#0097b2;--sidebar:#00697d;--sidebar-dark:#00525f;--bg:#7a9aaa;--card:#ffffff;--danger:#ef4444;--success:#047857;--txt:#1e293b;--muted:#64748b;--warn:#f59e0b;}
 *{box-sizing:border-box; font-family: 'Segoe UI', system-ui, sans-serif;}
 body{background-color:var(--bg);margin:0;padding:0;color:var(--txt);min-height:100vh;display:flex;}
 /* WATERMARK: Full Color, Visible */
@@ -1169,7 +1169,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
 
 <div class="sidebar">
     <div class="sidebar-logo">
-        <img src="data:image/png;base64,{{logo}}" alt="Farmacia Carimas">
+        <img id="sidebarLogo" src="data:image/png;base64,{{logo}}" alt="Farmacia Carimas">
         <h2>Farmacia Carimas</h2>
     </div>
     <nav class="sidebar-nav">
@@ -1404,7 +1404,7 @@ const app = {
     checkStore: () => {
         const s = document.getElementById('storeLoc').value;
         if(s === 'Carthage') document.getElementById('tipsSection').classList.remove('hidden'); else { document.getElementById('tipsSection').classList.add('hidden'); document.getElementById('ccTips').value = ''; }
-        fetch('/api/get_logo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({store:s})}).then(r=>r.json()).then(d=>{if(d.logo)document.getElementById('appLogo').src='data:image/png;base64,'+d.logo});
+        fetch('/api/get_logo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({store:s})}).then(r=>r.json()).then(d=>{if(d.logo){const src='data:image/png;base64,'+d.logo; document.getElementById('appLogo').src=src; document.getElementById('sidebarLogo').src=src;}});
     },
     save: async () => {
         app.showLoading();
