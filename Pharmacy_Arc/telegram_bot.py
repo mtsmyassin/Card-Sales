@@ -343,6 +343,7 @@ def handle_update(update: dict) -> None:
                     "username": user_row["username"],
                     "retry_count": 0,
                 }
+                state = bot_state[telegram_id]  # use the new dict, not the old empty one
                 current_state = "REGISTERED"
 
         _handle_photo(telegram_id, chat_id, tg_username, msg, state)
