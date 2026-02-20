@@ -1170,24 +1170,23 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
 
 <img src="data:image/png;base64,{{logo}}" class="watermark">
 
-<div class="header">
-    <div style="display:flex;align-items:center;gap:15px">
-        <div><h1 style="margin:0;font-weight:900;color:#1e293b;font-size:24px;letter-spacing:-0.5px">Farmacia Carimas</h1></div>
-        <button id="syncBtn" style="background:#f59e0b;color:white;border:none;padding:6px 12px;border-radius:6px;font-weight:bold;display:none">⚠️ Sync</button>
+<div class="sidebar">
+    <div class="sidebar-logo">
+        <img src="data:image/png;base64,{{logo}}" alt="Farmacia Carimas">
+        <h2>Farmacia Carimas</h2>
     </div>
-    <div style="display:flex;gap:15px;align-items:center">
-        <span id="userDisplay" style="color:var(--p);font-size:12px;font-weight:800;text-transform:uppercase"></span>
-        <button onclick="app.logout()" style="padding:8px 16px;cursor:pointer;background:#ef4444;color:white;border:none;border-radius:8px;font-size:12px;font-weight:800">Log Out</button>
-        <img id="appLogo" src="data:image/png;base64,{{logo}}" style="height:48px; opacity:1">
+    <nav class="sidebar-nav">
+        <div id="tab-dash" class="tab-btn active" onclick="app.tab('dash')"><span class="tab-icon">📋</span>Audit Entry</div>
+        <div id="tab-calendar" class="tab-btn" onclick="app.tab('calendar')"><span class="tab-icon">📅</span>Calendar</div>
+        <div id="tab-analytics" class="tab-btn" onclick="app.tab('analytics')"><span class="tab-icon">📊</span>Command Center</div>
+        <div id="tab-logs" class="tab-btn" onclick="app.tab('logs')"><span class="tab-icon">📜</span>History</div>
+        <div id="tab-users" class="tab-btn" onclick="app.tab('users')"><span class="tab-icon">👥</span>Users</div>
+    </nav>
+    <div class="sidebar-footer">
+        <div class="sidebar-user" id="userDisplay"></div>
+        <button id="syncBtn" style="background:#f59e0b;color:white;border:none;padding:6px 10px;border-radius:6px;font-weight:bold;font-size:12px;display:none;cursor:pointer">⚠️ Sync</button>
+        <button onclick="app.logout()" style="padding:9px 14px;cursor:pointer;background:#ef4444;color:white;border:none;border-radius:8px;font-size:12px;font-weight:800;width:100%">Log Out</button>
     </div>
-</div>
-
-<div class="tabs">
-    <div id="tab-dash" class="tab-btn active" onclick="app.tab('dash')">Audit Entry</div>
-    <div id="tab-calendar" class="tab-btn" onclick="app.tab('calendar')">Calendar</div>
-    <div id="tab-analytics" class="tab-btn" onclick="app.tab('analytics')">Command Center</div>
-    <div id="tab-logs" class="tab-btn" onclick="app.tab('logs')">History</div>
-    <div id="tab-users" class="tab-btn" onclick="app.tab('users')">Users</div>
 </div>
 
 <div id="dash" class="view active">
