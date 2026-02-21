@@ -159,20 +159,35 @@ class StorageUploadError(Exception):
     """Raised when upload to Supabase Storage fails."""
 
 
+def _ensure_bucket(admin_client) -> None:
+    """Create z-reports bucket if it doesn't exist (requires service role key)."""
+    try:
+        existing = [b.name for b in admin_client.storage.list_buckets()]
+        if "z-reports" not in existing:
+            admin_client.storage.create_bucket("z-reports", options={"public": False})
+            logger.info("Created z-reports storage bucket")
+    except Exception as e:
+        raise StorageUploadError(f"Could not ensure z-reports bucket: {e}") from e
+
+
 def upload_image_to_storage(image_bytes: bytes, store: str, date: str, register) -> str:
     """
     Upload photo to Supabase Storage z-reports bucket.
     Returns storage path string.
     Raises StorageUploadError on any failure — never returns empty string.
+    Requires SUPABASE_SERVICE_KEY to be set (service role key bypasses RLS).
     """
-    from app import supabase
-    if supabase is None:
-        raise StorageUploadError("Supabase client not initialized")
+    from app import supabase_admin
+    if supabase_admin is None:
+        raise StorageUploadError(
+            "SUPABASE_SERVICE_KEY not configured — photo upload disabled"
+        )
+    _ensure_bucket(supabase_admin)
     store_slug = store.replace(" ", "_").replace("#", "")
     reg_num = int(register) if register else 0
     path = f"{store_slug}/{date}/reg{reg_num}_{int(time.time())}.jpg"
     try:
-        supabase.storage.from_("z-reports").upload(
+        supabase_admin.storage.from_("z-reports").upload(
             path,
             image_bytes,
             {"content-type": "image/jpeg"},

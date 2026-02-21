@@ -8,8 +8,22 @@ from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-env_path = Path(__file__).parent / '.env'
+# Load environment variables from .env file.
+# When running as a PyInstaller frozen exe, __file__ is unreliable for path
+# resolution. Instead: look next to the exe first (user-editable), then fall
+# back to the bundled copy inside sys._MEIPASS.
+def _find_env() -> Path:
+    if getattr(sys, 'frozen', False):
+        # Packaged exe: prefer .env sitting next to PharmacyDirector.exe
+        beside_exe = Path(sys.executable).parent / '.env'
+        if beside_exe.exists():
+            return beside_exe
+        # Fall back to the file bundled inside the PyInstaller temp dir
+        return Path(sys._MEIPASS) / '.env'
+    # Development: .env lives in the same folder as config.py
+    return Path(__file__).parent / '.env'
+
+env_path = _find_env()
 load_dotenv(dotenv_path=env_path)
 
 
@@ -24,6 +38,7 @@ class Config:
     # Supabase Configuration
     SUPABASE_URL: str = os.getenv('SUPABASE_URL', '')
     SUPABASE_KEY: str = os.getenv('SUPABASE_KEY', '')
+    SUPABASE_SERVICE_KEY: str = os.getenv('SUPABASE_SERVICE_KEY', '')
     
     # Emergency Admin Accounts (format: username:bcrypt_hash)
     EMERGENCY_ADMIN_SUPER: str = os.getenv('EMERGENCY_ADMIN_SUPER', '')

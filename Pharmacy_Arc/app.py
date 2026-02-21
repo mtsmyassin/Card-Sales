@@ -136,6 +136,18 @@ except Exception as e:
     logger.critical(f"Cloud Client Init Failed: {e}")
     print(f"CRITICAL ERROR: Cloud Client Init Failed. {e}")
 
+# Admin client (service role key) — used for storage operations that require
+# elevated permissions (e.g. creating buckets, bypassing RLS on uploads).
+# Optional: if SUPABASE_SERVICE_KEY is not set, photo uploads are skipped.
+supabase_admin = None
+_service_key = Config.SUPABASE_SERVICE_KEY
+if _service_key:
+    try:
+        supabase_admin = create_client(SUPABASE_URL, _service_key)
+        logger.info("Supabase admin client (service role) initialized")
+    except Exception as e:
+        logger.warning(f"Supabase admin client init failed: {e}")
+
 # --- INPUT VALIDATION HELPERS ---
 def validate_audit_entry(data: dict) -> tuple[bool, str]:
     """
