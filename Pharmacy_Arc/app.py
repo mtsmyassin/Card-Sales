@@ -1436,9 +1436,15 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
         <div style="display:grid;grid-template-columns:1fr 4fr;gap:20px">
             <div><label>Cash Sales</label><input type="number" id="cash" placeholder="0.00"></div>
             <div class="grid-form">
-                <input type="number" id="ath" placeholder="ATH"><input type="number" id="athm" placeholder="ATHM"><input type="number" id="visa" placeholder="Visa">
-                <input type="number" id="mc" placeholder="MC"><input type="number" id="amex" placeholder="AmEx"><input type="number" id="disc" placeholder="Disc">
-                <input type="number" id="wic" placeholder="WIC"><input type="number" id="mcs" placeholder="MCS"><input type="number" id="sss" placeholder="Triple S" style="border:2px solid var(--p)">
+                <div><label>ATH</label><input type="number" id="ath" placeholder="0.00"></div>
+                <div><label>ATHM</label><input type="number" id="athm" placeholder="0.00"></div>
+                <div><label>Visa</label><input type="number" id="visa" placeholder="0.00"></div>
+                <div><label>MC</label><input type="number" id="mc" placeholder="0.00"></div>
+                <div><label>AmEx</label><input type="number" id="amex" placeholder="0.00"></div>
+                <div><label>Disc</label><input type="number" id="disc" placeholder="0.00"></div>
+                <div><label>WIC</label><input type="number" id="wic" placeholder="0.00"></div>
+                <div><label>MCS</label><input type="number" id="mcs" placeholder="0.00"></div>
+                <div><label>Triple S</label><input type="number" id="sss" placeholder="0.00" style="border:2px solid var(--p)"></div>
             </div>
         </div>
         <div id="tipsSection" class="hidden" style="margin-top:5px;background:#ecfdf5;padding:10px;border:1px solid #10b981;border-radius:8px;">
@@ -1563,7 +1569,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
                 <select id="histRange" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="30">Last 30 Days</option><option value="7">Last 7 Days</option><option value="0">Today</option><option value="custom">Custom</option><option value="9999">All</option></select>
                 <input type="date" id="historyFilter" onchange="document.getElementById('histRange').value='custom';app.filterHistory()" style="margin:0;padding:5px;">
                 <select id="histStoreFilter" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="All">All Stores</option><option>Carimas #1</option><option>Carimas #2</option><option>Carimas #3</option><option>Carimas #4</option><option>Carthage</option></select>
-                <button onclick="app.fetch()">Refresh</button>
+                <button onclick="app.fetch()" class="btn-main" style="padding:7px 14px;font-size:12px;width:auto;">↻ Refresh</button>
             </div>
         </div>
         <div id="logTable" style="max-height:600px;overflow-y:auto"></div>
@@ -1586,7 +1592,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
         <div class="section" style="margin-top:0">Manage Users</div>
         <div class="grid-form">
             <input type="text" id="u_name" placeholder="Username">
-            <input type="text" id="u_pass" placeholder="Password">
+            <input type="password" id="u_pass" placeholder="Password" autocomplete="new-password">
             <select id="u_role"><option value="staff">Staff</option><option value="manager">Manager</option><option value="admin">Admin</option><option value="super_admin">Super Admin</option></select>
             <select id="u_store"><option value="All">All (Admin)</option><option>Carimas #1</option><option>Carimas #2</option><option>Carimas #3</option><option>Carimas #4</option><option>Carthage</option></select>
         </div>
