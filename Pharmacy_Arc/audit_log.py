@@ -14,21 +14,56 @@ import os
 class AuditLogger:
     """
     Append-only audit logger with tamper detection.
-    
+
     Each audit entry is linked to the previous entry via hash chaining,
     making it difficult to modify historical logs without detection.
+    Writes to both a local JSONL file and Supabase when configured.
     """
-    
+
     def __init__(self, log_file: str = "audit_log.jsonl"):
         """
         Initialize audit logger.
-        
+
         Args:
             log_file: Path to the audit log file (JSONL format)
         """
         self.log_file = Path(log_file)
         self._lock = Lock()
+        self._supabase = None
         self._ensure_log_exists()
+
+    def configure_db(self, supabase_client) -> None:
+        """
+        Enable Supabase-backed persistence. Call after the Supabase client
+        is initialised in app.py so audit events survive Railway redeploys.
+
+        Required table (run migrations/003_app_audit_log.sql in Supabase):
+            CREATE TABLE app_audit_log (...)
+        """
+        self._supabase = supabase_client
+
+    def _write_to_db(self, entry: dict) -> None:
+        """Write audit entry to Supabase app_audit_log. Non-blocking; swallows errors."""
+        if not self._supabase:
+            return
+        try:
+            self._supabase.table('app_audit_log').insert({
+                'ts':          entry['timestamp'],
+                'action':      entry['action'],
+                'actor':       entry.get('actor'),
+                'role':        entry.get('role'),
+                'entity_type': entry.get('entity_type'),
+                'entity_id':   entry.get('entity_id'),
+                'success':     entry.get('success', True),
+                'error':       entry.get('error'),
+                'before_val':  entry.get('before'),
+                'after_val':   entry.get('after'),
+                'context':     entry.get('context'),
+                'entry_hash':  entry.get('entry_hash'),
+            }).execute()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"[audit_log] Supabase write failed: {e}")
     
     def _ensure_log_exists(self) -> None:
         """Create log file if it doesn't exist."""
@@ -131,6 +166,9 @@ class AuditLogger:
             # Append to log file
             with open(self.log_file, 'a') as f:
                 f.write(json.dumps(entry) + '\n')
+
+            # Mirror to Supabase (non-blocking; swallows errors)
+            self._write_to_db(entry)
     
     def verify_integrity(self) -> tuple[bool, List[str]]:
         """

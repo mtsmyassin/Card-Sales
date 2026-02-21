@@ -286,6 +286,15 @@ def verify_web_credentials(username: str, password: str) -> dict | None:
             valid = password_hasher.verify_password(password, stored)
         else:
             valid = (stored == password)
+            if valid:
+                try:
+                    from app import supabase_admin
+                    hashed = password_hasher.hash_password(password)
+                    _db = supabase_admin or supabase
+                    _db.table("users").update({"password": hashed}).eq("username", username).execute()
+                    logger.warning(f"[bot] Auto-hashed plaintext password for {username!r}")
+                except Exception as _he:
+                    logger.warning(f"[bot] Could not auto-hash password for {username!r}: {_he}")
         return user if valid else None
     except Exception as e:
         logger.error(f"verify_web_credentials failed: {e}", exc_info=True)

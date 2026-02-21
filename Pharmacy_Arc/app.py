@@ -1,7 +1,7 @@
 import json, webbrowser, os, sys, base64, re, time, io
 import logging
 from functools import wraps
-from threading import Timer
+from threading import Timer, Thread
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, session, redirect, send_file
 from supabase import create_client, Client
@@ -115,6 +115,18 @@ else:
     app.config['SESSION_COOKIE_SECURE'] = False
     logger.warning("⚠️  SESSION_COOKIE_SECURE disabled - HTTPS not required. Enable for production!")
 
+
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'geolocation=(), camera=(), microphone=()'
+    if Config.REQUIRE_HTTPS:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
+
 # --- SECURITY COMPONENTS ---
 password_hasher = PasswordHasher()
 login_tracker = LoginAttemptTracker(
@@ -157,6 +169,8 @@ _lockout_db = supabase_admin or supabase
 if _lockout_db:
     login_tracker.configure_db(_lockout_db)
     logger.info("Login lockout tracker configured with Supabase persistence")
+    get_audit_logger().configure_db(_lockout_db)
+    logger.info("Audit logger configured with Supabase persistence")
 else:
     logger.warning("Login lockout tracker using local file (no Supabase client available)")
 
@@ -660,9 +674,27 @@ def sync():
     success_count = 0
     for item in queue:
         try:
+            # Validate before inserting (offline entries skip the /api/save validation)
+            ok, err = validate_audit_entry(item)
+            if not ok:
+                logger.warning(f"[sync] Skipping invalid queue item: {err} — {item}")
+                failed_items.append(item)
+                continue
+
+            # Duplicate check — DB unique constraint on (date, store, reg)
+            date_val = item.get('date')
+            store_val = item.get('store')
+            reg_val = item.get('reg')
+            dup = supabase.table("audits").select("id").eq("date", date_val).eq(
+                "store", store_val).eq("reg", reg_val).limit(1).execute()
+            if dup.data:
+                logger.warning(f"[sync] Skipping duplicate: date={date_val} store={store_val} reg={reg_val}")
+                success_count += 1  # Don't keep retrying a duplicate — remove from queue
+                continue
+
             supabase.table("audits").insert(item).execute()
             success_count += 1
-            
+
             # Log successful sync
             audit_log(
                 action="SYNC",
@@ -1162,13 +1194,17 @@ def telegram_webhook():
     if not update:
         return jsonify(ok=False), 400
 
-    try:
-        from telegram_bot import handle_update
-        handle_update(update)
-    except Exception as e:
-        logger.error(f"Telegram webhook handler error: {e}", exc_info=True)
+    def _dispatch():
+        try:
+            from telegram_bot import handle_update
+            handle_update(update)
+        except Exception as e:
+            logger.error(f"Telegram webhook handler error: {e}", exc_info=True)
 
-    # Always return 200 to Telegram (prevents retries)
+    t = Thread(target=_dispatch, daemon=True)
+    t.start()
+
+    # Return 200 immediately — Telegram requires a response within 5 seconds
     return jsonify(ok=True)
 
 
@@ -1448,8 +1484,11 @@ def zr_lock(audit_id: int):
     ip = request.remote_addr
     try:
         audit = supabase_admin.table('audits').select(
-            'id,review_status,review_locked_by,review_locked_at'
+            'id,store,review_status,review_locked_by,review_locked_at'
         ).eq('id', audit_id).single().execute().data
+
+        if session.get('role') == 'manager' and audit.get('store') != session.get('store'):
+            return jsonify(error="You can only review entries for your store"), 403
 
         status = audit['review_status']
         locked_by = audit.get('review_locked_by')
@@ -1548,6 +1587,8 @@ def zr_approve(audit_id: int):
             return jsonify(error=f"Audit is not IN_REVIEW (status: {audit['review_status']})"), 409
         if audit.get('review_locked_by') != actor:
             return jsonify(error="You do not hold the lock on this audit"), 403
+        if session.get('role') == 'manager' and audit.get('store') != session.get('store'):
+            return jsonify(error="You can only review entries for your store"), 403
 
         breakdown = (audit.get('payload') or {}).get('breakdown', {})
         try:
@@ -1611,13 +1652,15 @@ def zr_reject(audit_id: int):
 
     try:
         audit = supabase_admin.table('audits').select(
-            'id,review_status,review_locked_by'
+            'id,store,review_status,review_locked_by'
         ).eq('id', audit_id).single().execute().data
 
         if audit['review_status'] != 'IN_REVIEW':
             return jsonify(error=f"Audit is not IN_REVIEW (status: {audit['review_status']})"), 409
         if audit.get('review_locked_by') != actor:
             return jsonify(error="You do not hold the lock on this audit"), 403
+        if session.get('role') == 'manager' and audit.get('store') != session.get('store'):
+            return jsonify(error="You can only review entries for your store"), 403
 
         existing = supabase_admin.table('z_report_reviews').select('version').eq(
             'audit_id', audit_id).order('version', desc=True).limit(1).execute()
@@ -1656,6 +1699,43 @@ def zr_reject(audit_id: int):
         return jsonify(ok=True)
     except Exception as e:
         logger.error(f"[zr_reject] audit_id={audit_id}: {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
+
+
+@app.route('/api/z-reports/<int:audit_id>/reopen', methods=['POST'])
+@require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+def zr_reopen(audit_id: int):
+    """Reopen a REJECTED audit back to PENDING_REVIEW so it can be re-reviewed."""
+    actor = session['user']
+    ip = request.remote_addr
+    body = request.get_json(force=True) or {}
+    reason = (body.get('reason') or '').strip()
+    if not reason:
+        return jsonify(error="reason is required"), 400
+
+    try:
+        audit = supabase_admin.table('audits').select(
+            'id,store,review_status'
+        ).eq('id', audit_id).single().execute().data
+
+        if audit['review_status'] != 'REJECTED':
+            return jsonify(error=f"Audit is not REJECTED (status: {audit['review_status']})"), 409
+        if session.get('role') == 'manager' and audit.get('store') != session.get('store'):
+            return jsonify(error="You can only reopen entries for your store"), 403
+
+        supabase_admin.table('audits').update({
+            'review_status': 'PENDING_REVIEW',
+            'review_locked_by': None,
+            'review_locked_at': None,
+        }).eq('id', audit_id).execute()
+
+        _zr_log(supabase_admin, audit_id, 'REOPEN', actor, ip=ip,
+                old_val={'review_status': 'REJECTED'},
+                new_val={'review_status': 'PENDING_REVIEW'},
+                reason=reason)
+        return jsonify(ok=True)
+    except Exception as e:
+        logger.error(f"[zr_reopen] audit_id={audit_id}: {e}", exc_info=True)
         return jsonify(error=str(e)), 500
 
 
@@ -2586,8 +2666,9 @@ function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replac
 
 app.zr = {
     _badge: (s) => {
-        const m = {PENDING_REVIEW:'#f59e0b',IN_REVIEW:'#3b82f6',FINAL_APPROVED:'#047857',REJECTED:'#ef4444',AMENDED:'#8b5cf6',NEEDS_ASSIGNMENT:'#64748b',DUPLICATE:'#64748b'};
-        return '<span style="background:' + (m[s]||'#64748b') + ';color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:800">' + esc(s).replace('_',' ') + '</span>';
+        const colors = {PENDING_REVIEW:'#f59e0b',IN_REVIEW:'#3b82f6',FINAL_APPROVED:'#047857',REJECTED:'#ef4444',AMENDED:'#8b5cf6',NEEDS_ASSIGNMENT:'#64748b',DUPLICATE:'#64748b'};
+        const labels = {PENDING_REVIEW:'Pending Review',IN_REVIEW:'In Review',FINAL_APPROVED:'Approved',REJECTED:'Rejected',AMENDED:'Amended',NEEDS_ASSIGNMENT:'Unassigned',DUPLICATE:'Duplicate'};
+        return '<span style="background:' + (colors[s]||'#64748b') + ';color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:800">' + esc(labels[s]||s.replace(/_/g,' ')) + '</span>';
     },
     fetchList: async () => {
         const status = document.getElementById('zrStatusFilter').value;

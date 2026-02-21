@@ -184,6 +184,7 @@ class TestZReportLock:
     def _audit(self, status='PENDING_REVIEW', locked_by=None, locked_at=None):
         return {
             'id': 42,
+            'store': 'Main',
             'review_status': status,
             'review_locked_by': locked_by,
             'review_locked_at': locked_at,
@@ -251,7 +252,7 @@ class TestZReportApprove:
     def _setup(self, flask_app, status='IN_REVIEW', locked_by='testmanager'):
         audit_mock = MagicMock()
         audit_mock.data = {
-            'id': 1, 'review_status': status, 'review_locked_by': locked_by,
+            'id': 1, 'store': 'Main', 'review_status': status, 'review_locked_by': locked_by,
             'payload': {'breakdown': {
                 'cash': 500, 'ath': 0, 'athm': 0, 'visa': 0, 'mc': 0,
                 'amex': 0, 'disc': 0, 'wic': 0, 'mcs': 0, 'sss': 0, 'float': 100
@@ -326,7 +327,7 @@ class TestZReportApprove:
 class TestZReportRejectAmend:
     def _setup_audit(self, flask_app, status, locked_by='testmanager'):
         m = MagicMock()
-        m.data = {'id': 1, 'review_status': status, 'review_locked_by': locked_by}
+        m.data = {'id': 1, 'store': 'Main', 'review_status': status, 'review_locked_by': locked_by}
         flask_app.supabase_admin.table.return_value.select.return_value \
             .eq.return_value.single.return_value.execute.return_value = m
         flask_app.supabase_admin.table.return_value.update.return_value \
