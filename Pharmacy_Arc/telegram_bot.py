@@ -280,12 +280,14 @@ def save_photo_record(
     source: str = "telegram",
 ) -> None:
     """Insert a photo record into z_report_photos, linked to an audit entry."""
-    from app import supabase
-    if supabase is None:
-        logger.warning("save_photo_record: supabase not available")
+    from app import supabase, supabase_admin
+    # Prefer service-role client so RLS doesn't block the insert
+    client = supabase_admin or supabase
+    if client is None:
+        logger.warning("save_photo_record: no supabase client available")
         return
     try:
-        supabase.table("z_report_photos").insert({
+        client.table("z_report_photos").insert({
             "entry_id": entry_id,
             "store": store,
             "business_date": business_date,
