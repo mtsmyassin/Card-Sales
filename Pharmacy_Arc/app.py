@@ -793,7 +793,7 @@ def list_audits():
         return jsonify(clean_rows)
     except Exception as e:
         logger.error(f"[list_audits] Error: {e}", exc_info=True)
-        return jsonify([])
+        return jsonify(error=str(e), code="LIST_ERROR"), 500
 
 
 # --- DIAGNOSTIC ENDPOINT ---
@@ -1084,13 +1084,22 @@ def telegram_webhook():
 @app.route('/api/audit/<int:audit_id>/zreport_image')
 @require_auth()
 def get_zreport_image(audit_id: int):
-    """Return a short-lived signed URL for the Z report image of an audit entry."""
+    """Return a short-lived signed URL for the Z report image of an audit entry (legacy)."""
     try:
-        result = supabase.table("audits").select("payload").eq("id", audit_id).execute()
+        result = supabase.table("audits").select("payload,store").eq("id", audit_id).execute()
         if not result.data:
             return jsonify(error="Not found"), 404
 
-        payload = result.data[0].get("payload", {})
+        row = result.data[0]
+        entry_store = row.get('store')
+        if not _can_access_photo(entry_store, session.get('role'), session.get('store')):
+            logger.warning(
+                f"[get_zreport_image] IDOR attempt: user={session.get('user')!r} "
+                f"tried audit_id={audit_id} (store={entry_store!r})"
+            )
+            return jsonify(error="Not authorized", code="FORBIDDEN"), 403
+
+        payload = row.get("payload", {})
         image_path = payload.get("z_report_image_path")
         if not image_path:
             return jsonify(error="No image for this entry"), 404
@@ -1613,7 +1622,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
 
 <script>
 const app = {
-    data: [], users: [], calDate: new Date(), calInitialized: false, role: '', store: '',
+    data: [], users: [], calDate: new Date(), calInitialized: false, role: '', store: '', _galleryPhotos: [], _galleryIdx: 0,
     init: () => {
         app.role = localStorage.getItem('role'); app.store = localStorage.getItem('store');
         document.getElementById('userDisplay').innerText = `User: ${app.role}`;
@@ -1693,8 +1702,14 @@ const app = {
         app.showLoading();
         let ok = false;
         try {
-            app.data = await (await fetch('/api/list')).json();
-            ok = true;
+            const raw = await (await fetch('/api/list')).json();
+            if (!Array.isArray(raw)) {
+                console.error('[fetch] /api/list returned non-array:', raw);
+                alert('Failed to load data: ' + (raw.error || 'Unknown error'));
+            } else {
+                app.data = raw;
+                ok = true;
+            }
         } catch(e) {
             console.error('Failed to fetch:', e);
             alert('Connection error. Please check your internet and try again.');
@@ -1730,31 +1745,49 @@ const app = {
             }
             const photos = await photosResp.json();
             if (!photos.length) { alert('No hay imagen para esta entrada.'); return; }
-            const photo = photos[0];
-            const urlResp = await fetch(`/api/zreport/signed_url?photo_id=${photo.id}`);
-            if (!urlResp.ok) {
-                const errJson = await urlResp.json().catch(()=>({}));
-                console.error('[viewZReport] signed_url failed:', urlResp.status, errJson);
-                alert(urlResp.status === 403 ? 'No autorizado.' : `Error cargando imagen [${errJson.code||urlResp.status}]: ${errJson.error||'Unknown error'}`);
-                return;
-            }
-            const { url } = await urlResp.json();
-            document.getElementById('zreportImg').src = url;
-            const meta = document.getElementById('zreportMeta');
-            if (meta) {
-                meta.querySelector('[data-store]').textContent = photo.store;
-                meta.querySelector('[data-register]').textContent = photo.register_id;
-                meta.querySelector('[data-date]').textContent = photo.business_date;
-                meta.querySelector('[data-by]').textContent = photo.uploaded_by;
-                meta.querySelector('[data-at]').textContent = new Date(photo.uploaded_at).toLocaleString('es-PR');
-            }
+            app._galleryPhotos = photos;
+            app._galleryIdx = 0;
+            await app._showGalleryPhoto(0);
             document.getElementById('zreportModal').style.display = 'flex';
         } catch(e) { console.error('[viewZReport] unexpected error:', e); alert('Error cargando imagen: ' + e.toString()); }
+    },
+    _showGalleryPhoto: async (idx) => {
+        const photos = app._galleryPhotos;
+        const photo = photos[idx];
+        const urlResp = await fetch(`/api/zreport/signed_url?photo_id=${photo.id}`);
+        if (!urlResp.ok) {
+            const errJson = await urlResp.json().catch(()=>({}));
+            console.error('[gallery] signed_url failed:', urlResp.status, errJson);
+            alert(urlResp.status === 403 ? 'No autorizado.' : `Error cargando imagen [${errJson.code||urlResp.status}]: ${errJson.error||'Unknown error'}`);
+            return;
+        }
+        const { url } = await urlResp.json();
+        document.getElementById('zreportImg').src = url;
+        const meta = document.getElementById('zreportMeta');
+        if (meta) {
+            meta.querySelector('[data-store]').textContent = photo.store;
+            meta.querySelector('[data-register]').textContent = photo.register_id;
+            meta.querySelector('[data-date]').textContent = photo.business_date;
+            meta.querySelector('[data-by]').textContent = photo.uploaded_by;
+            meta.querySelector('[data-at]').textContent = new Date(photo.uploaded_at).toLocaleString('es-PR');
+        }
+        const counter = document.getElementById('zreportCounter');
+        if (counter) counter.textContent = photos.length > 1 ? `${idx+1} / ${photos.length}` : '';
+        const prev = document.getElementById('zreportPrev');
+        const next = document.getElementById('zreportNext');
+        if (prev) prev.style.display = idx > 0 ? 'block' : 'none';
+        if (next) next.style.display = idx < photos.length - 1 ? 'block' : 'none';
+    },
+    galleryNav: async (dir) => {
+        const idx = app._galleryIdx + dir;
+        if (idx < 0 || idx >= app._galleryPhotos.length) return;
+        app._galleryIdx = idx;
+        await app._showGalleryPhoto(idx);
     },
     print: async (idx) => { const d=app.data[idx], b=d.breakdown||{}, val=v=>(v||0).toFixed(2), logo='data:image/png;base64,'+(await(await fetch('/api/get_logo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({store:d.store})})).json()).logo; const w=window.open('','','height=700,width=500'); w.document.write(`<html><head><style>body{font-family:monospace;padding:20px;font-weight:bold}.row{display:flex;justify-content:space-between;border-bottom:1px dotted #ccc;padding:5px 0}h2,h4{text-align:center;margin:5px 0}</style></head><body><div style="text-align:center;margin-bottom:10px"><img src="${logo}" style="max-height:80px;display:block;margin:0 auto"></div><h2>${d.store==='Carthage'?'Carthage Express':'Farmacia Carimas'}</h2><h4>${d.store} Audit</h4><br><div class="row"><span>Date:</span><span>${d.date}</span></div><div class="row"><span>Staff:</span><span>${d.staff||'N/A'}</span></div><br><div class="row"><strong>Cash Sales:</strong><span>$${val(b.cash)}</span></div><div class="row"><span>Cards (Combined):</span><span>$${val((d.gross||0)-(b.cash||0))}</span></div><br><div class="row"><span>State Tax:</span><span>$${val(b.taxState)}</span></div><div class="row"><span>City Tax:</span><span>$${val(b.taxCity)}</span></div>${(b.payoutList||[]).map(p=>`<div class="row"><span>${p.r}</span><span>$${val(p.a)}</span></div>`).join('')}<br><div class="row"><strong>Total Payouts:</strong><span>$${val(b.payouts)}</span></div><div class="row"><strong>Actual Cash:</strong><span>$${val(b.actual)}</span></div><br><div class="row" style="border-top:2px solid black;font-size:1.2em"><strong>VARIANCE:</strong><strong>$${d.variance}</strong></div><br><br><br><div style="text-align:center">________________________<br>Manager Signature</div></body></html>`); w.document.close(); setTimeout(()=>w.print(),500); },
     setupCalControls: () => { const m=document.getElementById('calMonthSelect'); ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].forEach((x,i)=>m.innerHTML+=`<option value="${i}">${x}</option>`); app.updateCalView(); },
     updateCalView: () => { if(event&&event.target.id==='calMonthSelect')app.calDate.setMonth(parseInt(event.target.value)); if(event&&event.target.id==='calYearInput')app.calDate.setFullYear(parseInt(event.target.value)); document.getElementById('calMonthSelect').value=app.calDate.getMonth(); document.getElementById('calYearInput').value=app.calDate.getFullYear(); app.renderCalendar(); },
-    renderCalendar: () => { const c=document.getElementById('calGrid'), dt=app.calDate, s=(app.role!=='staff')?document.getElementById('calStoreFilter').value:app.store, dim=new Date(dt.getFullYear(),dt.getMonth()+1,0).getDate(); c.innerHTML=''; for(let i=1;i<=dim;i++){ const ds=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`, es=app.data.filter(x=>x.date===ds&&(s==='All'||x.store===s)); let g=0,v=0; es.forEach(x=>{g+=x.gross||0;v+=parseFloat(x.variance||0)}); c.innerHTML+=`<div style="background:${es.length>0?(v<0?'#fee2e2':'#dcfce7'):'rgba(255,255,255,0.7)'};border:1px solid #ddd;padding:5px;height:80px;cursor:pointer;border-radius:8px" onclick="app.tab('logs');document.getElementById('historyFilter').value='${ds}';document.getElementById('histRange').value='custom';app.filterHistory()"><div style="font-weight:bold">${i}</div>${es.length>0?`<div style="font-size:10px;margin-top:5px">$${g.toFixed(0)}<br>${v.toFixed(2)}</div>`:''}</div>`; } },
+    renderCalendar: () => { const c=document.getElementById('calGrid'), dt=app.calDate, s=(app.role==='admin'||app.role==='super_admin')?document.getElementById('calStoreFilter').value:app.store, dim=new Date(dt.getFullYear(),dt.getMonth()+1,0).getDate(); c.innerHTML=''; for(let i=1;i<=dim;i++){ const ds=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`, es=app.data.filter(x=>x.date===ds&&(s==='All'||x.store===s)); let g=0,v=0; es.forEach(x=>{g+=x.gross||0;v+=parseFloat(x.variance||0)}); c.innerHTML+=`<div style="background:${es.length>0?(v<0?'#fee2e2':'#dcfce7'):'rgba(255,255,255,0.7)'};border:1px solid #ddd;padding:5px;height:80px;cursor:pointer;border-radius:8px" onclick="app.tab('logs');document.getElementById('historyFilter').value='${ds}';document.getElementById('histRange').value='custom';app.filterHistory()"><div style="font-weight:bold">${i}</div>${es.length>0?`<div style="font-size:10px;margin-top:5px">$${g.toFixed(0)}<br>${v.toFixed(2)}</div>`:''}</div>`; } },
     
     toggleCustomRange: () => {
         const v = document.getElementById('anFilter').value;
@@ -1833,7 +1866,7 @@ const app = {
         document.getElementById('tNet').innerText = (m!=='custom' && m!=='ytd' && !parseInt(m)) ? "" : calcGrowth(net, pNet) + " " + pLabel;
         document.getElementById('tNet').style.color = colorGrowth(net, pNet);
 
-        const avgDaily = count > 0 ? gross / count : 0; 
+        const distinctDays = new Set(f.map(x=>x.date)).size; const avgDaily = distinctDays > 0 ? gross / distinctDays : 0;
         const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
         document.getElementById('kProj').innerText = '$'+(avgDaily * daysInMonth).toLocaleString(undefined,{minimumFractionDigits:0});
         document.getElementById('kAvg').innerText = '$'+(count>0?(gross/count):0).toLocaleString(undefined,{minimumFractionDigits:0});
@@ -1857,16 +1890,16 @@ const app = {
         if(s === 'All') {
             const stores = [...new Set(f.map(x=>x.store))];
             const colors = ['#0097b2', '#be123c', '#b45309', '#6366f1', '#0ea5e9'];
-            datasets = stores.map((st, i) => ({ label: st, data: labels.map(l => { const r=f.find(x=>x.date===l && x.store===st); return r?r.gross:0; }), borderColor: colors[i%colors.length], tension: 0.4, pointRadius: 0, borderWidth:3 }));
-        } else { datasets = [{label:'Revenue', data:labels.map(l => { const r=f.find(x=>x.date===l); return r?r.gross:0; }), borderColor:'#0097b2', tension:0.4, pointRadius:3, fill:true, backgroundColor:grad, borderWidth:3}]; }
+            datasets = stores.map((st, i) => ({ label: st, data: labels.map(l => f.filter(x=>x.date===l && x.store===st).reduce((s,x)=>s+(x.gross||0),0)), borderColor: colors[i%colors.length], tension: 0.4, pointRadius: 0, borderWidth:3 }));
+        } else { datasets = [{label:'Revenue', data:labels.map(l => f.filter(x=>x.date===l).reduce((s,x)=>s+(x.gross||0),0)), borderColor:'#0097b2', tension:0.4, pointRadius:3, fill:true, backgroundColor:grad, borderWidth:3}]; }
         window.lineC=new Chart(cl,{type:'line', data:{labels:labels, datasets:datasets}, options: commonOpt }); 
 
         const dowMap = [0,0,0,0,0,0,0], dowCount=[0,0,0,0,0,0,0], days=['S','M','T','W','T','F','S'];
-        f.forEach(x=>{ const d=new Date(x.date).getDay(); dowMap[d]+=x.gross||0; dowCount[d]++; });
+        f.forEach(x=>{ const d=new Date(x.date+'T12:00:00').getDay(); dowMap[d]+=x.gross||0; dowCount[d]++; });
         const cd=document.getElementById('dowChart').getContext('2d'); if(window.dowC)window.dowC.destroy();
         window.dowC=new Chart(cd, {type:'bar', data:{labels:days, datasets:[{data:dowMap.map((v,i) => dowCount[i]?v/dowCount[i]:0), backgroundColor:'#0097b2', borderRadius:4, maxBarThickness: 40}]}, options:{...commonOpt, plugins:{legend:{display:false}, datalabels:{display:false}}}});
 
-        const regMap={}; f.forEach(x=>{ regMap[x.reg]=(regMap[x.reg]||0)+x.gross; });
+        const regMap={}; f.forEach(x=>{ const rk=x.reg||'Unknown'; regMap[rk]=(regMap[rk]||0)+(x.gross||0); });
         const cr=document.getElementById('regChart').getContext('2d'); if(window.regC)window.regC.destroy();
         window.regC=new Chart(cr, {type:'bar', data:{labels:Object.keys(regMap), datasets:[{data:Object.values(regMap), backgroundColor:'#6366f1', borderRadius:4, maxBarThickness: 40}]}, options:{...commonOpt, plugins:{legend:{display:false}, datalabels:{display:false}}}});
 
@@ -1916,8 +1949,13 @@ app.init();
 <div id="zreportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
   <div style="position:relative;max-width:90vw;max-height:90vh">
     <button onclick="document.getElementById('zreportModal').style.display='none'" style="position:absolute;top:-36px;right:0;background:none;border:none;color:white;font-size:28px;cursor:pointer">✕</button>
-    <img id="zreportImg" src="" style="max-width:90vw;max-height:72vh;border-radius:8px 8px 0 0;display:block">
-    <div id="zreportMeta" style="background:rgba(255,255,255,0.95);padding:8px 14px;border-radius:0 0 8px 8px;font-size:12px;display:flex;gap:14px;flex-wrap:wrap;color:#1e293b">
+    <div style="position:relative;display:inline-block">
+      <button id="zreportPrev" onclick="app.galleryNav(-1)" style="display:none;position:absolute;left:-44px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.25);border:none;color:white;font-size:26px;cursor:pointer;border-radius:50%;width:36px;height:36px;line-height:36px">&#8249;</button>
+      <img id="zreportImg" src="" style="max-width:90vw;max-height:72vh;border-radius:8px 8px 0 0;display:block">
+      <button id="zreportNext" onclick="app.galleryNav(1)" style="display:none;position:absolute;right:-44px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.25);border:none;color:white;font-size:26px;cursor:pointer;border-radius:50%;width:36px;height:36px;line-height:36px">&#8250;</button>
+    </div>
+    <div id="zreportMeta" style="background:rgba(255,255,255,0.95);padding:8px 14px;border-radius:0 0 8px 8px;font-size:12px;display:flex;gap:14px;flex-wrap:wrap;color:#1e293b;align-items:center">
+      <span id="zreportCounter" style="font-weight:bold;color:#0097b2;min-width:40px"></span>
       <span>🏪 <span data-store></span></span>
       <span>🖩 <span data-register></span></span>
       <span>📅 <span data-date></span></span>
