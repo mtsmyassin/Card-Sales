@@ -1104,35 +1104,42 @@ def get_entry_photos():
     """Return photo metadata (no URLs) for an audit entry. Store-scoped."""
     entry_id = request.args.get('entry_id', type=int)
     if not entry_id:
-        return jsonify(error="entry_id required"), 400
+        return jsonify(error="entry_id required", code="MISSING_PARAM"), 400
 
-    # Use service-role client so RLS doesn't block server-side reads
-    _db = supabase_admin or supabase
+    try:
+        # Use service-role client so RLS doesn't block server-side reads
+        _db = supabase_admin or supabase
+        using_admin = supabase_admin is not None
+        logger.info(f"[get_entry_photos] entry_id={entry_id} using_admin={using_admin}")
 
-    entry_resp = _db.table("audits").select("store").eq("id", entry_id).execute()
-    if not entry_resp.data:
-        logger.warning(f"[get_entry_photos] entry_id={entry_id} not found in audits")
-        return jsonify(error="Not found"), 404
+        entry_resp = _db.table("audits").select("store").eq("id", entry_id).execute()
+        if not entry_resp.data:
+            logger.warning(f"[get_entry_photos] entry_id={entry_id} not found in audits")
+            return jsonify(error="Not found", code="NOT_FOUND"), 404
 
-    entry_store = entry_resp.data[0]['store']
-    if not _can_access_photo(entry_store, session.get('role'), session.get('store')):
-        logger.warning(
-            f"[get_entry_photos] Access denied: user={session.get('user')!r} "
-            f"(store={session.get('store')!r}) tried entry_id={entry_id} (store={entry_store!r})"
+        entry_store = entry_resp.data[0].get('store')
+        if not _can_access_photo(entry_store, session.get('role'), session.get('store')):
+            logger.warning(
+                f"[get_entry_photos] Access denied: user={session.get('user')!r} "
+                f"(store={session.get('store')!r}) tried entry_id={entry_id} (store={entry_store!r})"
+            )
+            return jsonify(error="Not authorized", code="FORBIDDEN"), 403
+
+        photos = _db.table("z_report_photos") \
+            .select("id, store, business_date, register_id, uploaded_by, uploaded_at, storage_path") \
+            .eq("entry_id", entry_id) \
+            .order("uploaded_at") \
+            .execute()
+
+        logger.info(
+            f"[get_entry_photos] entry_id={entry_id} store={entry_store!r} "
+            f"using_admin={using_admin} → {len(photos.data)} photo(s)"
         )
-        return jsonify(error="Not authorized"), 403
+        return jsonify(photos.data)
 
-    photos = _db.table("z_report_photos") \
-        .select("id, store, business_date, register_id, uploaded_by, uploaded_at, source") \
-        .eq("entry_id", entry_id) \
-        .order("uploaded_at") \
-        .execute()
-
-    logger.info(
-        f"[get_entry_photos] entry_id={entry_id} store={entry_store!r} "
-        f"→ {len(photos.data)} photo(s)"
-    )
-    return jsonify(photos.data)
+    except Exception as e:
+        logger.error(f"[get_entry_photos] entry_id={entry_id} EXCEPTION: {e}", exc_info=True)
+        return jsonify(error=str(e), code="FETCH_ERROR"), 500
 
 
 @app.route('/api/zreport/signed_url')
