@@ -1305,7 +1305,7 @@ def zr_detail(audit_id: int):
         audit = supabase_admin.table('audits').select('*').eq('id', audit_id).single().execute()
         review = supabase_admin.table('z_report_reviews').select('*').eq(
             'audit_id', audit_id).eq('is_current', True).maybe_single().execute()
-        return jsonify({'audit': audit.data, 'review': review.data})
+        return jsonify({'audit': audit.data, 'review': review.data if review else None})
     except Exception as e:
         logger.error(f"[zr_detail] audit_id={audit_id}: {e}", exc_info=True)
         return jsonify(error=str(e)), 500
@@ -1554,8 +1554,9 @@ def zr_amend(audit_id: int):
         # Get current review row to link amendment chain
         current = supabase_admin.table('z_report_reviews').select('id,version').eq(
             'audit_id', audit_id).eq('is_current', True).maybe_single().execute()
-        amendment_of_id = current.data['id'] if current.data else None
-        next_version = (current.data['version'] + 1) if current.data else 1
+        current_data = current.data if current else None
+        amendment_of_id = current_data['id'] if current_data else None
+        next_version = (current_data['version'] + 1) if current_data else 1
 
         supabase_admin.table('z_report_reviews').update({'is_current': False}).eq(
             'audit_id', audit_id).eq('is_current', True).execute()
