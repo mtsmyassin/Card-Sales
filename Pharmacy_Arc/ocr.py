@@ -6,32 +6,45 @@ import anthropic
 
 NUMERIC_FIELDS = ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss", "variance"]
 
-EXTRACTION_PROMPT = """You are extracting data from a Puerto Rico pharmacy cash register Z Report (end-of-day batch close printout).
+EXTRACTION_PROMPT = """You are extracting data from a Puerto Rico pharmacy cash register Z Report.
 
-CRITICAL RULES:
-1. Extract values ONLY from the (close) column. Ignore (shift) and (even) columns entirely.
-2. The report has three numeric columns per row — always take the LAST (rightmost) value on each line, which is the close total.
-3. All monetary values are floats. Strip any $ signs or commas before returning.
-4. Register number is a small integer (1–15) found in the report header, e.g. "Register: 3" or "Reg #3".
-5. Date is in the header labeled "Report Date" — return as YYYY-MM-DD.
-6. Over/Short (variance): negative = cash short, positive = cash over.
-7. If a payment type is genuinely absent from this report (not just illegible), return 0.0 — not null.
-8. Return null ONLY if the value is present but you cannot read it clearly.
+REPORT STRUCTURE — READ THIS CAREFULLY:
+The payment section appears THREE times in the report:
+  Block 1: every row ends with (shift)
+  Block 2: every row ends with (close)   ← EXTRACT FROM THIS BLOCK ONLY
+  Block 3: every row ends with (even)
+Ignore blocks 1 and 3 entirely.
 
-Field mapping (label on receipt → JSON key):
+HEADER FIELDS:
+- "Register #" line → register number (small integer 1–15). Do NOT use Batch #.
+- "Report Date" line → date in header (format M/D/YYYY or M/DD/YYYY) → return as YYYY-MM-DD.
+
+NEGATIVE VALUES:
+- Values in parentheses are negative: ($19.31) → -19.31
+- Over / Short is in the SUMMARY section (before the payment blocks). Negative = cash short.
+
+FIELD MAPPING — (close) block only:
   CASH             → cash
-  ATH              → ath
+  ATH              → ath        (NOT ATH MOVIL)
   ATH MOVIL        → athm
-  VISA             → visa
-  MASTER CARD      → mc
+  VISA             → visa       (NOT MASTER CARD/ VISA)
+  MASTER CARD      → mc         (NOT MASTER CARD/ VISA — that row → ignore, add to 0.0)
   AMERICAN EXPRESS → amex
-  DISCOVER         → disc
+  DISCOVER         → disc       (if DISCOVER appears twice, sum both)
   EBT FOOD         → wic
   MCS OTC          → mcs
-  TRIPLE-S OTC     → sss
-  Over / Short     → variance
+  TRIPLE-S OTC     → sss        (any capitalisation)
 
-Return ONLY this JSON object, no explanation, no markdown:
+IGNORE these rows entirely (return 0.0 for their fields):
+  MASTER CARD/ VISA, TARJETAS, TARJETA DE FAMILI, EBT (non-food),
+  EBT CASH, GIFT CARD, CHEQUE, ATH MOVIL duplicate rows
+
+NUMERIC RULES:
+- Strip $ signs, commas, and spaces before returning floats.
+- Absent payment type → 0.0 (not null).
+- Return null ONLY if a value is present in the (close) block but truly illegible.
+
+Return ONLY this JSON, no explanation, no markdown:
 {
   "register": <int>,
   "date": "<YYYY-MM-DD>",
@@ -63,7 +76,7 @@ def extract_z_report(image_bytes: bytes) -> dict:
 
     message = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=512,
+        max_tokens=1024,
         messages=[{
             "role": "user",
             "content": [
@@ -82,13 +95,11 @@ def extract_z_report(image_bytes: bytes) -> dict:
 
     raw = message.content[0].text.strip()
 
-    # Strip markdown code fences if Claude wraps the JSON
-    if raw.startswith("```"):
-        parts = raw.split("```")
-        raw = parts[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
+    # Extract JSON object — handles preamble text, code fences, or bare JSON
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    if start != -1 and end > start:
+        raw = raw[start:end]
 
     try:
         return json.loads(raw)
