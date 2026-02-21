@@ -1666,7 +1666,7 @@ const app = {
         if(app.role==='manager' && (id!=='dash' && id!=='logs' && id!=='calendar')) return;
         document.querySelectorAll('.view,.tab-btn').forEach(e=>e.classList.remove('active')); 
         document.getElementById(id).classList.add('active'); document.getElementById('tab-'+id).classList.add('active'); 
-        if(id==='analytics')app.renderAnalytics(); if(id==='calendar')app.renderCalendar(); if(id==='logs')app.fetch(); if(id==='users')app.fetchUsers(); 
+        if(id==='analytics')app.renderAnalytics(); if(id==='calendar')app.fetch(); if(id==='logs')app.fetch(); if(id==='users')app.fetchUsers();
     },
     setupBill: () => { const d=document.getElementById('billRows'); [100,50,20,10,5,1,0.25,0.1,0.05,0.01].forEach(v=>{d.innerHTML+=`<div style="display:flex;justify-content:space-between;margin-bottom:5px"><span>$${v}</span><input type="number" class="bi" data-v="${v}" style="width:70px;padding:5px"></div>`}); d.addEventListener('input',()=>{let t=0;document.querySelectorAll('.bi').forEach(i=>t+=i.value*i.dataset.v);document.getElementById('billTotal').innerText='$'+t.toFixed(2)}) },
     addPayout: (r='',a='') => { const d=document.createElement('div');d.className='payout-row';d.innerHTML=`<div style="display:flex;gap:5px;margin-bottom:5px"><input class="p-reason" placeholder="Reason" value="${r}" style="flex:2"><input type="number" class="p-amt" placeholder="Amt" value="${a}" style="flex:1"><button onclick="this.parentElement.remove()" style="background:#fee2e2;border:1px solid #ef4444;cursor:pointer">X</button></div>`;document.getElementById('payoutList').appendChild(d)},
@@ -1679,8 +1679,9 @@ const app = {
     fetch: async () => { 
         app.showLoading();
         try {
-            app.data = await (await fetch('/api/list')).json(); 
+            app.data = await (await fetch('/api/list')).json();
             app.renderLogs();
+            app.renderCalendar();
         } catch(e) {
             console.error('Failed to fetch:', e);
             alert('Connection error. Please check your internet and try again.');
