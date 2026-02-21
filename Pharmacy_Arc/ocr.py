@@ -6,27 +6,47 @@ import anthropic
 
 NUMERIC_FIELDS = ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss", "variance"]
 
-EXTRACTION_PROMPT = """This is a pharmacy register Z Report (batch close printout).
-Extract the following values ONLY from the (close) column — ignore the (shift) and (even) columns.
-Return ONLY valid JSON with these exact keys. Use null for any value you cannot read clearly.
+EXTRACTION_PROMPT = """You are extracting data from a Puerto Rico pharmacy cash register Z Report (end-of-day batch close printout).
 
+CRITICAL RULES:
+1. Extract values ONLY from the (close) column. Ignore (shift) and (even) columns entirely.
+2. The report has three numeric columns per row — always take the LAST (rightmost) value on each line, which is the close total.
+3. All monetary values are floats. Strip any $ signs or commas before returning.
+4. Register number is a small integer (1–15) found in the report header, e.g. "Register: 3" or "Reg #3".
+5. Date is in the header labeled "Report Date" — return as YYYY-MM-DD.
+6. Over/Short (variance): negative = cash short, positive = cash over.
+7. If a payment type is genuinely absent from this report (not just illegible), return 0.0 — not null.
+8. Return null ONLY if the value is present but you cannot read it clearly.
+
+Field mapping (label on receipt → JSON key):
+  CASH             → cash
+  ATH              → ath
+  ATH MOVIL        → athm
+  VISA             → visa
+  MASTER CARD      → mc
+  AMERICAN EXPRESS → amex
+  DISCOVER         → disc
+  EBT FOOD         → wic
+  MCS OTC          → mcs
+  TRIPLE-S OTC     → sss
+  Over / Short     → variance
+
+Return ONLY this JSON object, no explanation, no markdown:
 {
-  "register": <integer register number from the header>,
-  "date": "<YYYY-MM-DD from Report Date in header>",
-  "cash": <float from CASH (close)>,
-  "ath": <float from ATH (close)>,
-  "athm": <float from ATH MOVIL (close)>,
-  "visa": <float from VISA (close)>,
-  "mc": <float from MASTER CARD (close)>,
-  "amex": <float from AMERICAN EXPRESS (close)>,
-  "disc": <float from DISCOVER (close)>,
-  "wic": <float from EBT FOOD (close)>,
-  "mcs": <float from MCS OTC (close)>,
-  "sss": <float from TRIPLE-S OTC (close)>,
-  "variance": <float from Over / Short — negative means cash short>
-}
-
-Return ONLY the JSON object, no explanation."""
+  "register": <int>,
+  "date": "<YYYY-MM-DD>",
+  "cash": <float>,
+  "ath": <float>,
+  "athm": <float>,
+  "visa": <float>,
+  "mc": <float>,
+  "amex": <float>,
+  "disc": <float>,
+  "wic": <float>,
+  "mcs": <float>,
+  "sss": <float>,
+  "variance": <float>
+}"""
 
 
 class OCRParseError(Exception):
@@ -42,7 +62,7 @@ def extract_z_report(image_bytes: bytes) -> dict:
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
 
     message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model="claude-sonnet-4-6",
         max_tokens=512,
         messages=[{
             "role": "user",
