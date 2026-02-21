@@ -1605,7 +1605,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
 
 <script>
 const app = {
-    data: [], users: [], calDate: new Date(), role: '', store: '',
+    data: [], users: [], calDate: new Date(), calInitialized: false, role: '', store: '',
     init: () => {
         app.role = localStorage.getItem('role'); app.store = localStorage.getItem('store');
         document.getElementById('userDisplay').innerText = `User: ${app.role}`;
@@ -1694,6 +1694,16 @@ const app = {
             app.hideLoading();
         }
         if (!ok) return;
+        if (!app.calInitialized && app.data.length > 0) {
+            const latest = app.data.reduce((a,b) => a.date > b.date ? a : b);
+            const parts = latest.date.split('-').map(Number);
+            app.calDate = new Date(parts[0], parts[1]-1, 1);
+            app.calInitialized = true;
+            const ms = document.getElementById('calMonthSelect');
+            const yi = document.getElementById('calYearInput');
+            if (ms) ms.value = app.calDate.getMonth();
+            if (yi) yi.value = app.calDate.getFullYear();
+        }
         app.renderLogs();
         try { app.renderCalendar(); } catch(e) { console.error('renderCalendar error:', e); }
         try { app.renderAnalytics(); } catch(e) { console.error('renderAnalytics error:', e); }
@@ -1852,7 +1862,7 @@ const app = {
         const cr=document.getElementById('regChart').getContext('2d'); if(window.regC)window.regC.destroy();
         window.regC=new Chart(cr, {type:'bar', data:{labels:Object.keys(regMap), datasets:[{data:Object.values(regMap), backgroundColor:'#6366f1', borderRadius:4, maxBarThickness: 40}]}, options:{...commonOpt, plugins:{legend:{display:false}, datalabels:{display:false}}}});
 
-        const payMap={}; f.forEach(x=>{ (x.breakdown.payoutList||[]).forEach(p=>{ payMap[p.r]=(payMap[p.r]||0)+p.a; }); });
+        const payMap={}; f.forEach(x=>{ ((x.breakdown||{}).payoutList||[]).forEach(p=>{ payMap[p.r]=(payMap[p.r]||0)+p.a; }); });
         const sortPay = Object.entries(payMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
         const cp2=document.getElementById('payoutChart').getContext('2d'); if(window.payC)window.payC.destroy();
         window.payC=new Chart(cp2, {type:'bar', indexAxis:'y', data:{labels:sortPay.map(x=>x[0]), datasets:[{data:sortPay.map(x=>x[1]), backgroundColor:'#be123c', borderRadius:4, maxBarThickness: 40}]}, options:{...commonOpt, plugins:{legend:{display:false}, datalabels:{display:false}}}});
