@@ -404,10 +404,18 @@ def login():
                     # Hashed password - verify properly
                     password_valid = password_hasher.verify_password(p, user['password'])
                 else:
-                    # Legacy plaintext password - still support but warn
+                    # Legacy plaintext password - still support but auto-upgrade
                     logger.warning(f"User {u} still using plaintext password!")
                     password_valid = (user['password'] == p)
-                
+                    if password_valid:
+                        try:
+                            hashed = password_hasher.hash_password(p)
+                            _db = supabase_admin or supabase
+                            _db.table("users").update({"password": hashed}).eq("username", u).execute()
+                            logger.info(f"[login] Auto-hashed password for {u!r}")
+                        except Exception as _he:
+                            logger.warning(f"[login] Could not auto-hash password for {u!r}: {_he}")
+
                 if password_valid:
                     # Regenerate session to prevent fixation
                     old_session = dict(session)
@@ -1485,6 +1493,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
             <div class="control-group">
                 <span class="control-label">Period</span>
                 <select id="anFilter" onchange="app.toggleCustomRange()" style="width:160px;margin:0;font-weight:600">
+                    <option value="all">All Time</option>
                     <option value="30">Last 30 Days</option>
                     <option value="7">Last 7 Days</option>
                     <option value="90">Last 90 Days</option>
@@ -1814,16 +1823,16 @@ const app = {
             rangeEnd.setHours(23,59,59,999);
         } else if (m === 'ytd') {
             rangeStart = new Date(new Date().getFullYear(), 0, 1);
-        } else {
+        } else if (m !== 'all') {
             const days = parseInt(m) || 30;
             // Fix: "Last N Days" includes today. Reset to midnight.
             rangeStart.setDate(rangeStart.getDate() - (days - 1));
             rangeStart.setHours(0, 0, 0, 0);
         }
 
-        let f = app.data; 
+        let f = app.data;
         if (s !== 'All') f = f.filter(x => x.store === s);
-        f = f.filter(x => { const d = new Date(x.date); return d >= rangeStart && d <= rangeEnd; });
+        if (m !== 'all') f = f.filter(x => { const d = new Date(x.date); return d >= rangeStart && d <= rangeEnd; });
 
         let pStart, pEnd, pLabel;
         if (m === 'ytd') {
