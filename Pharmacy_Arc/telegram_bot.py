@@ -210,8 +210,10 @@ def save_audit_entry(
     Returns the new entry id (int), or None if saved to offline queue.
     No longer stores z_report_image_path — photos go in z_report_photos table.
     """
-    from app import supabase, validate_audit_entry, save_to_queue
-    if supabase is None:
+    from app import supabase, supabase_admin, validate_audit_entry, save_to_queue
+    # Use service-role client so RLS doesn't block bot inserts
+    client = supabase_admin or supabase
+    if client is None:
         return None
 
     reg_str = _format_register_id(data.get("register"))
@@ -261,7 +263,7 @@ def save_audit_entry(
     }
 
     try:
-        result = supabase.table("audits").insert(record).execute()
+        result = client.table("audits").insert(record).execute()
         return result.data[0]["id"]
     except Exception as e:
         logger.warning(f"DB save failed, queuing offline: {e}")
