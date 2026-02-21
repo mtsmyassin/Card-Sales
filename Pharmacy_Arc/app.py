@@ -395,7 +395,7 @@ def login():
         
         # --- CHECK DATABASE ACCOUNTS ---
         try:
-            res = supabase.table("users").select("*").eq("username", u).execute()
+            res = (supabase_admin or supabase).table("users").select("*").eq("username", u).execute()
             if res.data:
                 user = res.data[0]
                 
