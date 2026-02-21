@@ -71,10 +71,13 @@ def require_auth(allowed_roles=None):
     return decorator
 
 
-def _can_access_photo(photo_store: str, user_role: str, user_store: str) -> bool:
+def _can_access_photo(photo_store, user_role: str, user_store: str) -> bool:
     """Return True if the user is authorized to access a photo from photo_store."""
     if user_role in ("admin", "super_admin"):
         return True
+    # If store is NULL in DB, only admins can access (handled above)
+    if photo_store is None:
+        return False
     return photo_store == user_store
 
 
@@ -1150,36 +1153,37 @@ def get_photo_signed_url():
     if not photo_id:
         return jsonify(error="photo_id required", code="MISSING_PARAM"), 400
 
-    # Use service-role client so RLS doesn't block server-side reads
-    _db = supabase_admin or supabase
-
-    photo_resp = _db.table("z_report_photos").select("*").eq("id", photo_id).execute()
-    if not photo_resp.data:
-        logger.warning(f"[signed_url] photo_id={photo_id} not found in z_report_photos")
-        return jsonify(error="Photo record not found", code="NOT_FOUND"), 404
-
-    photo = photo_resp.data[0]
-    storage_path = photo.get('storage_path', '')
-
-    if not _can_access_photo(photo['store'], session.get('role'), session.get('store')):
-        logger.warning(
-            f"[signed_url] IDOR attempt: user={session.get('user')!r} "
-            f"(store={session.get('store')!r}) tried photo_id={photo_id} "
-            f"(store={photo['store']!r})"
-        )
-        return jsonify(error="Not authorized", code="FORBIDDEN"), 403
-
-    if not storage_path:
-        logger.error(f"[signed_url] photo_id={photo_id} has empty storage_path")
-        return jsonify(error="Photo has no storage path", code="NO_PATH"), 500
-
-    storage_client = supabase_admin or supabase
-    logger.info(
-        f"[signed_url] Generating URL: photo_id={photo_id} "
-        f"bucket=z-reports path={storage_path!r} "
-        f"user={session.get('user')!r} using_admin={supabase_admin is not None}"
-    )
     try:
+        # Use service-role client so RLS doesn't block server-side reads
+        _db = supabase_admin or supabase
+
+        photo_resp = _db.table("z_report_photos").select("*").eq("id", photo_id).execute()
+        if not photo_resp.data:
+            logger.warning(f"[signed_url] photo_id={photo_id} not found in z_report_photos")
+            return jsonify(error="Photo record not found", code="NOT_FOUND"), 404
+
+        photo = photo_resp.data[0]
+        storage_path = photo.get('storage_path', '')
+        photo_store = photo.get('store')
+
+        if not _can_access_photo(photo_store, session.get('role'), session.get('store')):
+            logger.warning(
+                f"[signed_url] IDOR attempt: user={session.get('user')!r} "
+                f"(store={session.get('store')!r}) tried photo_id={photo_id} "
+                f"(store={photo_store!r})"
+            )
+            return jsonify(error="Not authorized", code="FORBIDDEN"), 403
+
+        if not storage_path:
+            logger.error(f"[signed_url] photo_id={photo_id} has empty storage_path")
+            return jsonify(error="Photo has no storage path", code="NO_PATH"), 500
+
+        storage_client = supabase_admin or supabase
+        logger.info(
+            f"[signed_url] Generating URL: photo_id={photo_id} "
+            f"bucket=z-reports path={storage_path!r} "
+            f"user={session.get('user')!r} using_admin={supabase_admin is not None}"
+        )
         signed = storage_client.storage.from_("z-reports").create_signed_url(
             storage_path, 3600
         )
@@ -1189,12 +1193,13 @@ def get_photo_signed_url():
             raise ValueError("create_signed_url returned empty URL")
         logger.info(f"[signed_url] Success: photo_id={photo_id} url_prefix={url[:60]!r}")
         return jsonify(url=url)
+
     except Exception as e:
         logger.error(
-            f"[signed_url] FAILED photo_id={photo_id} path={storage_path!r}: {e}",
+            f"[signed_url] FAILED photo_id={photo_id}: {e}",
             exc_info=True
         )
-        return jsonify(error="Could not generate image URL", code="STORAGE_ERROR"), 500
+        return jsonify(error=str(e), code="STORAGE_ERROR"), 500
 
 
 # --- 4. FRONTEND UI ---
@@ -1676,19 +1681,22 @@ const app = {
     resetForm: () => { document.getElementById('editId').value=''; document.getElementById('saveBtn').innerText="Finalize & Upload"; document.getElementById('saveBtn').style.background="#0097b2"; document.getElementById('cancelBtn').style.display="none"; document.getElementById('dashPanel').classList.remove('edit-mode'); document.getElementById('modeLabel').innerText="1. Store & Metadata"; document.querySelectorAll('input[type="number"]').forEach(i=>i.value=''); document.getElementById('float').value='150.00'; document.getElementById('payoutList').innerHTML=''; app.checkStore(); },
     editAudit: (idx) => { const d=app.data[idx], b=d.breakdown; document.getElementById('editId').value=d.id; document.getElementById('date').value=d.date; document.getElementById('storeLoc').value=d.store; app.checkStore(); document.getElementById('reg').value=d.reg; document.getElementById('staff').value=d.staff; Object.keys(b).forEach(k=>{if(document.getElementById(k))document.getElementById(k).value=b[k]}); document.getElementById('payoutList').innerHTML=''; (b.payoutList||[]).forEach(p=>app.addPayout(p.r,p.a)); document.getElementById('saveBtn').innerText="Update Record"; document.getElementById('saveBtn').style.background="#f59e0b"; document.getElementById('cancelBtn').style.display="inline-block"; document.getElementById('dashPanel').classList.add('edit-mode'); document.getElementById('modeLabel').innerText="EDITING RECORD #"+d.id; app.tab('dash'); window.scrollTo({ top: 0, behavior: 'smooth' }); document.getElementById('dashPanel').style.boxShadow = '0 0 20px rgba(245, 158, 11, 0.5)'; setTimeout(() => { document.getElementById('dashPanel').style.boxShadow = ''; }, 2000); },
     deleteAudit: async (id) => { if(confirm("Permanently Delete?")) { await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}); app.fetch(); } },
-    fetch: async () => { 
+    fetch: async () => {
         app.showLoading();
+        let ok = false;
         try {
             app.data = await (await fetch('/api/list')).json();
-            app.renderLogs();
-            app.renderCalendar();
-            app.renderAnalytics();
+            ok = true;
         } catch(e) {
             console.error('Failed to fetch:', e);
             alert('Connection error. Please check your internet and try again.');
         } finally {
             app.hideLoading();
         }
+        if (!ok) return;
+        app.renderLogs();
+        try { app.renderCalendar(); } catch(e) { console.error('renderCalendar error:', e); }
+        try { app.renderAnalytics(); } catch(e) { console.error('renderAnalytics error:', e); }
     },
     renderLogs: () => { app.filterHistory(); },
     filterHistory: () => { const r=document.getElementById('histRange').value, d=document.getElementById('historyFilter').value, s=(app.role!=='staff')?document.getElementById('histStoreFilter').value:app.store; let f=app.data; if(s&&s!=='All')f=f.filter(x=>x.store===s); const afterStore=f.length; if(r==='custom'){if(d)f=f.filter(x=>x.date===d)}else{const days=parseInt(r), cut=new Date(); cut.setDate(cut.getDate()-days); if(days===0)f=f.filter(x=>x.date===new Date().toISOString().split('T')[0]); else if(days!==9999)f=f.filter(x=>new Date(x.date)>=cut);} const hidden=afterStore-f.length; const hd=document.getElementById('histHidden'); if(hd){if(hidden>0){hd.textContent=`⚠️ ${hidden} entr${hidden===1?'y':'ies'} hidden by date filter — select "All" to see them.`;hd.style.display='block';}else{hd.style.display='none';}} app.renderTable(f); },
