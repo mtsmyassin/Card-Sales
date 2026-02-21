@@ -833,6 +833,7 @@ def diagnostics():
             "database": {
                 "status": db_status,
                 "url": SUPABASE_URL[:30] + "..." if len(SUPABASE_URL) > 30 else SUPABASE_URL,
+                "admin_client": "configured" if supabase_admin is not None else "NOT SET — bot inserts will fail RLS",
             },
             "audit_log": {
                 "integrity": "valid" if audit_valid else "FAILED",
@@ -850,14 +851,15 @@ def diagnostics():
             "session": session_info,
         }
 
-        # Storage diagnostics
+        # Storage diagnostics — prefer admin client to bypass RLS on bucket listing
+        _storage_client = supabase_admin or supabase
         storage_info = {
             "z_reports_bucket": "unknown",
             "photos_total": 0,
             "photos_missing_path": 0,
         }
         try:
-            supabase.storage.from_("z-reports").list("")
+            _storage_client.storage.from_("z-reports").list("")
             storage_info["z_reports_bucket"] = "exists"
         except Exception as bucket_err:
             storage_info["z_reports_bucket"] = f"error: {bucket_err}"
