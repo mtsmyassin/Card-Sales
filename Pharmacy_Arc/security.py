@@ -47,12 +47,12 @@ class PasswordHasher:
 
 class LoginAttemptTracker:
     """Track and limit login attempts to prevent brute-force attacks with persistent storage."""
-    
-    def __init__(self, max_attempts: int = 5, lockout_duration_minutes: int = 15, 
+
+    def __init__(self, max_attempts: int = 5, lockout_duration_minutes: int = 15,
                  state_file: str = 'lockout_state.json'):
         """
         Initialize the login attempt tracker with persistent storage.
-        
+
         Args:
             max_attempts: Maximum failed attempts before lockout
             lockout_duration_minutes: Duration of lockout in minutes
@@ -64,39 +64,106 @@ class LoginAttemptTracker:
         self._attempts: Dict[str, list] = {}  # username -> list of attempt timestamps
         self._lockouts: Dict[str, datetime] = {}  # username -> lockout expiry time
         self._lock = Lock()
-        
-        # Load persisted state on initialization
+        self._supabase = None  # Set via configure_db() after Supabase client is ready
+
+        # Load persisted state on initialization (file-based until DB is configured)
+        self._load_state()
+
+    def configure_db(self, supabase_client) -> None:
+        """
+        Switch to Supabase-backed persistence. Call this after the Supabase client
+        is initialised in app.py. Re-loads state from the DB immediately so any
+        active lockouts are honoured even after a Railway redeploy.
+
+        Required table (run once in Supabase SQL editor):
+            CREATE TABLE IF NOT EXISTS login_lockouts (
+                username    TEXT PRIMARY KEY,
+                attempts    TEXT[] DEFAULT '{}',
+                locked_until TIMESTAMPTZ
+            );
+        """
+        self._supabase = supabase_client
+        with self._lock:
+            self._attempts = {}
+            self._lockouts = {}
         self._load_state()
     
     def _load_state(self) -> None:
-        """Load lockout state from file if it exists."""
+        """Load lockout state — from Supabase if configured, otherwise from file."""
+        if self._supabase:
+            self._load_from_db()
+        else:
+            self._load_from_file()
+
+    def _save_state(self) -> None:
+        """Persist lockout state — to Supabase if configured, otherwise to file."""
+        if self._supabase:
+            self._save_to_db()
+        else:
+            self._save_to_file()
+
+    def _load_from_db(self) -> None:
+        """Load lockout state from Supabase login_lockouts table."""
+        try:
+            resp = self._supabase.table('login_lockouts').select('*').execute()
+            now = datetime.now()
+            for row in resp.data:
+                username = row['username']
+                if row.get('attempts'):
+                    self._attempts[username] = [
+                        datetime.fromisoformat(ts) for ts in row['attempts']
+                    ]
+                if row.get('locked_until'):
+                    expiry = datetime.fromisoformat(
+                        row['locked_until'].replace('Z', '+00:00')
+                    ).replace(tzinfo=None)
+                    if expiry > now:
+                        self._lockouts[username] = expiry
+        except Exception as e:
+            print(f"Warning: Could not load lockout state from DB: {e}")
+
+    def _save_to_db(self) -> None:
+        """Persist lockout state to Supabase login_lockouts table."""
+        try:
+            all_users = set(list(self._attempts.keys()) + list(self._lockouts.keys()))
+            for username in all_users:
+                attempts_list = [
+                    ts.isoformat() for ts in self._attempts.get(username, [])
+                ]
+                locked_until = (
+                    self._lockouts[username].isoformat()
+                    if username in self._lockouts else None
+                )
+                self._supabase.table('login_lockouts').upsert({
+                    'username': username,
+                    'attempts': attempts_list,
+                    'locked_until': locked_until,
+                }).execute()
+        except Exception as e:
+            print(f"Warning: Could not save lockout state to DB: {e}")
+
+    def _load_from_file(self) -> None:
+        """Load lockout state from local JSON file (dev / fallback)."""
         try:
             if os.path.exists(self.state_file):
                 with open(self.state_file, 'r') as f:
                     data = json.load(f)
-                
-                # Restore attempts (convert ISO strings back to datetime)
                 for username, timestamps in data.get('attempts', {}).items():
                     self._attempts[username] = [
                         datetime.fromisoformat(ts) for ts in timestamps
                     ]
-                
-                # Restore lockouts (convert ISO strings back to datetime)
                 for username, expiry in data.get('lockouts', {}).items():
                     expiry_time = datetime.fromisoformat(expiry)
-                    # Only restore if not expired
                     if expiry_time > datetime.now():
                         self._lockouts[username] = expiry_time
         except Exception as e:
-            # If state file is corrupted, start fresh
-            print(f"Warning: Could not load lockout state: {e}")
+            print(f"Warning: Could not load lockout state from file: {e}")
             self._attempts = {}
             self._lockouts = {}
-    
-    def _save_state(self) -> None:
-        """Persist lockout state to file."""
+
+    def _save_to_file(self) -> None:
+        """Persist lockout state to local JSON file (dev / fallback)."""
         try:
-            # Convert datetimes to ISO strings for JSON serialization
             data = {
                 'attempts': {
                     username: [ts.isoformat() for ts in timestamps]
@@ -107,16 +174,12 @@ class LoginAttemptTracker:
                     for username, expiry in self._lockouts.items()
                 }
             }
-            
-            # Write atomically (write to temp file, then rename)
             temp_file = self.state_file + '.tmp'
             with open(temp_file, 'w') as f:
                 json.dump(data, f, indent=2)
-            
-            # Atomic rename
             os.replace(temp_file, self.state_file)
         except Exception as e:
-            print(f"Warning: Could not save lockout state: {e}")
+            print(f"Warning: Could not save lockout state to file: {e}")
     
     def is_locked_out(self, username: str) -> bool:
         """

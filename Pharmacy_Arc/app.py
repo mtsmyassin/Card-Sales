@@ -151,6 +151,15 @@ if _service_key:
     except Exception as e:
         logger.warning(f"Supabase admin client init failed: {e}")
 
+# Switch lockout tracker to Supabase-backed persistence so lockouts survive
+# Railway redeploys (ephemeral filesystem would wipe the local file on every deploy).
+_lockout_db = supabase_admin or supabase
+if _lockout_db:
+    login_tracker.configure_db(_lockout_db)
+    logger.info("Login lockout tracker configured with Supabase persistence")
+else:
+    logger.warning("Login lockout tracker using local file (no Supabase client available)")
+
 # --- INPUT VALIDATION HELPERS ---
 def validate_audit_entry(data: dict) -> tuple[bool, str]:
     """
@@ -508,10 +517,30 @@ def save():
         if not is_valid:
             logger.warning(f"Invalid audit entry data from {session.get('user')}: {error_msg}")
             return jsonify(error=error_msg), 400
-        
+
+        # Duplicate check — use admin client so RLS doesn't hide existing entries
+        _dup_db = supabase_admin or supabase
+        try:
+            dup = _dup_db.table("audits").select("id") \
+                .eq("date", d['date']) \
+                .eq("store", d.get('store', 'Main')) \
+                .eq("reg", d['reg']) \
+                .execute()
+            if dup.data:
+                logger.warning(
+                    f"[save] Duplicate entry rejected: user={session.get('user')!r} "
+                    f"date={d['date']} store={d.get('store')} reg={d['reg']}"
+                )
+                return jsonify(
+                    error=f"Duplicate: a record for {d['date']} / {d.get('store')} / {d['reg']} already exists.",
+                    code="DUPLICATE"
+                ), 409
+        except Exception as e:
+            logger.warning(f"[save] Duplicate check failed (proceeding): {e}")
+
         username = session.get('user')
         role = session.get('role')
-        
+
         record = {
             "date": d['date'], 
             "reg": d['reg'], 
@@ -760,18 +789,18 @@ def list_audits():
 
         _db = supabase_admin or supabase
         logger.info(f"[list_audits] using_admin={supabase_admin is not None}")
-        response = _db.table("audits").select("*").order("date", desc=True).limit(2000).execute()
 
-        # Filter by store access
-        allowed_rows = [
-            r for r in response.data
-            if user_role in ('admin', 'super_admin') or r.get('store') == user_store
-        ]
+        # Push store filter to DB for non-admin users — avoids fetching all rows
+        query = _db.table("audits").select("*").order("date", desc=True).limit(2000)
+        if user_role not in ('admin', 'super_admin'):
+            query = query.eq("store", user_store)
+        response = query.execute()
+        allowed_rows = response.data
 
         logger.info(
             f"[list_audits] user={user!r} role={user_role!r} store={user_store!r} "
             f"using_admin={supabase_admin is not None} "
-            f"total_audits={len(response.data)} allowed={len(allowed_rows)}"
+            f"rows_returned={len(allowed_rows)}"
         )
 
         # Batch-fetch photo counts using service-role client to bypass RLS
@@ -1219,6 +1248,50 @@ def get_photo_signed_url():
             exc_info=True
         )
         return jsonify(error=str(e), code="STORAGE_ERROR"), 500
+
+
+@app.route('/api/zreport/photo/<int:photo_id>', methods=['DELETE'])
+@require_auth(['manager', 'admin', 'super_admin'])
+def delete_photo(photo_id):
+    """Delete a Z-report photo from storage and DB (manager/admin only)."""
+    try:
+        _db = supabase_admin or supabase
+        photo_resp = _db.table("z_report_photos").select("*") \
+            .eq("id", photo_id).maybe_single().execute()
+
+        if not photo_resp.data:
+            return jsonify(error="Photo not found", code="NOT_FOUND"), 404
+
+        # IDOR check — non-admins can only delete photos from their own store
+        photo_store = photo_resp.data.get('store')
+        user_store = session.get('store')
+        user_role = session.get('role')
+        if user_role not in ('admin', 'super_admin') and photo_store != user_store:
+            logger.warning(
+                f"[delete_photo] IDOR attempt: user={session.get('user')!r} "
+                f"(store={user_store!r}) tried photo_id={photo_id} (store={photo_store!r})"
+            )
+            return jsonify(error="Not authorized", code="FORBIDDEN"), 403
+
+        # Remove from Supabase Storage (non-fatal if file already gone)
+        storage_path = photo_resp.data.get('storage_path', '')
+        if storage_path:
+            try:
+                (supabase_admin or supabase).storage.from_("z-reports").remove([storage_path])
+                logger.info(f"[delete_photo] Removed storage file: {storage_path!r}")
+            except Exception as e:
+                logger.warning(f"[delete_photo] Storage removal failed (continuing): {e}")
+
+        # Delete DB record
+        _db.table("z_report_photos").delete().eq("id", photo_id).execute()
+        logger.info(
+            f"[delete_photo] photo_id={photo_id} deleted by {session.get('user')!r}"
+        )
+        return jsonify(status="deleted")
+
+    except Exception as e:
+        logger.error(f"[delete_photo] Error: {e}", exc_info=True)
+        return jsonify(error=str(e), code="DELETE_ERROR"), 500
 
 
 # ── Z REPORT REVIEW UTILITIES ─────────────────────────────────────────────────
@@ -1806,6 +1879,23 @@ input:focus,select:focus{outline:none;border-color:var(--p);box-shadow:0 0 0 3px
     .control-bar select, .control-bar input { flex:1; }
 }
 
+/* MOBILE SIDEBAR */
+#menuToggle { display:none; }
+@media (max-width:768px) {
+    #menuToggle {
+        display:block; position:fixed; top:12px; left:12px; z-index:200;
+        background:var(--sidebar); color:white; border:none; border-radius:8px;
+        padding:8px 12px; font-size:20px; cursor:pointer; line-height:1;
+        box-shadow:0 2px 8px rgba(0,0,0,0.25);
+    }
+    .sidebar {
+        transform:translateX(-100%);
+        transition:transform 0.25s ease;
+    }
+    .sidebar.open { transform:translateX(0); }
+    .main-content { margin-left:0 !important; padding:20px 14px; padding-top:56px; }
+}
+
 table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;border-bottom:1px solid #f1f5f9; font-weight:600;}
 .hidden{display:none !important;}
 
@@ -1846,6 +1936,8 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
 </div>
 
 <img src="data:image/png;base64,{{logo}}" class="watermark">
+
+<button id="menuToggle" onclick="app.toggleMenu()" aria-label="Open menu">&#9776;</button>
 
 <div class="sidebar">
     <div class="sidebar-logo">
@@ -1948,7 +2040,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
                         <div id="tGross" style="font-size:12px;font-weight:700;margin-top:5px"></div>
                     </div>
                     <div class="kpi-card kpi-accent-green">
-                        <div class="kpi-label">Net Profit (Est)</div>
+                        <div class="kpi-label">Net (Gross − Payouts)</div>
                         <div class="kpi-val" id="kNet">-</div>
                         <div id="tNet" style="font-size:12px;font-weight:700;margin-top:5px"></div>
                     </div>
@@ -2013,7 +2105,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
             <h3>Entry Log</h3>
             <div style="display:flex;gap:10px;">
-                <select id="histRange" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="30">Last 30 Days</option><option value="7">Last 7 Days</option><option value="0">Today</option><option value="custom">Custom</option><option value="9999">All</option></select>
+                <select id="histRange" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="9999" selected>All</option><option value="30">Last 30 Days</option><option value="7">Last 7 Days</option><option value="0">Today</option><option value="custom">Custom</option></select>
                 <input type="date" id="historyFilter" onchange="document.getElementById('histRange').value='custom';app.filterHistory()" style="margin:0;padding:5px;">
                 <select id="histStoreFilter" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="All">All Stores</option><option>Carimas #1</option><option>Carimas #2</option><option>Carimas #3</option><option>Carimas #4</option><option>Carthage</option></select>
                 <button onclick="app.fetch()" class="btn-main" style="padding:7px 14px;font-size:12px;width:auto;">↻ Refresh</button>
@@ -2153,7 +2245,9 @@ const app = {
         document.getElementById(id).classList.add('active'); document.getElementById('tab-'+id).classList.add('active');
         if(id==='analytics'||id==='calendar'||id==='logs')app.fetch(); if(id==='users')app.fetchUsers();
         if(id==='zreviews')app.zr.fetchList();
+        document.querySelector('.sidebar').classList.remove('open');
     },
+    toggleMenu: () => { document.querySelector('.sidebar').classList.toggle('open'); },
     setupBill: () => { const d=document.getElementById('billRows'); [100,50,20,10,5,1,0.25,0.1,0.05,0.01].forEach(v=>{d.innerHTML+=`<div style="display:flex;justify-content:space-between;margin-bottom:5px"><span>$${v}</span><input type="number" class="bi" data-v="${v}" style="width:70px;padding:5px"></div>`}); d.addEventListener('input',()=>{let t=0;document.querySelectorAll('.bi').forEach(i=>t+=i.value*i.dataset.v);document.getElementById('billTotal').innerText='$'+t.toFixed(2)}) },
     addPayout: (r='',a='') => { const d=document.createElement('div');d.className='payout-row';d.innerHTML=`<div style="display:flex;gap:5px;margin-bottom:5px"><input class="p-reason" placeholder="Reason" value="${r}" style="flex:2"><input type="number" class="p-amt" placeholder="Amt" value="${a}" style="flex:1"><button onclick="this.parentElement.remove()" style="background:#fee2e2;border:1px solid #ef4444;cursor:pointer">X</button></div>`;document.getElementById('payoutList').appendChild(d)},
     calcTax: () => { const c=parseFloat(document.getElementById('cash').value||0); document.getElementById('taxState').value=(c*0.105).toFixed(2); document.getElementById('taxCity').value=(c*0.01).toFixed(2); },
@@ -2241,12 +2335,33 @@ const app = {
         const next = document.getElementById('zreportNext');
         if (prev) prev.style.display = idx > 0 ? 'block' : 'none';
         if (next) next.style.display = idx < photos.length - 1 ? 'block' : 'none';
+        const delBtn = document.getElementById('zreportDeleteBtn');
+        if (delBtn) delBtn.style.display = ['manager','admin','super_admin'].includes(app.role) ? 'inline-block' : 'none';
     },
     galleryNav: async (dir) => {
         const idx = app._galleryIdx + dir;
         if (idx < 0 || idx >= app._galleryPhotos.length) return;
         app._galleryIdx = idx;
         await app._showGalleryPhoto(idx);
+    },
+    deleteCurrentPhoto: async () => {
+        const photo = app._galleryPhotos[app._galleryIdx];
+        if (!photo || !confirm('Permanently delete this photo?')) return;
+        const resp = await fetch(`/api/zreport/photo/${photo.id}`, { method: 'DELETE' });
+        if (!resp.ok) {
+            const err = await resp.json().catch(()=>({}));
+            alert('Delete failed: ' + (err.error || resp.status));
+            return;
+        }
+        app._galleryPhotos.splice(app._galleryIdx, 1);
+        if (!app._galleryPhotos.length) {
+            document.getElementById('zreportModal').style.display = 'none';
+            app.fetch();
+            return;
+        }
+        app._galleryIdx = Math.min(app._galleryIdx, app._galleryPhotos.length - 1);
+        await app._showGalleryPhoto(app._galleryIdx);
+        app.fetch();
     },
     print: async (idx) => { const d=app.data[idx], b=d.breakdown||{}, val=v=>(v||0).toFixed(2), logo='data:image/png;base64,'+(await(await fetch('/api/get_logo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({store:d.store})})).json()).logo; const w=window.open('','','height=700,width=500'); w.document.write(`<html><head><style>body{font-family:monospace;padding:20px;font-weight:bold}.row{display:flex;justify-content:space-between;border-bottom:1px dotted #ccc;padding:5px 0}h2,h4{text-align:center;margin:5px 0}</style></head><body><div style="text-align:center;margin-bottom:10px"><img src="${logo}" style="max-height:80px;display:block;margin:0 auto"></div><h2>${d.store==='Carthage'?'Carthage Express':'Farmacia Carimas'}</h2><h4>${d.store} Audit</h4><br><div class="row"><span>Date:</span><span>${d.date}</span></div><div class="row"><span>Staff:</span><span>${d.staff||'N/A'}</span></div><br><div class="row"><strong>Cash Sales:</strong><span>$${val(b.cash)}</span></div><div class="row"><span>Cards (Combined):</span><span>$${val((d.gross||0)-(b.cash||0))}</span></div><br><div class="row"><span>State Tax:</span><span>$${val(b.taxState)}</span></div><div class="row"><span>City Tax:</span><span>$${val(b.taxCity)}</span></div>${(b.payoutList||[]).map(p=>`<div class="row"><span>${p.r}</span><span>$${val(p.a)}</span></div>`).join('')}<br><div class="row"><strong>Total Payouts:</strong><span>$${val(b.payouts)}</span></div><div class="row"><strong>Actual Cash:</strong><span>$${val(b.actual)}</span></div><br><div class="row" style="border-top:2px solid black;font-size:1.2em"><strong>VARIANCE:</strong><strong>$${d.variance}</strong></div><br><br><br><div style="text-align:center">________________________<br>Manager Signature</div></body></html>`); w.document.close(); setTimeout(()=>w.print(),500); },
     setupCalControls: () => { const m=document.getElementById('calMonthSelect'); ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].forEach((x,i)=>m.innerHTML+=`<option value="${i}">${x}</option>`); app.updateCalView(); },
@@ -2548,6 +2663,7 @@ app.init();
       <span>📅 <span data-date></span></span>
       <span>👤 <span data-by></span></span>
       <span>🕐 <span data-at></span></span>
+      <button id="zreportDeleteBtn" onclick="app.deleteCurrentPhoto()" style="display:none;margin-left:auto;background:#fee2e2;border:1px solid #ef4444;color:#b91c1c;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-weight:700;">🗑 Delete</button>
     </div>
   </div>
 </div>
