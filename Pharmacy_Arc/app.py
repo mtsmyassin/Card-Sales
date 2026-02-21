@@ -747,7 +747,9 @@ def list_audits():
         user_role = session.get('role')
         user = session.get('user')
 
-        response = supabase.table("audits").select("*").order("date", desc=True).limit(2000).execute()
+        _db = supabase_admin or supabase
+        logger.info(f"[list_audits] using_admin={supabase_admin is not None}")
+        response = _db.table("audits").select("*").order("date", desc=True).limit(2000).execute()
 
         # Filter by store access
         allowed_rows = [
@@ -757,12 +759,12 @@ def list_audits():
 
         logger.info(
             f"[list_audits] user={user!r} role={user_role!r} store={user_store!r} "
+            f"using_admin={supabase_admin is not None} "
             f"total_audits={len(response.data)} allowed={len(allowed_rows)}"
         )
 
         # Batch-fetch photo counts using service-role client to bypass RLS
         photo_counts: dict = {}
-        _db = supabase_admin or supabase
         if allowed_rows:
             entry_ids = [r['id'] for r in allowed_rows]
             photo_resp = _db.table("z_report_photos") \
@@ -1551,6 +1553,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
             </div>
         </div>
         <div id="logTable" style="max-height:600px;overflow-y:auto"></div>
+        <div id="histHidden" style="display:none;margin-top:8px;padding:6px 10px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:13px;color:#92400e"></div>
     </div>
 </div>
 
@@ -1679,13 +1682,15 @@ const app = {
         }
     },
     renderLogs: () => { app.filterHistory(); },
-    filterHistory: () => { const r=document.getElementById('histRange').value, d=document.getElementById('historyFilter').value, s=(app.role!=='staff')?document.getElementById('histStoreFilter').value:app.store; let f=app.data; if(s&&s!=='All')f=f.filter(x=>x.store===s); if(r==='custom'){if(d)f=f.filter(x=>x.date===d)}else{const days=parseInt(r), cut=new Date(); cut.setDate(cut.getDate()-days); if(days===0)f=f.filter(x=>x.date===new Date().toISOString().split('T')[0]); else if(days!==9999)f=f.filter(x=>new Date(x.date)>=cut);} app.renderTable(f); },
+    filterHistory: () => { const r=document.getElementById('histRange').value, d=document.getElementById('historyFilter').value, s=(app.role!=='staff')?document.getElementById('histStoreFilter').value:app.store; let f=app.data; if(s&&s!=='All')f=f.filter(x=>x.store===s); const afterStore=f.length; if(r==='custom'){if(d)f=f.filter(x=>x.date===d)}else{const days=parseInt(r), cut=new Date(); cut.setDate(cut.getDate()-days); if(days===0)f=f.filter(x=>x.date===new Date().toISOString().split('T')[0]); else if(days!==9999)f=f.filter(x=>new Date(x.date)>=cut);} const hidden=afterStore-f.length; const hd=document.getElementById('histHidden'); if(hd){if(hidden>0){hd.textContent=`⚠️ ${hidden} entr${hidden===1?'y':'ies'} hidden by date filter — select "All" to see them.`;hd.style.display='block';}else{hd.style.display='none';}} app.renderTable(f); },
     renderTable: (rows) => { let h='<table><tr><th>Date</th><th>Store</th><th>Gross</th><th>Var</th><th>Actions</th></tr>'; rows.forEach(d=>{ const i=app.data.indexOf(d), camBtn=d.photo_count>0?`<button onclick="app.viewZReport(${d.id})" class="action-btn btn-cam" title="Ver ${d.photo_count} foto(s)">📷(${d.photo_count})</button>`:'', acts=(app.role==='staff')?`<button onclick="app.print(${i})" class="action-btn btn-print">🖨 Print</button>`:`<button onclick="app.print(${i})" class="action-btn btn-print">🖨</button><button onclick="app.editAudit(${i})" class="action-btn btn-edit">✏️</button><button onclick="app.deleteAudit(${d.id})" class="action-btn btn-del">🗑</button>${camBtn}`; h+=`<tr><td>${d.date}</td><td>${d.store}</td><td>$${(d.gross||0).toFixed(2)}</td><td style="color:${d.variance<0?'#be123c':'#047857'};font-weight:800">$${d.variance}</td><td>${acts}</td></tr>`;}); document.getElementById('logTable').innerHTML=h+'</table>'; },
     viewZReport: async (auditId) => {
         try {
             const photosResp = await fetch(`/api/zreport/photos?entry_id=${auditId}`);
             if (!photosResp.ok) {
-                alert(photosResp.status === 403 ? 'No autorizado.' : 'No hay imagen para esta entrada.');
+                const errJson = await photosResp.json().catch(()=>({}));
+                console.error('[viewZReport] photos fetch failed:', photosResp.status, errJson);
+                alert(photosResp.status === 403 ? 'No autorizado.' : `No hay imagen para esta entrada. [${errJson.code||photosResp.status}]`);
                 return;
             }
             const photos = await photosResp.json();
@@ -1693,7 +1698,9 @@ const app = {
             const photo = photos[0];
             const urlResp = await fetch(`/api/zreport/signed_url?photo_id=${photo.id}`);
             if (!urlResp.ok) {
-                alert(urlResp.status === 403 ? 'No autorizado.' : 'Error cargando imagen.');
+                const errJson = await urlResp.json().catch(()=>({}));
+                console.error('[viewZReport] signed_url failed:', urlResp.status, errJson);
+                alert(urlResp.status === 403 ? 'No autorizado.' : `Error cargando imagen [${errJson.code||urlResp.status}]: ${errJson.error||'Unknown error'}`);
                 return;
             }
             const { url } = await urlResp.json();
@@ -1707,7 +1714,7 @@ const app = {
                 meta.querySelector('[data-at]').textContent = new Date(photo.uploaded_at).toLocaleString('es-PR');
             }
             document.getElementById('zreportModal').style.display = 'flex';
-        } catch(e) { alert('Error cargando imagen.'); }
+        } catch(e) { console.error('[viewZReport] unexpected error:', e); alert('Error cargando imagen: ' + e.toString()); }
     },
     print: async (idx) => { const d=app.data[idx], b=d.breakdown||{}, val=v=>(v||0).toFixed(2), logo='data:image/png;base64,'+(await(await fetch('/api/get_logo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({store:d.store})})).json()).logo; const w=window.open('','','height=700,width=500'); w.document.write(`<html><head><style>body{font-family:monospace;padding:20px;font-weight:bold}.row{display:flex;justify-content:space-between;border-bottom:1px dotted #ccc;padding:5px 0}h2,h4{text-align:center;margin:5px 0}</style></head><body><div style="text-align:center;margin-bottom:10px"><img src="${logo}" style="max-height:80px;display:block;margin:0 auto"></div><h2>${d.store==='Carthage'?'Carthage Express':'Farmacia Carimas'}</h2><h4>${d.store} Audit</h4><br><div class="row"><span>Date:</span><span>${d.date}</span></div><div class="row"><span>Staff:</span><span>${d.staff||'N/A'}</span></div><br><div class="row"><strong>Cash Sales:</strong><span>$${val(b.cash)}</span></div><div class="row"><span>Cards (Combined):</span><span>$${val((d.gross||0)-(b.cash||0))}</span></div><br><div class="row"><span>State Tax:</span><span>$${val(b.taxState)}</span></div><div class="row"><span>City Tax:</span><span>$${val(b.taxCity)}</span></div>${(b.payoutList||[]).map(p=>`<div class="row"><span>${p.r}</span><span>$${val(p.a)}</span></div>`).join('')}<br><div class="row"><strong>Total Payouts:</strong><span>$${val(b.payouts)}</span></div><div class="row"><strong>Actual Cash:</strong><span>$${val(b.actual)}</span></div><br><div class="row" style="border-top:2px solid black;font-size:1.2em"><strong>VARIANCE:</strong><strong>$${d.variance}</strong></div><br><br><br><div style="text-align:center">________________________<br>Manager Signature</div></body></html>`); w.document.close(); setTimeout(()=>w.print(),500); },
     setupCalControls: () => { const m=document.getElementById('calMonthSelect'); ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].forEach((x,i)=>m.innerHTML+=`<option value="${i}">${x}</option>`); app.updateCalView(); },
