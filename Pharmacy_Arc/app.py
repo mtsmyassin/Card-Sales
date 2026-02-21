@@ -1221,6 +1221,432 @@ def get_photo_signed_url():
         return jsonify(error=str(e), code="STORAGE_ERROR"), 500
 
 
+# ── Z REPORT REVIEW UTILITIES ─────────────────────────────────────────────────
+
+_ZR_PAYMENT_FIELDS = ['cash', 'ath', 'athm', 'visa', 'mc', 'amex', 'disc', 'wic', 'mcs', 'sss']
+
+VALID_REVIEW_STATUSES = (
+    'NEEDS_ASSIGNMENT', 'PENDING_REVIEW', 'IN_REVIEW',
+    'FINAL_APPROVED', 'REJECTED', 'DUPLICATE', 'AMENDED'
+)
+
+
+def _zr_recalculate(breakdown: dict, payouts_total: float, cash_actual: float) -> dict:
+    """Recalculate gross, net, variance from raw breakdown. Raises ValueError on bad data."""
+    opening_float = float(breakdown.get('float', 100.0))
+    cash = float(breakdown.get('cash', 0))
+    gross = sum(float(breakdown.get(f, 0)) for f in _ZR_PAYMENT_FIELDS)
+    net = gross - payouts_total
+    variance = (cash_actual - opening_float) - (cash - payouts_total)
+    if payouts_total > gross + 0.01:
+        raise ValueError(f"payouts_total {payouts_total:.2f} exceeds gross {gross:.2f}")
+    return {
+        'gross': round(gross, 2),
+        'net': round(net, 2),
+        'variance': round(variance, 2),
+        'opening_float': round(opening_float, 2),
+    }
+
+
+def _zr_validate_breakdown(payouts_total: float, payouts_breakdown: dict | None) -> None:
+    """Assert payouts_breakdown values sum to payouts_total. Raises ValueError on mismatch."""
+    if not payouts_breakdown:
+        return
+    total = sum(float(v) for v in payouts_breakdown.values())
+    if abs(total - payouts_total) > 0.01:
+        raise ValueError(
+            f"payouts_breakdown sum {total:.2f} != payouts_total {payouts_total:.2f}"
+        )
+
+
+def _zr_log(db_client, audit_id: int, action: str, actor: str,
+            ip: str = None, old_val: dict = None, new_val: dict = None,
+            reason: str = None) -> None:
+    """Append a row to z_report_audit_log. Swallows errors to avoid blocking main flow."""
+    try:
+        db_client.table('z_report_audit_log').insert({
+            'audit_id': audit_id,
+            'action': action,
+            'actor_username': actor,
+            'actor_ip': ip,
+            'old_val': old_val,
+            'new_val': new_val,
+            'reason': reason,
+        }).execute()
+    except Exception as e:
+        logger.error(f"[zr_log] Failed to write audit log for audit_id={audit_id}: {e}")
+
+
+# ── Z REPORT REVIEW API ───────────────────────────────────────────────────────
+
+@app.route('/api/z-reports')
+@require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+def zr_list():
+    """List audits with review status, optional ?status= filter."""
+    status_filter = request.args.get('status')
+    try:
+        q = supabase_admin.table('audits').select(
+            'id,store,date,review_status,review_locked_by,review_locked_at'
+        ).order('date', desc=True)
+        if status_filter and status_filter in VALID_REVIEW_STATUSES:
+            q = q.eq('review_status', status_filter)
+        result = q.execute()
+        return jsonify(result.data)
+    except Exception as e:
+        logger.error(f"[zr_list] {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
+
+
+@app.route('/api/z-reports/<int:audit_id>')
+@require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+def zr_detail(audit_id: int):
+    """Return audit row plus current review record."""
+    try:
+        audit = supabase_admin.table('audits').select('*').eq('id', audit_id).single().execute()
+        review = supabase_admin.table('z_report_reviews').select('*').eq(
+            'audit_id', audit_id).eq('is_current', True).maybe_single().execute()
+        return jsonify({'audit': audit.data, 'review': review.data})
+    except Exception as e:
+        logger.error(f"[zr_detail] audit_id={audit_id}: {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
+
+
+@app.route('/api/z-reports/<int:audit_id>/lock', methods=['POST'])
+@require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+def zr_lock(audit_id: int):
+    """Lock an audit for review by the current user."""
+    actor = session['user']
+    ip = request.remote_addr
+    try:
+        audit = supabase_admin.table('audits').select(
+            'id,review_status,review_locked_by,review_locked_at'
+        ).eq('id', audit_id).single().execute().data
+
+        status = audit['review_status']
+        locked_by = audit.get('review_locked_by')
+        locked_at = audit.get('review_locked_at')
+
+        if status in ('PENDING_REVIEW', 'NEEDS_ASSIGNMENT'):
+            pass  # always lockable
+        elif status == 'IN_REVIEW':
+            if locked_by == actor:
+                pass  # re-locking own audit is fine
+            else:
+                # Another user holds the lock — check if it's expired
+                from datetime import timezone
+                lock_time = datetime.fromisoformat(
+                    locked_at.replace('Z', '+00:00')
+                ) if locked_at else None
+                if lock_time and datetime.now(timezone.utc) - lock_time < timedelta(minutes=30):
+                    return jsonify(
+                        error=f"Audit is locked by {locked_by}"
+                    ), 409
+                # Lock expired — allow stealing it
+        else:
+            return jsonify(error=f"Cannot lock audit in status '{status}'"), 409
+
+        old_status = audit['review_status']
+        supabase_admin.table('audits').update({
+            'review_status': 'IN_REVIEW',
+            'review_locked_by': actor,
+            'review_locked_at': datetime.utcnow().isoformat(),
+        }).eq('id', audit_id).execute()
+
+        _zr_log(supabase_admin, audit_id, 'LOCK', actor, ip=ip,
+                old_val={'review_status': old_status},
+                new_val={'review_status': 'IN_REVIEW', 'locked_by': actor})
+        return jsonify(ok=True)
+    except Exception as e:
+        logger.error(f"[zr_lock] audit_id={audit_id}: {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
+
+
+@app.route('/api/z-reports/<int:audit_id>/lock', methods=['DELETE'])
+@require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+def zr_unlock(audit_id: int):
+    """Release the review lock on an audit."""
+    actor = session['user']
+    role = session.get('role')
+    ip = request.remote_addr
+    try:
+        audit = supabase_admin.table('audits').select(
+            'id,review_status,review_locked_by'
+        ).eq('id', audit_id).single().execute().data
+
+        if audit['review_status'] != 'IN_REVIEW':
+            return jsonify(error="Audit is not IN_REVIEW"), 409
+
+        if audit['review_locked_by'] != actor and role not in ('admin', 'super_admin'):
+            return jsonify(error="You do not hold the lock on this audit"), 403
+
+        supabase_admin.table('audits').update({
+            'review_status': 'PENDING_REVIEW',
+            'review_locked_by': None,
+            'review_locked_at': None,
+        }).eq('id', audit_id).execute()
+
+        _zr_log(supabase_admin, audit_id, 'UNLOCK', actor, ip=ip,
+                old_val={'locked_by': audit['review_locked_by']},
+                new_val={'review_status': 'PENDING_REVIEW'})
+        return jsonify(ok=True)
+    except Exception as e:
+        logger.error(f"[zr_unlock] audit_id={audit_id}: {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
+
+
+@app.route('/api/z-reports/<int:audit_id>/approve', methods=['POST'])
+@require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+def zr_approve(audit_id: int):
+    """Approve a Z Report. Recalculates figures server-side."""
+    actor = session['user']
+    ip = request.remote_addr
+    body = request.get_json(force=True) or {}
+
+    payouts_total = float(body.get('payouts_total', 0))
+    cash_actual = float(body.get('cash_in_register_actual', 0))
+    payouts_breakdown = body.get('payouts_breakdown')
+    manager_notes = body.get('manager_notes', '')
+
+    try:
+        _zr_validate_breakdown(payouts_total, payouts_breakdown)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+    try:
+        audit = supabase_admin.table('audits').select('*').eq('id', audit_id).single().execute().data
+
+        if audit['review_status'] != 'IN_REVIEW':
+            return jsonify(error=f"Audit is not IN_REVIEW (status: {audit['review_status']})"), 409
+        if audit.get('review_locked_by') != actor:
+            return jsonify(error="You do not hold the lock on this audit"), 403
+
+        breakdown = (audit.get('payload') or {}).get('breakdown', {})
+        try:
+            calc = _zr_recalculate(breakdown, payouts_total, cash_actual)
+        except ValueError as e:
+            return jsonify(error=str(e)), 400
+
+        # Mark previous review as not current
+        supabase_admin.table('z_report_reviews').update({'is_current': False}).eq(
+            'audit_id', audit_id).eq('is_current', True).execute()
+
+        # Get next version number
+        existing = supabase_admin.table('z_report_reviews').select('version').eq(
+            'audit_id', audit_id).order('version', desc=True).limit(1).execute()
+        next_version = (existing.data[0]['version'] + 1) if existing.data else 1
+
+        supabase_admin.table('z_report_reviews').insert({
+            'audit_id': audit_id,
+            'payouts_total': payouts_total,
+            'cash_in_register_actual': cash_actual,
+            'payouts_breakdown': payouts_breakdown,
+            'manager_notes': manager_notes,
+            'calculated_gross': calc['gross'],
+            'calculated_net': calc['net'],
+            'calculated_variance': calc['variance'],
+            'opening_float_used': calc['opening_float'],
+            'reviewed_by': actor,
+            'approved_ip': ip,
+            'action': 'APPROVED',
+            'version': next_version,
+            'is_current': True,
+        }).execute()
+
+        old_status = audit['review_status']
+        supabase_admin.table('audits').update({
+            'review_status': 'FINAL_APPROVED',
+            'review_locked_by': None,
+            'review_locked_at': None,
+        }).eq('id', audit_id).execute()
+
+        _zr_log(supabase_admin, audit_id, 'APPROVE', actor, ip=ip,
+                old_val={'review_status': old_status},
+                new_val={'review_status': 'FINAL_APPROVED', 'gross': calc['gross'],
+                         'net': calc['net'], 'variance': calc['variance']})
+        return jsonify(ok=True, **calc)
+    except Exception as e:
+        logger.error(f"[zr_approve] audit_id={audit_id}: {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
+
+
+@app.route('/api/z-reports/<int:audit_id>/reject', methods=['POST'])
+@require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+def zr_reject(audit_id: int):
+    """Reject a Z Report with a mandatory reason."""
+    actor = session['user']
+    ip = request.remote_addr
+    body = request.get_json(force=True) or {}
+    reason = (body.get('rejection_reason') or '').strip()
+    if not reason:
+        return jsonify(error="rejection_reason is required"), 400
+
+    try:
+        audit = supabase_admin.table('audits').select(
+            'id,review_status,review_locked_by'
+        ).eq('id', audit_id).single().execute().data
+
+        if audit['review_status'] != 'IN_REVIEW':
+            return jsonify(error=f"Audit is not IN_REVIEW (status: {audit['review_status']})"), 409
+        if audit.get('review_locked_by') != actor:
+            return jsonify(error="You do not hold the lock on this audit"), 403
+
+        existing = supabase_admin.table('z_report_reviews').select('version').eq(
+            'audit_id', audit_id).order('version', desc=True).limit(1).execute()
+        next_version = (existing.data[0]['version'] + 1) if existing.data else 1
+
+        supabase_admin.table('z_report_reviews').update({'is_current': False}).eq(
+            'audit_id', audit_id).eq('is_current', True).execute()
+
+        supabase_admin.table('z_report_reviews').insert({
+            'audit_id': audit_id,
+            'payouts_total': 0,
+            'cash_in_register_actual': 0,
+            'calculated_gross': 0,
+            'calculated_net': 0,
+            'calculated_variance': 0,
+            'opening_float_used': 100,
+            'reviewed_by': actor,
+            'approved_ip': ip,
+            'action': 'REJECTED',
+            'rejection_reason': reason,
+            'version': next_version,
+            'is_current': True,
+        }).execute()
+
+        old_status = audit['review_status']
+        supabase_admin.table('audits').update({
+            'review_status': 'REJECTED',
+            'review_locked_by': None,
+            'review_locked_at': None,
+        }).eq('id', audit_id).execute()
+
+        _zr_log(supabase_admin, audit_id, 'REJECT', actor, ip=ip,
+                old_val={'review_status': old_status},
+                new_val={'review_status': 'REJECTED'},
+                reason=reason)
+        return jsonify(ok=True)
+    except Exception as e:
+        logger.error(f"[zr_reject] audit_id={audit_id}: {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
+
+
+@app.route('/api/z-reports/<int:audit_id>/amend', methods=['POST'])
+@require_auth(allowed_roles=['admin', 'super_admin'])
+def zr_amend(audit_id: int):
+    """Reopen a FINAL_APPROVED audit for amendment (admin only)."""
+    actor = session['user']
+    ip = request.remote_addr
+    body = request.get_json(force=True) or {}
+    reason = (body.get('amendment_reason') or '').strip()
+    if not reason:
+        return jsonify(error="amendment_reason is required"), 400
+
+    try:
+        audit = supabase_admin.table('audits').select(
+            'id,review_status'
+        ).eq('id', audit_id).single().execute().data
+
+        if audit['review_status'] != 'FINAL_APPROVED':
+            return jsonify(
+                error=f"Can only amend FINAL_APPROVED audits (status: {audit['review_status']})"
+            ), 409
+
+        # Get current review row to link amendment chain
+        current = supabase_admin.table('z_report_reviews').select('id,version').eq(
+            'audit_id', audit_id).eq('is_current', True).maybe_single().execute()
+        amendment_of_id = current.data['id'] if current.data else None
+        next_version = (current.data['version'] + 1) if current.data else 1
+
+        supabase_admin.table('z_report_reviews').update({'is_current': False}).eq(
+            'audit_id', audit_id).eq('is_current', True).execute()
+
+        supabase_admin.table('z_report_reviews').insert({
+            'audit_id': audit_id,
+            'payouts_total': 0,
+            'cash_in_register_actual': 0,
+            'calculated_gross': 0,
+            'calculated_net': 0,
+            'calculated_variance': 0,
+            'opening_float_used': 100,
+            'reviewed_by': actor,
+            'approved_ip': ip,
+            'action': 'AMENDED',
+            'amendment_reason': reason,
+            'amendment_of_id': amendment_of_id,
+            'version': next_version,
+            'is_current': True,
+        }).execute()
+
+        supabase_admin.table('audits').update({
+            'review_status': 'PENDING_REVIEW',
+            'review_locked_by': None,
+            'review_locked_at': None,
+        }).eq('id', audit_id).execute()
+
+        _zr_log(supabase_admin, audit_id, 'AMEND', actor, ip=ip,
+                old_val={'review_status': 'FINAL_APPROVED'},
+                new_val={'review_status': 'PENDING_REVIEW'},
+                reason=reason)
+        return jsonify(ok=True)
+    except Exception as e:
+        logger.error(f"[zr_amend] audit_id={audit_id}: {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
+
+
+@app.route('/api/z-reports/<int:audit_id>/history')
+@require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+def zr_history(audit_id: int):
+    """Return all review records for an audit, newest first."""
+    try:
+        result = supabase_admin.table('z_report_reviews').select('*').eq(
+            'audit_id', audit_id).order('version', desc=True).execute()
+        return jsonify(result.data)
+    except Exception as e:
+        logger.error(f"[zr_history] audit_id={audit_id}: {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
+
+
+@app.route('/api/z-reports/<int:audit_id>/audit-log')
+@require_auth(allowed_roles=['admin', 'super_admin'])
+def zr_audit_log(audit_id: int):
+    """Return the audit trail for a Z Report (admin only)."""
+    try:
+        result = supabase_admin.table('z_report_audit_log').select('*').eq(
+            'audit_id', audit_id).order('ts', desc=True).execute()
+        return jsonify(result.data)
+    except Exception as e:
+        logger.error(f"[zr_audit_log] audit_id={audit_id}: {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
+
+
+@app.route('/api/z-reports/unlock-timed-out', methods=['POST'])
+@require_auth(allowed_roles=['admin', 'super_admin'])
+def zr_unlock_timed_out():
+    """Release all locks older than 30 minutes (admin cron / manual trigger)."""
+    actor = session['user']
+    ip = request.remote_addr
+    cutoff = (datetime.utcnow() - timedelta(minutes=30)).isoformat()
+    try:
+        stale = supabase_admin.table('audits').select('id,review_locked_by').eq(
+            'review_status', 'IN_REVIEW').lt('review_locked_at', cutoff).execute()
+        count = 0
+        for row in stale.data:
+            supabase_admin.table('audits').update({
+                'review_status': 'PENDING_REVIEW',
+                'review_locked_by': None,
+                'review_locked_at': None,
+            }).eq('id', row['id']).execute()
+            _zr_log(supabase_admin, row['id'], 'UNLOCK', actor, ip=ip,
+                    old_val={'locked_by': row['review_locked_by']},
+                    new_val={'review_status': 'PENDING_REVIEW'},
+                    reason='lock_timeout')
+            count += 1
+        return jsonify(ok=True, unlocked=count)
+    except Exception as e:
+        logger.error(f"[zr_unlock_timed_out] {e}", exc_info=True)
+        return jsonify(error=str(e)), 500
+
+
 # --- 4. FRONTEND UI ---
 LOGIN_UI = """<!DOCTYPE html><html><body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;">
 <div style="background:#1e293b;padding:40px;border-radius:20px;text-align:center;width:320px;border:1px solid #334155;">
@@ -1430,6 +1856,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
         <div id="tab-analytics" class="tab-btn" onclick="app.tab('analytics')"><span class="tab-icon">📊</span>Command Center</div>
         <div id="tab-logs" class="tab-btn" onclick="app.tab('logs')"><span class="tab-icon">📜</span>History</div>
         <div id="tab-users" class="tab-btn" onclick="app.tab('users')"><span class="tab-icon">👥</span>Users</div>
+        <div id="tab-zreviews" class="tab-btn" onclick="app.tab('zreviews')"><span class="tab-icon">🔍</span>Z Reviews</div>
     </nav>
     <div class="sidebar-footer">
         <div class="sidebar-user" id="userDisplay"></div>
@@ -1618,7 +2045,32 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
         <br><br><div id="userTable"></div>
     </div>
 </div>
+
+<div id="zreviews" class="view">
+    <div class="panel">
+        <div class="section" style="margin-top:0">Z Report Review Queue
+            <span><select id="zrStatusFilter" onchange="app.zr.fetchList()" style="width:auto;margin:0;padding:6px 10px;font-size:12px;border-radius:6px">
+                <option value="">All Statuses</option>
+                <option value="PENDING_REVIEW">Pending Review</option>
+                <option value="IN_REVIEW">In Review</option>
+                <option value="FINAL_APPROVED">Approved</option>
+                <option value="REJECTED">Rejected</option>
+                <option value="AMENDED">Amended</option>
+            </select></span>
+        </div>
+        <div id="zrList"><p style="color:#64748b">Loading...</p></div>
+    </div>
+</div>
 </div><!-- end .main-content -->
+
+<!-- Z Report Review Modal -->
+<div id="zrModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9998;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:white;border-radius:16px;padding:30px;width:560px;max-width:95vw;max-height:88vh;overflow-y:auto;position:relative;">
+    <button onclick="document.getElementById('zrModal').style.display='none'" style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:22px;cursor:pointer;color:#64748b">✕</button>
+    <h3 id="zrModalTitle" style="margin:0 0 16px;color:#1e293b">Review Z Report</h3>
+    <div id="zrModalBody"></div>
+  </div>
+</div>
 
 <div id="modalCount" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);justify-content:center;align-items:center;z-index:9999;">
     <div style="background:white;padding:30px;border-radius:15px;width:350px;border:2px solid var(--p);">
@@ -1642,7 +2094,7 @@ const app = {
     enforcePermissions: () => {
         const r = app.role;
         if (r === 'staff') {
-            ['tab-calendar','tab-analytics','tab-users'].forEach(x=>document.getElementById(x).style.display='none');
+            ['tab-calendar','tab-analytics','tab-users','tab-zreviews'].forEach(x=>document.getElementById(x).style.display='none');
             const sl = document.getElementById('storeLoc'); sl.value = app.store; sl.disabled = true;
             document.getElementById('histStoreFilter').parentElement.style.display = 'none';
         } else if (r === 'manager') {
@@ -1692,12 +2144,13 @@ const app = {
         }
     },
     logout: () => fetch('/api/logout', {method:'POST'}).then(()=>location.reload()),
-    tab: (id) => { 
+    tab: (id) => {
         if(app.role==='staff' && (id!=='dash' && id!=='logs')) return;
-        if(app.role==='manager' && (id!=='dash' && id!=='logs' && id!=='calendar')) return;
-        document.querySelectorAll('.view,.tab-btn').forEach(e=>e.classList.remove('active')); 
-        document.getElementById(id).classList.add('active'); document.getElementById('tab-'+id).classList.add('active'); 
+        if(app.role==='manager' && (id!=='dash' && id!=='logs' && id!=='calendar' && id!=='zreviews')) return;
+        document.querySelectorAll('.view,.tab-btn').forEach(e=>e.classList.remove('active'));
+        document.getElementById(id).classList.add('active'); document.getElementById('tab-'+id).classList.add('active');
         if(id==='analytics'||id==='calendar'||id==='logs')app.fetch(); if(id==='users')app.fetchUsers();
+        if(id==='zreviews')app.zr.fetchList();
     },
     setupBill: () => { const d=document.getElementById('billRows'); [100,50,20,10,5,1,0.25,0.1,0.05,0.01].forEach(v=>{d.innerHTML+=`<div style="display:flex;justify-content:space-between;margin-bottom:5px"><span>$${v}</span><input type="number" class="bi" data-v="${v}" style="width:70px;padding:5px"></div>`}); d.addEventListener('input',()=>{let t=0;document.querySelectorAll('.bi').forEach(i=>t+=i.value*i.dataset.v);document.getElementById('billTotal').innerText='$'+t.toFixed(2)}) },
     addPayout: (r='',a='') => { const d=document.createElement('div');d.className='payout-row';d.innerHTML=`<div style="display:flex;gap:5px;margin-bottom:5px"><input class="p-reason" placeholder="Reason" value="${r}" style="flex:2"><input type="number" class="p-amt" placeholder="Amt" value="${a}" style="flex:1"><button onclick="this.parentElement.remove()" style="background:#fee2e2;border:1px solid #ef4444;cursor:pointer">X</button></div>`;document.getElementById('payoutList').appendChild(d)},
@@ -1952,6 +2405,129 @@ const app = {
     },
     deleteUser: async (n) => { if(confirm('Delete?')) { await fetch('/api/users/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:n})}); app.fetchUsers(); } }
 };
+
+// HTML escape helper - use on all server-provided strings before inserting into innerHTML
+function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+app.zr = {
+    _badge: (s) => {
+        const m = {PENDING_REVIEW:'#f59e0b',IN_REVIEW:'#3b82f6',FINAL_APPROVED:'#047857',REJECTED:'#ef4444',AMENDED:'#8b5cf6',NEEDS_ASSIGNMENT:'#64748b',DUPLICATE:'#64748b'};
+        return '<span style="background:' + (m[s]||'#64748b') + ';color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:800">' + esc(s).replace('_',' ') + '</span>';
+    },
+    fetchList: async () => {
+        const status = document.getElementById('zrStatusFilter').value;
+        try {
+            const rows = await (await fetch('/api/z-reports' + (status ? '?status=' + encodeURIComponent(status) : ''))).json();
+            if (!Array.isArray(rows)) { document.getElementById('zrList').textContent = 'Error loading list.'; return; }
+            if (!rows.length) { document.getElementById('zrList').textContent = 'No records found.'; return; }
+            const tbody = rows.map(r => {
+                const canReview = ['PENDING_REVIEW','IN_REVIEW','NEEDS_ASSIGNMENT'].includes(r.review_status);
+                return '<tr style="border-bottom:1px solid #f1f5f9;font-size:13px">'
+                    + '<td style="padding:10px 8px;font-weight:700">' + esc(r.date) + '</td>'
+                    + '<td style="padding:10px 8px">' + esc(r.store||'—') + '</td>'
+                    + '<td style="padding:10px 8px">' + app.zr._badge(r.review_status) + '</td>'
+                    + '<td style="padding:10px 8px;color:#64748b;font-size:11px">' + esc(r.review_locked_by||'—') + '</td>'
+                    + '<td style="padding:10px 8px"><button onclick="app.zr.openModal(' + r.id + ')" class="action-btn btn-edit" style="font-size:11px">'
+                    + (canReview ? '🔍 Review' : '👁 View') + '</button></td></tr>';
+            }).join('');
+            document.getElementById('zrList').innerHTML = '<table style="width:100%;border-collapse:collapse"><tr style="text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;border-bottom:2px solid #e2e8f0"><th style="padding:8px">Date</th><th>Store</th><th>Status</th><th>Locked By</th><th>Action</th></tr>' + tbody + '</table>';
+        } catch(e) { document.getElementById('zrList').textContent = 'Failed to load.'; }
+    },
+    openModal: async (id) => {
+        document.getElementById('zrModalTitle').textContent = 'Loading...';
+        document.getElementById('zrModalBody').textContent = 'Loading...';
+        document.getElementById('zrModal').style.display = 'flex';
+        try {
+            const d = await (await fetch('/api/z-reports/' + id)).json();
+            if (d.error) { document.getElementById('zrModalBody').textContent = d.error; return; }
+            app.zr._renderModal(d);
+        } catch(e) { document.getElementById('zrModalBody').textContent = 'Failed to load detail.'; }
+    },
+    _renderModal: (d) => {
+        const a = d.audit, rv = d.review;
+        const bd = ((a.payload||{}).breakdown)||{};
+        const gross = a.gross||0, net = a.net||0, variance = a.variance||0;
+        const status = a.review_status;
+        const me = localStorage.getItem('user')||'';
+        const isAdmin = (app.role==='admin'||app.role==='super_admin');
+        const canAct = status === 'IN_REVIEW' && a.review_locked_by === me;
+        const canLock = ['PENDING_REVIEW','NEEDS_ASSIGNMENT'].includes(status) || (status==='IN_REVIEW' && a.review_locked_by !== me);
+        const canUnlock = status === 'IN_REVIEW' && (a.review_locked_by === me || isAdmin);
+        document.getElementById('zrModalTitle').textContent = 'Z Report #' + a.id + ' — ' + (a.store||'') + ' — ' + (a.date||'');
+        // Build safe HTML with esc() on all dynamic strings
+        let html = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">'
+            + '<div class="kpi-card kpi-accent-teal"><div class="kpi-label">Gross</div><div class="kpi-val" style="font-size:20px">$' + gross.toFixed(2) + '</div></div>'
+            + '<div class="kpi-card kpi-accent-green"><div class="kpi-label">Net</div><div class="kpi-val" style="font-size:20px">$' + net.toFixed(2) + '</div></div>'
+            + '<div class="kpi-card ' + (variance<0?'kpi-accent-amber':'kpi-accent-green') + '"><div class="kpi-label">Variance</div><div class="kpi-val" style="font-size:20px;color:' + (variance<0?'#b45309':'#047857') + '">$' + parseFloat(variance).toFixed(2) + '</div></div></div>'
+            + '<div style="margin-bottom:16px">Status: ' + app.zr._badge(status)
+            + (a.review_locked_by ? ' &nbsp;<span style="font-size:12px;color:#64748b">Locked by <b>' + esc(a.review_locked_by) + '</b></span>' : '') + '</div>'
+            + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px">';
+        if(canLock) html += '<button onclick="app.zr.lock(' + a.id + ')" class="btn-main" style="padding:8px 16px;font-size:13px">🔒 Lock to Review</button>';
+        if(canUnlock) html += '<button onclick="app.zr.unlock(' + a.id + ')" style="padding:8px 16px;font-size:13px;background:#64748b;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700">🔓 Release Lock</button>';
+        if(isAdmin && status==='FINAL_APPROVED') html += '<button onclick="app.zr.amendPrompt(' + a.id + ')" style="padding:8px 16px;font-size:13px;background:#8b5cf6;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700">✏️ Amend</button>';
+        html += '</div>';
+        if(canAct) {
+            html += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:16px">'
+                + '<div style="font-weight:800;font-size:12px;text-transform:uppercase;color:#64748b;margin-bottom:12px">Review Form</div>'
+                + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+                + '<div><label style="font-size:12px;font-weight:700;color:#64748b">Payouts Total ($)</label><input type="number" step="0.01" id="zrPayouts" value="0" style="margin-bottom:8px"></div>'
+                + '<div><label style="font-size:12px;font-weight:700;color:#64748b">Cash in Register ($)</label><input type="number" step="0.01" id="zrCashActual" value="' + parseFloat(bd.actual||0).toFixed(2) + '" style="margin-bottom:8px"></div></div>'
+                + '<label style="font-size:12px;font-weight:700;color:#64748b">Manager Notes (optional)</label>'
+                + '<textarea id="zrNotes" style="width:100%;padding:8px;border:1.5px solid #cbd5e1;border-radius:8px;font-size:13px;margin-bottom:12px;resize:vertical" rows="2" placeholder="Notes..."></textarea>'
+                + '<div style="display:flex;gap:8px">'
+                + '<button onclick="app.zr.approve(' + a.id + ')" style="flex:1;padding:10px;background:#047857;color:white;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-size:13px">✅ Approve</button>'
+                + '<button onclick="app.zr.rejectPrompt(' + a.id + ')" style="flex:1;padding:10px;background:#ef4444;color:white;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-size:13px">❌ Reject</button>'
+                + '</div></div>';
+        }
+        if(rv) {
+            html += '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;font-size:12px">'
+                + '<b>Last Review:</b> ' + esc(rv.action) + ' by ' + esc(rv.reviewed_by)
+                + ' — Gross: $' + parseFloat(rv.calculated_gross||0).toFixed(2)
+                + ', Net: $' + parseFloat(rv.calculated_net||0).toFixed(2)
+                + ', Var: $' + parseFloat(rv.calculated_variance||0).toFixed(2)
+                + (rv.rejection_reason ? '<br><b>Rejection:</b> ' + esc(rv.rejection_reason) : '')
+                + (rv.amendment_reason ? '<br><b>Amendment:</b> ' + esc(rv.amendment_reason) : '')
+                + '</div>';
+        }
+        document.getElementById('zrModalBody').innerHTML = html;
+    },
+    lock: async (id) => {
+        const r = await fetch('/api/z-reports/'+id+'/lock',{method:'POST'});
+        const d = await r.json();
+        if(r.ok) { app.zr.openModal(id); app.zr.fetchList(); } else alert('Lock failed: '+(d.error||r.status));
+    },
+    unlock: async (id) => {
+        const r = await fetch('/api/z-reports/'+id+'/lock',{method:'DELETE'});
+        const d = await r.json();
+        if(r.ok) { app.zr.openModal(id); app.zr.fetchList(); } else alert('Unlock failed: '+(d.error||r.status));
+    },
+    approve: async (id) => {
+        const payouts = parseFloat(document.getElementById('zrPayouts').value||0);
+        const cashActual = parseFloat(document.getElementById('zrCashActual').value||0);
+        const notes = document.getElementById('zrNotes').value;
+        const r = await fetch('/api/z-reports/'+id+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payouts_total:payouts,cash_in_register_actual:cashActual,manager_notes:notes})});
+        const d = await r.json();
+        if(r.ok) { document.getElementById('zrModal').style.display='none'; app.zr.fetchList(); alert('Approved! Gross: $'+d.gross+', Net: $'+d.net+', Var: $'+d.variance); }
+        else alert('Approve failed: '+(d.error||r.status));
+    },
+    rejectPrompt: async (id) => {
+        const reason = prompt('Rejection reason (required):');
+        if(!reason) return;
+        const r = await fetch('/api/z-reports/'+id+'/reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rejection_reason:reason})});
+        const d = await r.json();
+        if(r.ok) { document.getElementById('zrModal').style.display='none'; app.zr.fetchList(); alert('Rejected.'); }
+        else alert('Reject failed: '+(d.error||r.status));
+    },
+    amendPrompt: async (id) => {
+        const reason = prompt('Amendment reason (required):');
+        if(!reason) return;
+        const r = await fetch('/api/z-reports/'+id+'/amend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amendment_reason:reason})});
+        const d = await r.json();
+        if(r.ok) { document.getElementById('zrModal').style.display='none'; app.zr.fetchList(); alert('Audit reopened for amendment.'); }
+        else alert('Amend failed: '+(d.error||r.status));
+    }
+};
+
 app.init();
 </script>
 <!-- Z Report Image Modal -->
