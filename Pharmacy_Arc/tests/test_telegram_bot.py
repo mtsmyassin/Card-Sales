@@ -1,4 +1,4 @@
-"""Tests for Telegram bot state machine."""
+"""Tests for Telegram bot state machine (English, new AWAITING_DATE/REGISTER flow)."""
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -37,9 +37,9 @@ def test_unregistered_user_gets_welcome():
 
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt: replies.append(txt)):
         with patch("telegram_bot.is_registered", return_value=False):
-            handle_update(make_text_update(111, "hola"))
+            handle_update(make_text_update(111, "hello"))
 
-    assert any("usuario" in r.lower() for r in replies)
+    assert any("username" in r.lower() for r in replies)
     assert bot_state[111]["state"] == "AWAITING_USERNAME"
 
 
@@ -60,7 +60,7 @@ def test_registration_wrong_password():
             handle_update(make_text_update(111, "wrongpass"))
 
     assert bot_state[111]["state"] == "AWAITING_USERNAME"
-    assert any("incorrectos" in r.lower() for r in replies)
+    assert any("incorrect" in r.lower() for r in replies)
 
 
 def test_registration_success():
@@ -76,7 +76,7 @@ def test_registration_success():
                 handle_update(make_text_update(222, "correctpass"))
 
     assert bot_state[222]["state"] == "REGISTERED"
-    assert any("registrada" in r.lower() or "registrado" in r.lower() for r in replies)
+    assert any("registered" in r.lower() for r in replies)
 
 
 def test_already_registered_photo_triggers_ocr():
@@ -97,11 +97,11 @@ def test_already_registered_photo_triggers_ocr():
                 with patch("ocr.has_null_fields", return_value=False):
                     handle_update(make_photo_update(333))
 
-    assert bot_state[333]["state"] == "AWAITING_PAYOUTS"
-    assert any("retiro" in r.lower() or "caj" in r.lower() for r in replies)
+    assert bot_state[333]["state"] == "AWAITING_DATE"
+    assert any("date" in r.lower() for r in replies)
 
 
-def test_confirmation_si_saves_entry():
+def test_confirmation_yes_saves_entry():
     from telegram_bot import handle_update, bot_state
     bot_state.clear()
     good_ocr = {
@@ -123,10 +123,10 @@ def test_confirmation_si_saves_entry():
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt: replies.append(txt)):
         with patch("telegram_bot.upload_image_to_storage", return_value="https://img.url/file.jpg"):
             with patch("telegram_bot.save_audit_entry"):
-                handle_update(make_text_update(444, "SI"))
+                handle_update(make_text_update(444, "YES"))
 
     assert bot_state[444]["state"] == "REGISTERED"
-    assert any("guardado" in r.lower() for r in replies)
+    assert any("saved" in r.lower() for r in replies)
 
 
 def test_confirmation_no_cancels():
@@ -146,7 +146,7 @@ def test_confirmation_no_cancels():
         handle_update(make_text_update(555, "NO"))
 
     assert bot_state[555]["state"] == "REGISTERED"
-    assert any("cancelado" in r.lower() for r in replies)
+    assert any("cancelled" in r.lower() for r in replies)
 
 
 def test_ocr_failure_increments_retry():
@@ -162,7 +162,7 @@ def test_ocr_failure_increments_retry():
                 handle_update(make_photo_update(666))
 
     assert bot_state[666]["retry_count"] == 1
-    assert any("intenta de nuevo" in r.lower() for r in replies)
+    assert any("try again" in r.lower() for r in replies)
 
 
 def test_ocr_failure_twice_tells_manual():
@@ -178,4 +178,4 @@ def test_ocr_failure_twice_tells_manual():
                 handle_update(make_photo_update(777))
 
     assert bot_state[777]["retry_count"] == 0  # reset after max
-    assert any("manualmente" in r.lower() for r in replies)
+    assert any("manually" in r.lower() for r in replies)

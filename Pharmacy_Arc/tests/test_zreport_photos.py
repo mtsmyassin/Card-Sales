@@ -1,4 +1,4 @@
-"""Tests for the z_report_photos system."""
+"""Tests for the z_report_photos system (updated for English bot, new state machine)."""
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -27,41 +27,14 @@ class TestFormatRegisterId:
         assert _format_register_id(None) == "Reg ?"
 
 
-class TestCalculateVariance:
-    def test_exact_match(self):
-        from telegram_bot import _calculate_variance
-        # 100 cash sales, 0 payouts, 100 in drawer → variance 0
-        assert _calculate_variance(100.0, 100.0, 0.0) == 0.0
-
-    def test_short(self):
-        from telegram_bot import _calculate_variance
-        # 100 cash, 0 payouts, 70 actual → -30
-        assert _calculate_variance(70.0, 100.0, 0.0) == -30.0
-
-    def test_over(self):
-        from telegram_bot import _calculate_variance
-        # 100 cash, 0 payouts, 110 actual → +10
-        assert _calculate_variance(110.0, 100.0, 0.0) == 10.0
-
-    def test_with_payouts(self):
-        from telegram_bot import _calculate_variance
-        # 100 cash, 25 payouts → expected = 75. Actual = 80. Variance = +5
-        assert _calculate_variance(80.0, 100.0, 25.0) == 5.0
-
-    def test_rounds_to_2_decimal(self):
-        from telegram_bot import _calculate_variance
-        result = _calculate_variance(99.99, 100.0, 0.0)
-        assert result == -0.01
-
-
 # ── Task 3: StorageUploadError ────────────────────────────────────────────────
 
 class TestUploadImageToStorage:
-    def test_raises_when_supabase_none(self):
+    def test_raises_when_supabase_admin_none(self):
         import sys
         from unittest.mock import MagicMock
         fake_app = MagicMock()
-        fake_app.supabase = None
+        fake_app.supabase_admin = None  # service-role client missing → should raise
         with patch.dict(sys.modules, {"app": fake_app}):
             import importlib
             import telegram_bot as tb
@@ -80,6 +53,7 @@ class TestSaveAuditEntryReturnsId:
 
         fake_app = MagicMock()
         fake_app.supabase = mock_supabase
+        fake_app.supabase_admin = None  # force fallback to anon supabase mock
         fake_app.validate_audit_entry = MagicMock(return_value=True)
         fake_app.save_to_queue = MagicMock()
 
@@ -98,7 +72,7 @@ class TestSaveAuditEntryReturnsId:
         assert entry_id == 42
 
 
-# ── Task 5: New state machine ─────────────────────────────────────────────────
+# ── Task 5: New state machine (AWAITING_DATE → AWAITING_REGISTER → AWAITING_CONFIRMATION) ──
 
 def make_text_update(telegram_id: int, text: str) -> dict:
     return {"message": {"from": {"id": telegram_id, "username": "testuser"},
@@ -119,8 +93,8 @@ GOOD_OCR = {
 
 
 class TestNewBotFlow:
-    def test_photo_leads_to_awaiting_payouts(self):
-        """After OCR success, state should be AWAITING_PAYOUTS (not AWAITING_CONFIRMATION)."""
+    def test_photo_leads_to_awaiting_date(self):
+        """After OCR success, state should be AWAITING_DATE (date confirmation step)."""
         from telegram_bot import handle_update, bot_state
         bot_state.clear()
         bot_state[100] = {"state": "REGISTERED", "store": "Carimas #1",
@@ -133,86 +107,83 @@ class TestNewBotFlow:
                     with patch("ocr.has_null_fields", return_value=False):
                         handle_update(make_photo_update(100))
 
-        assert bot_state[100]["state"] == "AWAITING_PAYOUTS"
-        assert any("retiro" in r.lower() or "payout" in r.lower() or "caj" in r.lower()
-                   for r in replies)
+        assert bot_state[100]["state"] == "AWAITING_DATE"
+        assert any("date" in r.lower() for r in replies)
 
-    def test_payouts_zero_leads_to_awaiting_cash(self):
-        """Typing '0' in AWAITING_PAYOUTS state moves to AWAITING_CASH."""
+    def test_date_ok_leads_to_awaiting_register(self):
+        """Replying OK in AWAITING_DATE confirms the OCR date and moves to AWAITING_REGISTER."""
         from telegram_bot import handle_update, bot_state
         bot_state.clear()
         bot_state[101] = {
-            "state": "AWAITING_PAYOUTS",
+            "state": "AWAITING_DATE",
             "store": "Carimas #1", "username": "manager",
-            "pending_data": GOOD_OCR, "pending_image_bytes": b"bytes",
+            "pending_data": GOOD_OCR.copy(), "pending_image_bytes": b"bytes",
             "retry_count": 0,
         }
         replies = []
         with patch("telegram_bot.send_message", side_effect=lambda c, t: replies.append(t)):
-            handle_update(make_text_update(101, "0"))
+            handle_update(make_text_update(101, "OK"))
 
-        assert bot_state[101]["state"] == "AWAITING_CASH"
-        assert bot_state[101]["pending_payouts"] == 0.0
+        assert bot_state[101]["state"] == "AWAITING_REGISTER"
 
-    def test_payouts_with_amount_leads_to_awaiting_cash(self):
+    def test_date_override_leads_to_awaiting_register(self):
+        """Typing a date in MM/DD/YYYY format overrides OCR date and moves to AWAITING_REGISTER."""
         from telegram_bot import handle_update, bot_state
         bot_state.clear()
         bot_state[102] = {
-            "state": "AWAITING_PAYOUTS",
+            "state": "AWAITING_DATE",
             "store": "Carimas #1", "username": "manager",
-            "pending_data": GOOD_OCR, "pending_image_bytes": b"bytes",
+            "pending_data": GOOD_OCR.copy(), "pending_image_bytes": b"bytes",
             "retry_count": 0,
         }
         replies = []
         with patch("telegram_bot.send_message", side_effect=lambda c, t: replies.append(t)):
-            handle_update(make_text_update(102, "25.50"))
+            handle_update(make_text_update(102, "02/25/2026"))
 
-        assert bot_state[102]["state"] == "AWAITING_CASH"
-        assert bot_state[102]["pending_payouts"] == 25.50
+        assert bot_state[102]["state"] == "AWAITING_REGISTER"
+        assert bot_state[102]["pending_data"]["date"] == "2026-02-25"
 
-    def test_invalid_payouts_stays_in_state(self):
+    def test_invalid_date_stays_in_awaiting_date(self):
+        """An unrecognized date string keeps the user in AWAITING_DATE."""
         from telegram_bot import handle_update, bot_state
         bot_state.clear()
         bot_state[103] = {
-            "state": "AWAITING_PAYOUTS",
+            "state": "AWAITING_DATE",
             "store": "Carimas #1", "username": "manager",
-            "pending_data": GOOD_OCR, "pending_image_bytes": b"bytes",
+            "pending_data": GOOD_OCR.copy(), "pending_image_bytes": b"bytes",
             "retry_count": 0,
         }
         with patch("telegram_bot.send_message"):
-            handle_update(make_text_update(103, "abc"))
+            handle_update(make_text_update(103, "not-a-date"))
 
-        assert bot_state[103]["state"] == "AWAITING_PAYOUTS"
+        assert bot_state[103]["state"] == "AWAITING_DATE"
 
-    def test_actual_cash_leads_to_awaiting_confirmation(self):
-        """Typing actual cash amount in AWAITING_CASH moves to AWAITING_CONFIRMATION."""
+    def test_register_ok_leads_to_awaiting_confirmation(self):
+        """Replying OK in AWAITING_REGISTER confirms OCR register and moves to AWAITING_CONFIRMATION."""
         from telegram_bot import handle_update, bot_state
         bot_state.clear()
         bot_state[104] = {
-            "state": "AWAITING_CASH",
+            "state": "AWAITING_REGISTER",
             "store": "Carimas #1", "username": "manager",
-            "pending_data": GOOD_OCR, "pending_image_bytes": b"bytes",
-            "pending_payouts": 0.0, "retry_count": 0,
+            "pending_data": GOOD_OCR.copy(), "pending_image_bytes": b"bytes",
+            "retry_count": 0,
         }
         replies = []
         with patch("telegram_bot.send_message", side_effect=lambda c, t: replies.append(t)):
-            handle_update(make_text_update(104, "95.00"))
+            handle_update(make_text_update(104, "OK"))
 
         assert bot_state[104]["state"] == "AWAITING_CONFIRMATION"
-        assert bot_state[104]["pending_actual_cash"] == 95.0
-        # variance = 95 - (100 - 0) = -5.0
-        assert bot_state[104]["pending_variance"] == -5.0
+        assert any("save" in r.lower() for r in replies)
 
-    def test_si_confirmation_saves_entry_and_photo(self):
-        """SI in AWAITING_CONFIRMATION calls save_audit_entry + save_photo_record."""
+    def test_yes_confirmation_saves_entry_and_photo(self):
+        """YES in AWAITING_CONFIRMATION calls save_audit_entry + save_photo_record."""
         from telegram_bot import handle_update, bot_state
         bot_state.clear()
         bot_state[105] = {
             "state": "AWAITING_CONFIRMATION",
             "store": "Carimas #2", "username": "maria",
             "pending_data": GOOD_OCR, "pending_image_bytes": b"bytes",
-            "pending_payouts": 0.0, "pending_actual_cash": 95.0,
-            "pending_variance": -5.0, "retry_count": 0,
+            "retry_count": 0,
         }
         replies = []
 
@@ -220,10 +191,10 @@ class TestNewBotFlow:
             with patch("telegram_bot.upload_image_to_storage", return_value="Carimas2/2026-02-20/reg2_123.jpg"):
                 with patch("telegram_bot.save_audit_entry", return_value=99):
                     with patch("telegram_bot.save_photo_record") as mock_photo:
-                        handle_update(make_text_update(105, "SI"))
+                        handle_update(make_text_update(105, "YES"))
 
         assert bot_state[105]["state"] == "REGISTERED"
-        assert any("guardado" in r.lower() for r in replies)
+        assert any("saved" in r.lower() for r in replies)
         mock_photo.assert_called_once_with(
             entry_id=99,
             store="Carimas #2",
