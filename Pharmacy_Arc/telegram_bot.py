@@ -264,11 +264,20 @@ def save_audit_entry(
 
     try:
         result = client.table("audits").insert(record).execute()
-        return result.data[0]["id"]
+        entry_id = result.data[0]["id"]
+        logger.info(
+            f"[BOT] audit saved: entry_id={entry_id} store={store!r} "
+            f"date={record['date']!r} staff={username!r}"
+        )
+        return entry_id
     except Exception as e:
-        logger.warning(f"DB save failed, queuing offline: {e}")
-        save_to_queue(record)
-        return None
+        # Do NOT fall back to the filesystem queue — it is ephemeral on Railway
+        # and will be silently lost on every redeploy.  Raise loudly instead.
+        logger.error(
+            f"[BOT] FATAL: DB insert failed — store={store!r} date={record['date']!r}: {e}",
+            exc_info=True,
+        )
+        raise
 
 
 def save_photo_record(
@@ -289,7 +298,7 @@ def save_photo_record(
         logger.warning("save_photo_record: no supabase client available")
         return
     try:
-        client.table("z_report_photos").insert({
+        result = client.table("z_report_photos").insert({
             "entry_id": entry_id,
             "store": store,
             "business_date": business_date,
@@ -299,8 +308,16 @@ def save_photo_record(
             "content_type": content_type,
             "source": source,
         }).execute()
+        photo_id = result.data[0]["id"] if result.data else None
+        logger.info(
+            f"[BOT] photo record saved: photo_id={photo_id} entry_id={entry_id} "
+            f"store={store!r} path={storage_path!r}"
+        )
     except Exception as e:
-        logger.error(f"save_photo_record failed for entry {entry_id}: {e}")
+        logger.error(
+            f"[BOT] save_photo_record FAILED: entry_id={entry_id} path={storage_path!r}: {e}",
+            exc_info=True,
+        )
         raise
 
 
@@ -612,12 +629,18 @@ def _ascii_upper(text: str) -> str:
 
 def _handle_confirmation(telegram_id, chat_id, text, state):
     if _ascii_upper(text) == "YES":
+        sid = f"{int(time.time()) % 100000}"  # short correlation ID for log tracing
         ocr_data = state["pending_data"]
         image_bytes = state["pending_image_bytes"]
         store = state["store"]
         username = state["username"]
 
-        # 1. Upload image (log error but don't block the save)
+        logger.info(
+            f"[BOT sid={sid}] Submission started: user={username!r} store={store!r} "
+            f"date={ocr_data.get('date')!r} register={ocr_data.get('register')!r}"
+        )
+
+        # 1. Upload image (log error but don't block the audit save)
         storage_path = None
         try:
             storage_path = upload_image_to_storage(
@@ -625,16 +648,21 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
                 ocr_data.get("date", "unknown"),
                 ocr_data.get("register", 0),
             )
+            logger.info(f"[BOT sid={sid}] Upload OK: path={storage_path!r}")
         except Exception as e:
-            logger.error(f"Image upload failed: {e}")
+            logger.error(f"[BOT sid={sid}] Image upload failed: {e}")
             send_message(chat_id, "Warning: Could not upload the photo. The report will be saved without it.")
 
-        # 2. Save audit entry → get entry_id
+        # 2. Save audit entry → get entry_id (raises on DB failure — do NOT swallow)
         try:
             entry_id = save_audit_entry(ocr_data, store, username)
         except Exception as e:
-            logger.error(f"save_audit_entry failed: {e}")
-            send_message(chat_id, "Error saving the report. Please try again or enter it manually.")
+            logger.error(f"[BOT sid={sid}] save_audit_entry FAILED: {e}")
+            send_message(
+                chat_id,
+                "❌ Error saving the report to the database. "
+                "Please enter it manually in the web app."
+            )
             return
 
         # 3. Save photo record (only if upload succeeded and we have an entry_id)
@@ -649,18 +677,24 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
                     storage_path=storage_path,
                 )
             except Exception as e:
-                logger.error(f"save_photo_record failed (entry still saved): {e}")
+                logger.error(f"[BOT sid={sid}] save_photo_record failed (entry still saved): {e}")
 
         gross = sum(ocr_data.get(f) or 0 for f in
                     ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss"])
+        logger.info(
+            f"[BOT sid={sid}] Submission complete: entry_id={entry_id} "
+            f"photo={'yes path='+storage_path if storage_path else 'no'} gross={gross:.2f}"
+        )
         state["state"] = "REGISTERED"
         for key in ["pending_data", "pending_image_bytes"]:
             state.pop(key, None)
         bot_state[telegram_id] = state
+        photo_note = " (photo attached)" if storage_path and entry_id else ""
         send_message(
             chat_id,
-            f"Saved. Reg #{ocr_data.get('register', '?')} — "
-            f"${gross:.2f} gross."
+            f"✅ Saved{photo_note}. Reg #{ocr_data.get('register', '?')} — "
+            f"${gross:.2f} gross.\n"
+            f"If you don't see it in the web app, check the 'All' date filter."
         )
 
     elif _ascii_upper(text) == "NO":

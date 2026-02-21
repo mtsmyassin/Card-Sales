@@ -743,9 +743,11 @@ def delete():
 def list_audits():
     """List audit entries filtered by user's store access, with photo counts."""
     try:
-        response = supabase.table("audits").select("*").order("date", desc=True).limit(2000).execute()
         user_store = session.get('store')
         user_role = session.get('role')
+        user = session.get('user')
+
+        response = supabase.table("audits").select("*").order("date", desc=True).limit(2000).execute()
 
         # Filter by store access
         allowed_rows = [
@@ -753,17 +755,27 @@ def list_audits():
             if user_role in ('admin', 'super_admin') or r.get('store') == user_store
         ]
 
-        # Batch-fetch photo counts for all allowed entry IDs
+        logger.info(
+            f"[list_audits] user={user!r} role={user_role!r} store={user_store!r} "
+            f"total_audits={len(response.data)} allowed={len(allowed_rows)}"
+        )
+
+        # Batch-fetch photo counts using service-role client to bypass RLS
         photo_counts: dict = {}
+        _db = supabase_admin or supabase
         if allowed_rows:
             entry_ids = [r['id'] for r in allowed_rows]
-            photo_resp = supabase.table("z_report_photos") \
+            photo_resp = _db.table("z_report_photos") \
                 .select("entry_id") \
                 .in_("entry_id", entry_ids) \
                 .execute()
             for p in photo_resp.data:
                 eid = p['entry_id']
                 photo_counts[eid] = photo_counts.get(eid, 0) + 1
+            logger.info(
+                f"[list_audits] photo_counts fetched: {len(photo_resp.data)} photo rows "
+                f"for {len(entry_ids)} entries → {len(photo_counts)} entries have photos"
+            )
 
         clean_rows = []
         for r in allowed_rows:
@@ -775,7 +787,7 @@ def list_audits():
 
         return jsonify(clean_rows)
     except Exception as e:
-        logger.error(f"Error listing audits: {e}")
+        logger.error(f"[list_audits] Error: {e}", exc_info=True)
         return jsonify([])
 
 
@@ -1092,24 +1104,32 @@ def get_entry_photos():
     if not entry_id:
         return jsonify(error="entry_id required"), 400
 
-    entry_resp = supabase.table("audits").select("store").eq("id", entry_id).execute()
+    # Use service-role client so RLS doesn't block server-side reads
+    _db = supabase_admin or supabase
+
+    entry_resp = _db.table("audits").select("store").eq("id", entry_id).execute()
     if not entry_resp.data:
+        logger.warning(f"[get_entry_photos] entry_id={entry_id} not found in audits")
         return jsonify(error="Not found"), 404
 
     entry_store = entry_resp.data[0]['store']
     if not _can_access_photo(entry_store, session.get('role'), session.get('store')):
         logger.warning(
-            f"Access denied: {session.get('user')} tried photos for entry {entry_id} "
-            f"(store={entry_store})"
+            f"[get_entry_photos] Access denied: user={session.get('user')!r} "
+            f"(store={session.get('store')!r}) tried entry_id={entry_id} (store={entry_store!r})"
         )
         return jsonify(error="Not authorized"), 403
 
-    photos = supabase.table("z_report_photos") \
+    photos = _db.table("z_report_photos") \
         .select("id, store, business_date, register_id, uploaded_by, uploaded_at, source") \
         .eq("entry_id", entry_id) \
         .order("uploaded_at") \
         .execute()
 
+    logger.info(
+        f"[get_entry_photos] entry_id={entry_id} store={entry_store!r} "
+        f"→ {len(photos.data)} photo(s)"
+    )
     return jsonify(photos.data)
 
 
@@ -1119,32 +1139,53 @@ def get_photo_signed_url():
     """Return a 1-hour signed URL for a specific photo. Store-scoped IDOR check."""
     photo_id = request.args.get('photo_id', type=int)
     if not photo_id:
-        return jsonify(error="photo_id required"), 400
+        return jsonify(error="photo_id required", code="MISSING_PARAM"), 400
 
-    photo_resp = supabase.table("z_report_photos").select("*").eq("id", photo_id).execute()
+    # Use service-role client so RLS doesn't block server-side reads
+    _db = supabase_admin or supabase
+
+    photo_resp = _db.table("z_report_photos").select("*").eq("id", photo_id).execute()
     if not photo_resp.data:
-        return jsonify(error="Not found"), 404
+        logger.warning(f"[signed_url] photo_id={photo_id} not found in z_report_photos")
+        return jsonify(error="Photo record not found", code="NOT_FOUND"), 404
 
     photo = photo_resp.data[0]
+    storage_path = photo.get('storage_path', '')
 
     if not _can_access_photo(photo['store'], session.get('role'), session.get('store')):
         logger.warning(
-            f"IDOR attempt: {session.get('user')} (store={session.get('store')}) "
-            f"tried signed URL for photo {photo_id} (store={photo['store']})"
+            f"[signed_url] IDOR attempt: user={session.get('user')!r} "
+            f"(store={session.get('store')!r}) tried photo_id={photo_id} "
+            f"(store={photo['store']!r})"
         )
-        return jsonify(error="Not authorized"), 403
+        return jsonify(error="Not authorized", code="FORBIDDEN"), 403
+
+    if not storage_path:
+        logger.error(f"[signed_url] photo_id={photo_id} has empty storage_path")
+        return jsonify(error="Photo has no storage path", code="NO_PATH"), 500
 
     storage_client = supabase_admin or supabase
+    logger.info(
+        f"[signed_url] Generating URL: photo_id={photo_id} "
+        f"bucket=z-reports path={storage_path!r} "
+        f"user={session.get('user')!r} using_admin={supabase_admin is not None}"
+    )
     try:
         signed = storage_client.storage.from_("z-reports").create_signed_url(
-            photo['storage_path'], 3600
+            storage_path, 3600
         )
         # storage3 v2.x returns a SignedURLResponse object; older versions returned a dict
         url = signed.signed_url if hasattr(signed, 'signed_url') else signed["signedURL"]
+        if not url:
+            raise ValueError("create_signed_url returned empty URL")
+        logger.info(f"[signed_url] Success: photo_id={photo_id} url_prefix={url[:60]!r}")
         return jsonify(url=url)
     except Exception as e:
-        logger.error(f"create_signed_url failed photo_id={photo_id}: {e}", exc_info=True)
-        return jsonify(error="Could not generate image URL"), 500
+        logger.error(
+            f"[signed_url] FAILED photo_id={photo_id} path={storage_path!r}: {e}",
+            exc_info=True
+        )
+        return jsonify(error="Could not generate image URL", code="STORAGE_ERROR"), 500
 
 
 # --- 4. FRONTEND UI ---
@@ -1503,7 +1544,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
             <h3>Entry Log</h3>
             <div style="display:flex;gap:10px;">
-                <select id="histRange" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="30">Last 30 Days</option><option value="7">Last 7 Days</option><option value="0">Today</option><option value="custom">Custom</option></select>
+                <select id="histRange" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="30">Last 30 Days</option><option value="7">Last 7 Days</option><option value="0">Today</option><option value="custom">Custom</option><option value="9999">All</option></select>
                 <input type="date" id="historyFilter" onchange="document.getElementById('histRange').value='custom';app.filterHistory()" style="margin:0;padding:5px;">
                 <select id="histStoreFilter" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="All">All Stores</option><option>Carimas #1</option><option>Carimas #2</option><option>Carimas #3</option><option>Carimas #4</option><option>Carthage</option></select>
                 <button onclick="app.fetch()">Refresh</button>
