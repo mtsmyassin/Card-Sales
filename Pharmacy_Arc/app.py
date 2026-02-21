@@ -1134,11 +1134,14 @@ def get_photo_signed_url():
         )
         return jsonify(error="Not authorized"), 403
 
+    storage_client = supabase_admin or supabase
     try:
-        signed = supabase.storage.from_("z-reports").create_signed_url(
+        signed = storage_client.storage.from_("z-reports").create_signed_url(
             photo['storage_path'], 3600
         )
-        return jsonify(url=signed["signedURL"])
+        # storage3 v2.x returns a SignedURLResponse object; older versions returned a dict
+        url = signed.signed_url if hasattr(signed, 'signed_url') else signed["signedURL"]
+        return jsonify(url=url)
     except Exception as e:
         logger.error(f"create_signed_url failed photo_id={photo_id}: {e}", exc_info=True)
         return jsonify(error="Could not generate image URL"), 500
