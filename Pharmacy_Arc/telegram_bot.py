@@ -1,7 +1,7 @@
 """
 Telegram bot for Z Report submission.
 Uses raw Telegram Bot API (via requests) — no python-telegram-bot library needed.
-Conversation state is kept in-memory; bot_users registration is persisted in Supabase.
+Conversation state is kept in-memory and persisted to Supabase bot_sessions table.
 """
 import os
 import io
@@ -21,14 +21,96 @@ _BOT_TOKEN = None  # loaded lazily from env
 
 KNOWN_STORES = ["Carimas #1", "Carimas #2", "Carimas #3", "Carthage"]
 STORE_MENU = (
-    "Which store is this report for?\n"
+    "¿Para cuál tienda es este reporte?\n"
     "1 — Carimas #1\n"
     "2 — Carimas #2\n"
     "3 — Carimas #3\n"
     "4 — Carthage\n"
-    "Reply with the number."
+    "Responde con el número."
 )
 _STORE_CHOICE = {"1": "Carimas #1", "2": "Carimas #2", "3": "Carimas #3", "4": "Carthage"}
+
+# ── Messages (Spanish) ─────────────────────────────────────────────────────────
+MSG_REGISTER_START = "Bienvenido a Carimas Bot. Ingresa tu usuario para registrarte:"
+MSG_ENTER_PASSWORD = "Contraseña:"
+MSG_BAD_CREDENTIALS = "Usuario o contraseña incorrectos. Ingresa tu usuario:"
+MSG_REGISTERED = "✅ Registrado. Tienda: {store}.\nEnvía una foto del Reporte Z para comenzar."
+MSG_WELCOME_BACK = "Registrado en {store}. Envía la foto del Reporte Z."
+MSG_PHOTO_SEND = "Envía la foto del Reporte Z."
+MSG_PROCESSING = "Procesando... por favor espera."
+MSG_OCR_DATE = (
+    "¿Cuál es la fecha del reporte Z?\n"
+    "OCR: {date}\n"
+    "Escribe la fecha (MM/DD/AAAA) o responde OK para confirmar."
+)
+MSG_OCR_REG = (
+    "¿Número de caja registradora?\n"
+    "OCR: {reg}\n"
+    "Escribe el número o responde OK para confirmar."
+)
+MSG_BAD_DATE = "No se pudo leer la fecha. Usa MM/DD/AAAA (ej. 02/20/2026) o responde OK."
+MSG_BAD_REG = "Ingresa un número de caja (ej. 1) o responde OK para mantener el valor del OCR."
+MSG_YES_NO = "Responde SÍ para guardar o NO para cancelar."
+MSG_SAVED = (
+    "✅ Guardado{photo_note}. Caja #{reg} — ${gross:.2f} bruto.\n"
+    "Si no lo ves en la app, selecciona el filtro 'Todos'."
+)
+MSG_CANCELLED = "Cancelado. Envía otra foto cuando estés listo."
+MSG_INVALID_STORE = "Responde con 1, 2, 3 o 4."
+MSG_STORE_CONFIRM = "Tienda: {store}. Envía la foto del Reporte Z."
+MSG_OCR_FAIL_RETRY = (
+    "No se pudo leer el reporte. Toma la foto más cerca con mejor iluminación e inténtalo de nuevo. "
+    "(Intento {attempt} de 2)"
+)
+MSG_OCR_FAIL_FINAL = (
+    "No se pudo procesar la foto después de 2 intentos.\n"
+    "Por favor ingresa este reporte manualmente en el sistema."
+)
+MSG_NULL_RETRY = (
+    "No se pudo leer: {fields}.\n"
+    "Toma la foto más cerca con mejor iluminación. (Intento {attempt} de 2)"
+)
+MSG_NULL_FINAL = (
+    "No se pudo leer: {fields}.\n"
+    "Fallo tras 2 intentos. Ingresa este reporte manualmente."
+)
+MSG_PHOTO_WARN = "⚠️ No se pudo subir la foto. El reporte se guardará sin ella."
+MSG_DB_ERROR = "❌ Error guardando el reporte. Por favor ingrésalo manualmente en la app web."
+MSG_PHOTO_DL_ERROR = "No se pudo descargar la foto. Inténtalo de nuevo."
+MSG_OCR_ERROR = "Error procesando la imagen. Inténtalo de nuevo."
+MSG_SESSION_RESET = (
+    "Tu sesión fue restaurada después de un reinicio del sistema.\n"
+    "Por favor envía la foto del Reporte Z de nuevo."
+)
+MSG_HELP = (
+    "📋 Carimas Bot — Ayuda\n\n"
+    "Comandos disponibles:\n"
+    "  /help   — Ver esta ayuda\n"
+    "  /status — Ver tu estado actual\n"
+    "  /cancel — Cancelar la operación en curso\n\n"
+    "Cómo enviar un Reporte Z:\n"
+    "  1. Regístrate con tu usuario y contraseña del sistema\n"
+    "  2. Envía una foto clara y bien iluminada del Reporte Z\n"
+    "  3. Confirma la fecha y número de caja\n"
+    "  4. Responde SÍ para guardar el reporte"
+)
+MSG_STATUS_REGISTERED = (
+    "Estado: ✅ Registrado\n"
+    "Tienda: {store}\n"
+    "Usuario: {username}\n"
+    "Listo para recibir fotos de Reporte Z."
+)
+MSG_STATUS_UNREGISTERED = (
+    "Estado: ❌ No registrado\n"
+    "Envía cualquier mensaje para comenzar el registro."
+)
+MSG_STATUS_MIDFLOW = (
+    "Estado: En proceso ({state})\n"
+    "Usuario: {username}\n"
+    "Usa /cancel para reiniciar."
+)
+MSG_CANCEL_OK = "Operación cancelada. Envía una foto del Reporte Z cuando estés listo."
+MSG_CANCEL_NOTHING = "No hay ninguna operación activa en este momento."
 
 
 # ── Photo system helpers ───────────────────────────────────────────────────────
@@ -71,6 +153,73 @@ def download_photo(file_id: str) -> bytes:
     url = f"https://api.telegram.org/file/bot{_token()}/{file_path}"
     return http.get(url, timeout=30).content
 
+
+# ── State persistence ──────────────────────────────────────────────────────────
+
+def persist_session(telegram_id: int, state: dict) -> None:
+    """Upsert bot session state to Supabase bot_sessions table.
+
+    Required table (run once in Supabase SQL editor):
+        CREATE TABLE IF NOT EXISTS bot_sessions (
+            telegram_id  BIGINT PRIMARY KEY,
+            state        TEXT    DEFAULT 'AWAITING_USERNAME',
+            username     TEXT,
+            store        TEXT,
+            retry_count  INT     DEFAULT 0,
+            pending_data JSONB,
+            updated_at   TIMESTAMPTZ DEFAULT now()
+        );
+    """
+    try:
+        from app import supabase_admin, supabase
+        client = supabase_admin or supabase
+        if client is None:
+            return
+        # Exclude image bytes (binary, too large) and pending_photo_msg (Telegram dict)
+        client.table("bot_sessions").upsert({
+            "telegram_id": telegram_id,
+            "state": state.get("state", "AWAITING_USERNAME"),
+            "username": state.get("username"),
+            "store": state.get("store"),
+            "retry_count": state.get("retry_count", 0),
+            "pending_data": state.get("pending_data"),
+        }).execute()
+    except Exception as e:
+        logger.warning(f"persist_session failed for {telegram_id}: {e}")
+
+
+def load_session(telegram_id: int) -> dict | None:
+    """Load bot session state from Supabase bot_sessions table.
+    Returns None if not found or DB unavailable.
+    """
+    try:
+        from app import supabase_admin, supabase
+        client = supabase_admin or supabase
+        if client is None:
+            return None
+        result = client.table("bot_sessions").select("*").eq("telegram_id", telegram_id).execute()
+        if not result.data:
+            return None
+        row = result.data[0]
+        return {
+            "state": row.get("state", "AWAITING_USERNAME"),
+            "username": row.get("username"),
+            "store": row.get("store"),
+            "retry_count": row.get("retry_count", 0),
+            "pending_data": row.get("pending_data"),
+        }
+    except Exception as e:
+        logger.warning(f"load_session failed for {telegram_id}: {e}")
+        return None
+
+
+def _set_state(telegram_id: int, state: dict) -> None:
+    """Update in-memory bot_state and persist to Supabase."""
+    bot_state[telegram_id] = state
+    persist_session(telegram_id, state)
+
+
+# ── User helpers ───────────────────────────────────────────────────────────────
 
 def is_registered(telegram_id: int) -> bool:
     """Check if telegram_id exists in bot_users Supabase table."""
@@ -154,6 +303,8 @@ def save_bot_user(telegram_id: int, username: str, tg_username: str, store: str)
         "store": store,
     }).execute()
 
+
+# ── Storage helpers ────────────────────────────────────────────────────────────
 
 class StorageUploadError(Exception):
     """Raised when upload to Supabase Storage fails."""
@@ -322,17 +473,17 @@ def save_photo_record(
 
 
 def _format_preview(data: dict) -> str:
-    """Format OCR result as a confirmation message."""
+    """Format OCR result as a Spanish confirmation message."""
     def fmt(v):
         return f"${v:.2f}" if v is not None else "?"
 
     return (
-        f"Z Report read:\n"
-        f"Register: #{data.get('register', '?')}  |  Date: {data.get('date', '?')}\n"
+        f"Reporte Z leído:\n"
+        f"Caja: #{data.get('register', '?')}  |  Fecha: {data.get('date', '?')}\n"
         f"─────────────────────────\n"
-        f"Cash:          {fmt(data.get('cash'))}\n"
+        f"Efectivo:      {fmt(data.get('cash'))}\n"
         f"ATH:           {fmt(data.get('ath'))}\n"
-        f"ATH Mobile:    {fmt(data.get('athm'))}\n"
+        f"ATH Móvil:     {fmt(data.get('athm'))}\n"
         f"VISA:          {fmt(data.get('visa'))}\n"
         f"Master Card:   {fmt(data.get('mc'))}\n"
         f"American Exp:  {fmt(data.get('amex'))}\n"
@@ -340,11 +491,13 @@ def _format_preview(data: dict) -> str:
         f"WIC/EBT:       {fmt(data.get('wic'))}\n"
         f"MCS OTC:       {fmt(data.get('mcs'))}\n"
         f"Triple-S OTC:  {fmt(data.get('sss'))}\n"
-        f"Over/Short:    {fmt(data.get('variance'))}\n"
+        f"Sobre/Corto:   {fmt(data.get('variance'))}\n"
         f"─────────────────────────\n"
-        f"Save this report? Reply YES or NO"
+        f"¿Guardar este reporte? Responde SÍ o NO"
     )
 
+
+# ── Main dispatcher ────────────────────────────────────────────────────────────
 
 def handle_update(update: dict) -> None:
     """
@@ -359,7 +512,12 @@ def handle_update(update: dict) -> None:
     tg_username = msg["from"].get("username", "")
     chat_id = msg["chat"]["id"]
 
-    state = bot_state.get(telegram_id, {})
+    # Load state: prefer in-memory, fall back to DB (restores state after restart)
+    state = bot_state.get(telegram_id)
+    if state is None:
+        state = load_session(telegram_id) or {}
+        if state:
+            bot_state[telegram_id] = state  # cache locally (no re-persist)
     current_state = state.get("state")
 
     # ── photo received ────────────────────────────────────────────────────────
@@ -367,19 +525,21 @@ def handle_update(update: dict) -> None:
         if not current_state or current_state not in ("REGISTERED",):
             # Not registered yet — nudge them to register first
             if not is_registered(telegram_id):
-                bot_state[telegram_id] = {"state": "AWAITING_USERNAME", "retry_count": 0}
-                send_message(chat_id, "To register, enter your username:")
+                new_state = {"state": "AWAITING_USERNAME", "retry_count": 0}
+                _set_state(telegram_id, new_state)
+                send_message(chat_id, MSG_REGISTER_START)
                 return
             else:
                 # Reload state from DB on bot restart
                 user_row = get_bot_user(telegram_id)
-                bot_state[telegram_id] = {
+                new_state = {
                     "state": "REGISTERED",
                     "store": user_row["store"],
                     "username": user_row["username"],
                     "retry_count": 0,
                 }
-                state = bot_state[telegram_id]  # use the new dict, not the old empty one
+                _set_state(telegram_id, new_state)
+                state = new_state
                 current_state = "REGISTERED"
 
         _handle_photo(telegram_id, chat_id, tg_username, msg, state)
@@ -387,6 +547,11 @@ def handle_update(update: dict) -> None:
 
     # ── text received ─────────────────────────────────────────────────────────
     text = (msg.get("text") or "").strip()
+
+    # Slash commands — handled regardless of current state
+    if text.startswith("/"):
+        _handle_slash(telegram_id, chat_id, text, state)
+        return
 
     if current_state == "AWAITING_DATE":
         _handle_date(telegram_id, chat_id, text, state)
@@ -403,17 +568,17 @@ def handle_update(update: dict) -> None:
     if current_state == "AWAITING_STORE":
         chosen = _STORE_CHOICE.get(text)
         if not chosen:
-            send_message(chat_id, "Reply with 1, 2, 3, or 4.")
+            send_message(chat_id, MSG_INVALID_STORE)
             return
         state["store"] = chosen
         state["state"] = "REGISTERED"
-        bot_state[telegram_id] = state
+        _set_state(telegram_id, state)
         # Now process the saved photo
         saved_msg = state.pop("pending_photo_msg", None)
         if saved_msg:
             _handle_photo(telegram_id, chat_id, tg_username, saved_msg, state)
         else:
-            send_message(chat_id, f"Store: {chosen}. Send the Z Report photo.")
+            send_message(chat_id, MSG_STORE_CONFIRM.format(store=chosen))
         return
 
     if current_state == "AWAITING_PASSWORD":
@@ -423,24 +588,75 @@ def handle_update(update: dict) -> None:
     if current_state == "AWAITING_USERNAME":
         state["username"] = text
         state["state"] = "AWAITING_PASSWORD"
-        bot_state[telegram_id] = state
-        send_message(chat_id, "Enter your password:")
+        _set_state(telegram_id, state)
+        send_message(chat_id, MSG_ENTER_PASSWORD)
         return
 
-    # ── default: start registration or show help ──────────────────────────────
+    # ── default: start registration or show welcome ───────────────────────────
     if is_registered(telegram_id):
         user_row = get_bot_user(telegram_id)
-        bot_state[telegram_id] = {
+        new_state = {
             "state": "REGISTERED",
             "store": user_row["store"],
             "username": user_row["username"],
             "retry_count": 0,
         }
-        send_message(chat_id, f"You are registered at {user_row['store']}. Send a Z Report photo to get started.")
+        _set_state(telegram_id, new_state)
+        send_message(chat_id, MSG_WELCOME_BACK.format(store=user_row["store"]))
     else:
-        bot_state[telegram_id] = {"state": "AWAITING_USERNAME", "retry_count": 0}
-        send_message(chat_id, "Hello! To register, enter your username:")
+        new_state = {"state": "AWAITING_USERNAME", "retry_count": 0}
+        _set_state(telegram_id, new_state)
+        send_message(chat_id, MSG_REGISTER_START)
 
+
+# ── Slash command handler ──────────────────────────────────────────────────────
+
+def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
+    """Handle /help, /status, /cancel commands."""
+    cmd = text.split()[0].lower().split("@")[0]  # strip bot name suffix if present
+
+    if cmd == "/help":
+        send_message(chat_id, MSG_HELP)
+
+    elif cmd == "/status":
+        current = state.get("state")
+        if not current or current == "AWAITING_USERNAME":
+            send_message(chat_id, MSG_STATUS_UNREGISTERED)
+        elif current == "REGISTERED":
+            send_message(chat_id, MSG_STATUS_REGISTERED.format(
+                store=state.get("store", "?"),
+                username=state.get("username", "?"),
+            ))
+        else:
+            send_message(chat_id, MSG_STATUS_MIDFLOW.format(
+                state=current,
+                username=state.get("username", "?"),
+            ))
+
+    elif cmd == "/cancel":
+        current = state.get("state")
+        if not current or current in ("AWAITING_USERNAME", "AWAITING_PASSWORD"):
+            send_message(chat_id, MSG_CANCEL_NOTHING)
+        else:
+            # Reset to REGISTERED if we have a username/store, else fresh start
+            if state.get("username") and state.get("store") and current != "AWAITING_USERNAME":
+                new_state = {
+                    "state": "REGISTERED",
+                    "store": state.get("store"),
+                    "username": state.get("username"),
+                    "retry_count": 0,
+                }
+            else:
+                new_state = {"state": "AWAITING_USERNAME", "retry_count": 0}
+            _set_state(telegram_id, new_state)
+            send_message(chat_id, MSG_CANCEL_OK)
+
+    else:
+        # Unknown command — show help
+        send_message(chat_id, MSG_HELP)
+
+
+# ── State-specific handlers ────────────────────────────────────────────────────
 
 def _handle_password(telegram_id, chat_id, tg_username, password, state):
     username = state.get("username", "")
@@ -449,23 +665,20 @@ def _handle_password(telegram_id, chat_id, tg_username, password, state):
         # Failed — reset to AWAITING_USERNAME (don't reveal which field was wrong)
         state["state"] = "AWAITING_USERNAME"
         state.pop("username", None)
-        bot_state[telegram_id] = state
-        send_message(chat_id, "Incorrect username or password. Enter your username:")
+        _set_state(telegram_id, state)
+        send_message(chat_id, MSG_BAD_CREDENTIALS)
         return
 
     # Success — register
     save_bot_user(telegram_id, user_row["username"], tg_username, user_row["store"])
-    bot_state[telegram_id] = {
+    new_state = {
         "state": "REGISTERED",
         "store": user_row["store"],
         "username": user_row["username"],
         "retry_count": 0,
     }
-    send_message(
-        chat_id,
-        f"Registered. Store: {user_row['store']}.\n"
-        f"You can now send Z Report photos."
-    )
+    _set_state(telegram_id, new_state)
+    send_message(chat_id, MSG_REGISTERED.format(store=user_row["store"]))
 
 
 def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
@@ -473,11 +686,11 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
     if state.get("store") == "All":
         state["pending_photo_msg"] = msg
         state["state"] = "AWAITING_STORE"
-        bot_state[telegram_id] = state
+        _set_state(telegram_id, state)
         send_message(chat_id, STORE_MENU)
         return
 
-    send_message(chat_id, "Processing... please wait.")
+    send_message(chat_id, MSG_PROCESSING)
 
     # Pick the largest photo (last in array)
     file_id = msg["photo"][-1]["file_id"]
@@ -486,7 +699,7 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
         image_bytes = download_photo(file_id)
     except Exception as e:
         logger.error(f"Photo download failed: {e}")
-        send_message(chat_id, "Could not download the photo. Please try again.")
+        send_message(chat_id, MSG_PHOTO_DL_ERROR)
         return
 
     retry_count = state.get("retry_count", 0)
@@ -499,29 +712,19 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
         return
     except Exception as e:
         logger.error(f"OCR unexpected error: {e}")
-        send_message(chat_id, "Error processing the image. Please try again.")
+        send_message(chat_id, MSG_OCR_ERROR)
         return
 
     if has_null_fields(ocr_data):
         null_names = ", ".join(NULL_FIELD_NAMES(ocr_data))
         if retry_count >= 1:
             state["retry_count"] = 0
-            bot_state[telegram_id] = state
-            send_message(
-                chat_id,
-                f"Could not read: {null_names}.\n"
-                f"Failed to process after 2 attempts.\n"
-                f"Please enter this report manually in the system."
-            )
+            _set_state(telegram_id, state)
+            send_message(chat_id, MSG_NULL_FINAL.format(fields=null_names))
             return
         state["retry_count"] = retry_count + 1
-        bot_state[telegram_id] = state
-        send_message(
-            chat_id,
-            f"Could not read some fields: {null_names}.\n"
-            f"Take the photo closer with better lighting and try again.\n"
-            f"(Attempt {retry_count + 1} of 2)"
-        )
+        _set_state(telegram_id, state)
+        send_message(chat_id, MSG_NULL_RETRY.format(fields=null_names, attempt=retry_count + 1))
         return
 
     # All fields readable — ask for date confirmation
@@ -529,33 +732,20 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
     state["pending_data"] = ocr_data
     state["pending_image_bytes"] = image_bytes
     state["retry_count"] = 0
-    bot_state[telegram_id] = state
-    ocr_date = ocr_data.get("date") or "unknown"
-    send_message(
-        chat_id,
-        f"What is the date of this Z report?\n"
-        f"OCR read: {ocr_date}\n"
-        f"Type the date (MM/DD/YYYY) or reply OK to confirm."
-    )
+    _set_state(telegram_id, state)
+    ocr_date = ocr_data.get("date") or "desconocida"
+    send_message(chat_id, MSG_OCR_DATE.format(date=ocr_date))
 
 
 def _handle_ocr_failure(telegram_id, chat_id, state, retry_count):
     if retry_count >= 1:
         state["retry_count"] = 0
-        bot_state[telegram_id] = state
-        send_message(
-            chat_id,
-            "Could not process the photo after 2 attempts.\n"
-            "Please enter this report manually in the system."
-        )
+        _set_state(telegram_id, state)
+        send_message(chat_id, MSG_OCR_FAIL_FINAL)
     else:
         state["retry_count"] = retry_count + 1
-        bot_state[telegram_id] = state
-        send_message(
-            chat_id,
-            "Could not read this report. Take the photo closer with better "
-            f"lighting and try again. (Attempt {retry_count + 1} of 2)"
-        )
+        _set_state(telegram_id, state)
+        send_message(chat_id, MSG_OCR_FAIL_RETRY.format(attempt=retry_count + 1))
 
 
 def _parse_date(text: str) -> str | None:
@@ -578,60 +768,49 @@ def _parse_date(text: str) -> str | None:
 
 def _handle_date(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
     """Handle AWAITING_DATE — let user confirm or override the OCR-read date."""
-    if _ascii_upper(text) in ("OK", "YES", "SI", "CONFIRM"):
+    if _ascii_upper(text) in ("OK", "YES", "SI", "SÍ", "CONFIRM"):
         # Keep OCR date as-is
         pass
     else:
         parsed = _parse_date(text)
         if parsed is None:
-            send_message(
-                chat_id,
-                "Could not read that date. Please use MM/DD/YYYY (e.g. 02/20/2026) or reply OK to keep the OCR date."
-            )
+            send_message(chat_id, MSG_BAD_DATE)
             return
         state["pending_data"]["date"] = parsed
 
-    ocr_reg = state["pending_data"].get("register") or "unknown"
+    ocr_reg = state["pending_data"].get("register") or "desconocido"
     state["state"] = "AWAITING_REGISTER"
-    bot_state[telegram_id] = state
-    send_message(
-        chat_id,
-        f"What is the cash register number?\n"
-        f"OCR read: {ocr_reg}\n"
-        f"Type the number or reply OK to confirm."
-    )
+    _set_state(telegram_id, state)
+    send_message(chat_id, MSG_OCR_REG.format(reg=ocr_reg))
 
 
 def _handle_register(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
     """Handle AWAITING_REGISTER — let user confirm or override the OCR-read register."""
-    if _ascii_upper(text) not in ("OK", "YES", "SI", "CONFIRM"):
+    if _ascii_upper(text) not in ("OK", "YES", "SI", "SÍ", "CONFIRM"):
         text_stripped = text.strip()
         try:
             reg_num = int(text_stripped)
         except ValueError:
-            send_message(
-                chat_id,
-                "Please enter a register number (e.g. 1) or reply OK to keep the OCR value."
-            )
+            send_message(chat_id, MSG_BAD_REG)
             return
         state["pending_data"]["register"] = reg_num
 
     state["state"] = "AWAITING_CONFIRMATION"
-    bot_state[telegram_id] = state
+    _set_state(telegram_id, state)
     send_message(chat_id, _format_preview(state["pending_data"]))
 
 
 def _ascii_upper(text: str) -> str:
-    """Uppercase and strip accents so 'Yes' == 'YES', etc."""
+    """Uppercase and strip accents so 'Sí' == 'SI', etc."""
     nfkd = unicodedata.normalize("NFKD", text)
     return "".join(c for c in nfkd if not unicodedata.combining(c)).upper()
 
 
 def _handle_confirmation(telegram_id, chat_id, text, state):
-    if _ascii_upper(text) == "YES":
+    if _ascii_upper(text) in ("YES", "SI", "SÍ"):
         sid = f"{int(time.time()) % 100000}"  # short correlation ID for log tracing
         ocr_data = state["pending_data"]
-        image_bytes = state["pending_image_bytes"]
+        image_bytes = state.get("pending_image_bytes")
         store = state["store"]
         username = state["username"]
 
@@ -642,27 +821,24 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
 
         # 1. Upload image (log error but don't block the audit save)
         storage_path = None
-        try:
-            storage_path = upload_image_to_storage(
-                image_bytes, store,
-                ocr_data.get("date", "unknown"),
-                ocr_data.get("register", 0),
-            )
-            logger.info(f"[BOT sid={sid}] Upload OK: path={storage_path!r}")
-        except Exception as e:
-            logger.error(f"[BOT sid={sid}] Image upload failed: {e}")
-            send_message(chat_id, "Warning: Could not upload the photo. The report will be saved without it.")
+        if image_bytes:
+            try:
+                storage_path = upload_image_to_storage(
+                    image_bytes, store,
+                    ocr_data.get("date", "unknown"),
+                    ocr_data.get("register", 0),
+                )
+                logger.info(f"[BOT sid={sid}] Upload OK: path={storage_path!r}")
+            except Exception as e:
+                logger.error(f"[BOT sid={sid}] Image upload failed: {e}")
+                send_message(chat_id, MSG_PHOTO_WARN)
 
         # 2. Save audit entry → get entry_id (raises on DB failure — do NOT swallow)
         try:
             entry_id = save_audit_entry(ocr_data, store, username)
         except Exception as e:
             logger.error(f"[BOT sid={sid}] save_audit_entry FAILED: {e}")
-            send_message(
-                chat_id,
-                "❌ Error saving the report to the database. "
-                "Please enter it manually in the web app."
-            )
+            send_message(chat_id, MSG_DB_ERROR)
             return
 
         # 3. Save photo record (only if upload succeeded and we have an entry_id)
@@ -685,26 +861,34 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
             f"[BOT sid={sid}] Submission complete: entry_id={entry_id} "
             f"photo={'yes path='+storage_path if storage_path else 'no'} gross={gross:.2f}"
         )
-        state["state"] = "REGISTERED"
-        for key in ["pending_data", "pending_image_bytes"]:
-            state.pop(key, None)
-        bot_state[telegram_id] = state
-        photo_note = " (photo attached)" if storage_path and entry_id else ""
+        new_state = {
+            "state": "REGISTERED",
+            "store": state.get("store"),
+            "username": state.get("username"),
+            "retry_count": 0,
+        }
+        _set_state(telegram_id, new_state)
+        photo_note = " (foto adjunta)" if storage_path and entry_id else ""
         send_message(
             chat_id,
-            f"✅ Saved{photo_note}. Reg #{ocr_data.get('register', '?')} — "
-            f"${gross:.2f} gross.\n"
-            f"If you don't see it in the web app, check the 'All' date filter."
+            MSG_SAVED.format(
+                photo_note=photo_note,
+                reg=ocr_data.get("register", "?"),
+                gross=gross,
+            )
         )
 
     elif _ascii_upper(text) == "NO":
-        state["state"] = "REGISTERED"
-        for key in ["pending_data", "pending_image_bytes"]:
-            state.pop(key, None)
-        bot_state[telegram_id] = state
-        send_message(chat_id, "Cancelled. Send another photo when ready.")
+        new_state = {
+            "state": "REGISTERED",
+            "store": state.get("store"),
+            "username": state.get("username"),
+            "retry_count": 0,
+        }
+        _set_state(telegram_id, new_state)
+        send_message(chat_id, MSG_CANCELLED)
     else:
-        send_message(chat_id, "Reply YES to save or NO to cancel.")
+        send_message(chat_id, MSG_YES_NO)
 
 
 def register_webhook() -> None:

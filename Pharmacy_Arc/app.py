@@ -1,9 +1,9 @@
-import json, webbrowser, os, sys, base64, re, time
+import json, webbrowser, os, sys, base64, re, time, io
 import logging
 from functools import wraps
 from threading import Timer
 from datetime import datetime, timedelta
-from flask import Flask, render_template_string, request, jsonify, session, redirect
+from flask import Flask, render_template_string, request, jsonify, session, redirect, send_file
 from supabase import create_client, Client
 
 # Import our security and config modules
@@ -318,6 +318,15 @@ def index():
     has_pending = len(load_queue()) > 0
     return render_template_string(MAIN_UI if session.get('logged_in') else LOGIN_UI, logo=logo_data, pending=has_pending)
 
+@app.route('/favicon.ico')
+def favicon():
+    """Serve logo.png as the site favicon (eliminates 404 on every page load)."""
+    logo_path = os.path.join(get_base_path(), 'logo.png')
+    if os.path.exists(logo_path):
+        return send_file(io.BytesIO(open(logo_path, 'rb').read()), mimetype='image/png')
+    return '', 204
+
+
 @app.route('/api/get_logo', methods=['POST'])
 @require_auth()
 def api_get_logo():
@@ -503,6 +512,39 @@ def logout():
     session.clear()
     return jsonify(status="ok")
 
+def _send_variance_alert(store: str, date: str, reg: str, variance: float, gross: float, submitted_by: str) -> None:
+    """Send Telegram alert to admin/manager bot users when |variance| > $25."""
+    try:
+        from telegram_bot import send_message
+        _db = supabase_admin or supabase
+        if _db is None:
+            return
+        bot_users_resp = _db.table("bot_users").select("telegram_id, username, store").execute()
+        if not (bot_users_resp.data):
+            return
+        # Cross-reference roles
+        unames = [u["username"] for u in bot_users_resp.data if u.get("username")]
+        role_map = {}
+        if unames:
+            users_resp = _db.table("users").select("username, role, store").in_("username", unames).execute()
+            role_map = {u["username"]: (u.get("role", "staff"), u.get("store", "")) for u in (users_resp.data or [])}
+        sign = "🔴 Corto" if variance < 0 else "🟡 Sobre"
+        msg = (
+            f"⚠️ Varianza {sign}: ${abs(variance):.2f}\n"
+            f"Tienda: {store} | Caja: {reg} | Fecha: {date}\n"
+            f"Bruto: ${gross:.2f} | Enviado por: {submitted_by}"
+        )
+        for bu in bot_users_resp.data:
+            role, user_store = role_map.get(bu.get("username", ""), ("staff", ""))
+            if role in ("admin", "super_admin", "manager") or user_store == store:
+                try:
+                    send_message(bu["telegram_id"], msg)
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"_send_variance_alert failed: {e}")
+
+
 @app.route('/api/save', methods=['POST'])
 @require_auth()
 def save():
@@ -568,6 +610,20 @@ def save():
             )
             
             logger.info(f"Audit entry created by {username}: date={d['date']}, store={d.get('store')}")
+            # Variance alert — fire-and-forget, never block the response
+            variance_val = float(d.get('variance', 0))
+            if abs(variance_val) > 25:
+                try:
+                    _send_variance_alert(
+                        store=d.get('store', 'Main'),
+                        date=d['date'],
+                        reg=d['reg'],
+                        variance=variance_val,
+                        gross=float(d['gross']),
+                        submitted_by=username,
+                    )
+                except Exception:
+                    pass
             return jsonify(status="success")
         
         except Exception as e:
@@ -2109,6 +2165,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
                 <input type="date" id="historyFilter" onchange="document.getElementById('histRange').value='custom';app.filterHistory()" style="margin:0;padding:5px;">
                 <select id="histStoreFilter" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="All">All Stores</option><option>Carimas #1</option><option>Carimas #2</option><option>Carimas #3</option><option>Carimas #4</option><option>Carthage</option></select>
                 <button onclick="app.fetch()" class="btn-main" style="padding:7px 14px;font-size:12px;width:auto;">↻ Refresh</button>
+                <button onclick="app.exportCSV()" class="btn-main" style="padding:7px 14px;font-size:12px;width:auto;background:#047857;">📥 CSV</button>
             </div>
         </div>
         <div id="logTable" style="max-height:600px;overflow-y:auto"></div>
@@ -2290,7 +2347,8 @@ const app = {
         try { app.renderAnalytics(); } catch(e) { console.error('renderAnalytics error:', e); }
     },
     renderLogs: () => { app.filterHistory(); },
-    filterHistory: () => { const r=document.getElementById('histRange').value, d=document.getElementById('historyFilter').value, s=(app.role!=='staff')?document.getElementById('histStoreFilter').value:app.store; let f=app.data; if(s&&s!=='All')f=f.filter(x=>x.store===s); const afterStore=f.length; if(r==='custom'){if(d)f=f.filter(x=>x.date===d)}else{const days=parseInt(r), cut=new Date(); cut.setDate(cut.getDate()-days); if(days===0)f=f.filter(x=>x.date===new Date().toISOString().split('T')[0]); else if(days!==9999)f=f.filter(x=>new Date(x.date)>=cut);} const hidden=afterStore-f.length; const hd=document.getElementById('histHidden'); if(hd){if(hidden>0){hd.textContent=`⚠️ ${hidden} entr${hidden===1?'y':'ies'} hidden by date filter — select "All" to see them.`;hd.style.display='block';}else{hd.style.display='none';}} app.renderTable(f); },
+    filterHistory: () => { const r=document.getElementById('histRange').value, d=document.getElementById('historyFilter').value, s=(app.role!=='staff')?document.getElementById('histStoreFilter').value:app.store; let f=app.data; if(s&&s!=='All')f=f.filter(x=>x.store===s); const afterStore=f.length; if(r==='custom'){if(d)f=f.filter(x=>x.date===d)}else{const days=parseInt(r), cut=new Date(); cut.setDate(cut.getDate()-days); if(days===0)f=f.filter(x=>x.date===new Date().toISOString().split('T')[0]); else if(days!==9999)f=f.filter(x=>new Date(x.date)>=cut);} const hidden=afterStore-f.length; const hd=document.getElementById('histHidden'); if(hd){if(hidden>0){hd.textContent=`⚠️ ${hidden} entr${hidden===1?'y':'ies'} hidden by date filter — select "All" to see them.`;hd.style.display='block';}else{hd.style.display='none';}} app._filteredRows=f; app.renderTable(f); },
+    exportCSV: () => { const rows=app._filteredRows||app.data; if(!rows.length){alert('No data to export.');return;} const hdr='Date,Store,Register,Staff,Gross,Net,Variance'; const lines=rows.map(d=>[d.date,d.store,d.reg||'',d.staff||'',(d.gross||0).toFixed(2),(d.net||0).toFixed(2),(d.variance||0)].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')); const csv=[hdr,...lines].join('\r\n'); const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`carimas_history_${new Date().toISOString().split('T')[0]}.csv`; a.click(); URL.revokeObjectURL(a.href); },
     renderTable: (rows) => { let h='<table><tr><th>Date</th><th>Store</th><th>Gross</th><th>Var</th><th>Actions</th></tr>'; rows.forEach(d=>{ const i=app.data.indexOf(d), camBtn=d.photo_count>0?`<button onclick="app.viewZReport(${d.id})" class="action-btn btn-cam" title="Ver ${d.photo_count} foto(s)">📷(${d.photo_count})</button>`:'', acts=(app.role==='staff')?`<button onclick="app.print(${i})" class="action-btn btn-print">🖨 Print</button>`:`<button onclick="app.print(${i})" class="action-btn btn-print">🖨</button><button onclick="app.editAudit(${i})" class="action-btn btn-edit">✏️</button><button onclick="app.deleteAudit(${d.id})" class="action-btn btn-del">🗑</button>${camBtn}`; h+=`<tr><td>${d.date}</td><td>${d.store}</td><td>$${(d.gross||0).toFixed(2)}</td><td style="color:${d.variance<0?'#be123c':'#047857'};font-weight:800">$${d.variance}</td><td>${acts}</td></tr>`;}); document.getElementById('logTable').innerHTML=h+'</table>'; },
     viewZReport: async (auditId) => {
         try {
@@ -2668,6 +2726,61 @@ app.init();
   </div>
 </div>
 </body></html>"""
+
+def _send_eod_reminders() -> None:
+    """Send 9 PM reminder to bot users whose store hasn't submitted today."""
+    try:
+        from zoneinfo import ZoneInfo
+        pr_tz = ZoneInfo("America/Puerto_Rico")
+        today = datetime.now(pr_tz).strftime("%Y-%m-%d")
+        _db = supabase_admin or supabase
+        if _db is None:
+            return
+        subs = _db.table("audits").select("store").eq("date", today).execute()
+        submitted_stores = {s["store"] for s in (subs.data or [])}
+        bot_users_resp = _db.table("bot_users").select("telegram_id, store").execute()
+        if not bot_users_resp.data:
+            return
+        from telegram_bot import send_message
+        notified = set()
+        for bu in bot_users_resp.data:
+            store = bu.get("store", "")
+            tid = bu["telegram_id"]
+            if store in ("All", "") or tid in notified:
+                continue
+            if store not in submitted_stores:
+                try:
+                    send_message(
+                        tid,
+                        f"⏰ Recordatorio: {store} no ha enviado el Reporte Z de hoy ({today}).\n"
+                        f"Envía una foto del Reporte Z para registrarlo."
+                    )
+                    notified.add(tid)
+                except Exception:
+                    pass
+        logger.info(f"EOD reminders sent to {len(notified)} user(s) for {today}")
+    except Exception as e:
+        logger.warning(f"_send_eod_reminders failed: {e}")
+
+
+# ── APScheduler: EOD submission reminder at 21:00 PR time ──────────────────────
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    _scheduler = BackgroundScheduler()
+    _scheduler.add_job(
+        _send_eod_reminders,
+        CronTrigger(hour=21, minute=0, timezone="America/Puerto_Rico"),
+        id="eod_reminder",
+        replace_existing=True,
+    )
+    _scheduler.start()
+    logger.info("APScheduler started: EOD reminder at 21:00 PR time")
+except ImportError:
+    logger.warning("APScheduler not installed — EOD reminders disabled")
+except Exception as _sched_e:
+    logger.warning(f"APScheduler start failed: {_sched_e}")
+
 
 # Register Telegram webhook on startup (idempotent — safe on every deploy)
 try:
