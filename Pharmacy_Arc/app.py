@@ -391,7 +391,7 @@ def login():
                     context={"ip": request.remote_addr, "account_type": "emergency"}
                 )
                 
-                return jsonify(status="ok", role=role, store='All')
+                return jsonify(status="ok", role=role, store='All', username=u)
         
         # --- CHECK DATABASE ACCOUNTS ---
         try:
@@ -439,7 +439,7 @@ def login():
                         context={"ip": request.remote_addr, "store": user['store']}
                     )
                     
-                    return jsonify(status="ok", role=user['role'], store=user['store'])
+                    return jsonify(status="ok", role=user['role'], store=user['store'], username=u)
         
         except Exception as e:
             logger.error(f"Database error during login for {u}: {e}")
@@ -1678,6 +1678,7 @@ function l(){
         if(data.status==='ok'){
             localStorage.setItem('role',data.role);
             localStorage.setItem('store',data.store);
+            localStorage.setItem('user',data.username);
             location.reload();
         } else {
             errDiv.innerText = data.error || 'Invalid credentials';
