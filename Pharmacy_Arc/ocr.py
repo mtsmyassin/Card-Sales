@@ -6,45 +6,54 @@ import anthropic
 
 NUMERIC_FIELDS = ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss", "variance"]
 
-EXTRACTION_PROMPT = """You are extracting data from a Puerto Rico pharmacy cash register Z Report.
+EXTRACTION_PROMPT = """You are extracting data from a Puerto Rico pharmacy cash register Z Report (Farmacia Carimas).
 
 REPORT STRUCTURE — READ THIS CAREFULLY:
-The payment section appears THREE times in the report:
-  Block 1: every row ends with (shift)
-  Block 2: every row ends with (close)   ← EXTRACT FROM THIS BLOCK ONLY
-  Block 3: every row ends with (even)
-Ignore blocks 1 and 3 entirely.
+The payment section appears in blocks, each row ending with the block name in parentheses.
+Blocks present vary by register — either 3 or 4 blocks:
+  3-block format:  (shift) | (close) | (even)
+  4-block format:  (open)  | (shift) | (close) | (even)  or  (short)
+
+EXTRACT ONLY FROM THE (close) BLOCK.
+Ignore (open), (shift), (even), and (short) blocks entirely.
+If the (close) block is all $0.00, that is valid — return 0.0 for those fields, do NOT fall back to shift.
 
 HEADER FIELDS:
-- "Register #" line → register number (small integer 1–15). Do NOT use Batch #.
-- "Report Date" line → date in header (format M/D/YYYY or M/DD/YYYY) → return as YYYY-MM-DD.
+- "Register #" line → register number (small integer 1–15). It is on its own labeled line. Do NOT use Batch #.
+- "Report Date" line → date format is M/DD/YYYY (e.g. 2/19/2026) → return as YYYY-MM-DD (e.g. 2026-02-19).
+  IMPORTANT: The digit before the first "/" is the MONTH (1–12). Cross-check it against the "Start Date"
+  and "Date" fields also in the header — they must all share the same month.
+  This pharmacy's thermal printer sometimes prints "2" with a font that resembles "7". If the month
+  digit could be read as either 2 or 7, and the Start Date is exactly 1 day before the Report Date,
+  prefer 2 (February) over 7 (July) when the year is 2026.
 
 NEGATIVE VALUES:
 - Values in parentheses are negative: ($19.31) → -19.31
-- Over / Short is in the SUMMARY section (before the payment blocks). Negative = cash short.
+- Over / Short is in the SUMMARY section (above the payment blocks). Negative = cash short.
 
 FIELD MAPPING — (close) block only:
   CASH             → cash
   ATH              → ath        (NOT ATH MOVIL)
   ATH MOVIL        → athm
   VISA             → visa       (NOT MASTER CARD/ VISA)
-  MASTER CARD      → mc         (NOT MASTER CARD/ VISA — that row → ignore, add to 0.0)
+  MASTER CARD      → mc         (NOT MASTER CARD/ VISA)
   AMERICAN EXPRESS → amex
-  DISCOVER         → disc       (if DISCOVER appears twice, sum both)
+  DISCOVER         → disc       (if DISCOVER appears twice, sum both values)
   EBT FOOD         → wic
   MCS OTC          → mcs
-  TRIPLE-S OTC     → sss        (any capitalisation)
+  TRIPLE-S OTC     → sss        (any capitalisation: Triple-S OTC, TRIPLE-S OTC)
 
-IGNORE these rows entirely (return 0.0 for their fields):
-  MASTER CARD/ VISA, TARJETAS, TARJETA DE FAMILI, EBT (non-food),
-  EBT CASH, GIFT CARD, CHEQUE, ATH MOVIL duplicate rows
+IGNORE these rows (treat as 0.0, do not add to any field):
+  MASTER CARD/ VISA, TARJETAS, TARJETA DE FAMILI, TARJETA DE FAMIL,
+  EBT (non-food/non-FOOD label), EBT CASH, GIFT CARD, CHEQUE,
+  duplicate ATH MOVIL rows
 
 NUMERIC RULES:
 - Strip $ signs, commas, and spaces before returning floats.
 - Absent payment type → 0.0 (not null).
 - Return null ONLY if a value is present in the (close) block but truly illegible.
 
-Return ONLY this JSON, no explanation, no markdown:
+Return ONLY this JSON object — no explanation, no markdown, no reasoning text:
 {
   "register": <int>,
   "date": "<YYYY-MM-DD>",
