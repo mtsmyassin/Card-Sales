@@ -11,22 +11,28 @@ import sys
 import re
 from pathlib import Path
 
+# Windows-safe output
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+_OPEN = lambda p: open(p, 'r', encoding='utf-8')
+
 class TestResult:
     """Store test results."""
     def __init__(self):
         self.passed = 0
         self.failed = 0
         self.tests = []
-    
+
     def add_pass(self, name):
         self.passed += 1
         self.tests.append((name, True, None))
-        print(f"  ✅ {name}")
-    
+        print(f"  PASS  {name}")
+
     def add_fail(self, name, error):
         self.failed += 1
         self.tests.append((name, False, error))
-        print(f"  ❌ {name}: {error}")
+        print(f"  FAIL  {name}: {error}")
     
     def summary(self):
         total = self.passed + self.failed
@@ -52,7 +58,7 @@ def test_edit_flow_navigation(results):
     print("-" * 70)
     
     try:
-        with open('app.py', 'r') as f:
+        with _OPEN('app.py') as f:
             content = f.read()
         
         # Test 1: editAudit function exists
@@ -115,7 +121,7 @@ def test_users_tab_auto_sync(results):
     print("-" * 70)
     
     try:
-        with open('app.py', 'r') as f:
+        with _OPEN('app.py') as f:
             content = f.read()
         
         # Test 1: fetchUsers function exists
@@ -192,7 +198,7 @@ def test_global_sync_consistency(results):
     print("-" * 70)
     
     try:
-        with open('app.py', 'r') as f:
+        with _OPEN('app.py') as f:
             content = f.read()
         
         # Test 1: fetch function exists and is used
