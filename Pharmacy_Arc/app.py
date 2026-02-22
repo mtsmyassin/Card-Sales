@@ -301,23 +301,33 @@ def get_logo(store_name=None):
     if store_name == 'Carthage': filename = 'carthage.png'
     p = os.path.join(get_base_path(), filename)
     if not os.path.exists(p): p = os.path.join(get_base_path(), 'logo.png')
-    return base64.b64encode(open(p, "rb").read()).decode() if os.path.exists(p) else ""
+    if not os.path.exists(p):
+        return ""
+    with open(p, "rb") as fh:
+        return base64.b64encode(fh.read()).decode()
 
 # --- 3. OFFLINE HANDLERS ---
 def save_to_queue(payload):
     q_path = get_queue_path()
     queue = []
     if os.path.exists(q_path):
-        try: queue = json.load(open(q_path))
-        except: pass
+        try:
+            with open(q_path, encoding='utf-8') as fh:
+                queue = json.load(fh)
+        except Exception:
+            pass
     queue.append(payload)
-    with open(q_path, 'w') as f: json.dump(queue, f)
+    with open(q_path, 'w', encoding='utf-8') as f:
+        json.dump(queue, f, ensure_ascii=False)
 
 def load_queue():
     q_path = get_queue_path()
     if os.path.exists(q_path):
-        try: return json.load(open(q_path))
-        except: return []
+        try:
+            with open(q_path, encoding='utf-8') as fh:
+                return json.load(fh)
+        except Exception:
+            return []
     return []
 
 def clear_queue():
@@ -337,7 +347,8 @@ def favicon():
     """Serve logo.png as the site favicon (eliminates 404 on every page load)."""
     logo_path = os.path.join(get_base_path(), 'logo.png')
     if os.path.exists(logo_path):
-        return send_file(io.BytesIO(open(logo_path, 'rb').read()), mimetype='image/png')
+        with open(logo_path, 'rb') as fh:
+            return send_file(io.BytesIO(fh.read()), mimetype='image/png')
     return '', 204
 
 
@@ -609,7 +620,7 @@ def save():
         }
         
         try:
-            result = supabase.table("audits").insert(record).execute()
+            result = (supabase_admin or supabase).table("audits").insert(record).execute()
             
             # Log successful creation
             audit_log(
@@ -682,17 +693,18 @@ def sync():
                 continue
 
             # Duplicate check — DB unique constraint on (date, store, reg)
+            _db = supabase_admin or supabase
             date_val = item.get('date')
             store_val = item.get('store')
             reg_val = item.get('reg')
-            dup = supabase.table("audits").select("id").eq("date", date_val).eq(
+            dup = _db.table("audits").select("id").eq("date", date_val).eq(
                 "store", store_val).eq("reg", reg_val).limit(1).execute()
             if dup.data:
                 logger.warning(f"[sync] Skipping duplicate: date={date_val} store={store_val} reg={reg_val}")
                 success_count += 1  # Don't keep retrying a duplicate — remove from queue
                 continue
 
-            supabase.table("audits").insert(item).execute()
+            _db.table("audits").insert(item).execute()
             success_count += 1
 
             # Log successful sync
@@ -704,11 +716,12 @@ def sync():
                 success=True,
                 context={"ip": request.remote_addr, "records": 1}
             )
-        except:
+        except Exception as exc:
+            logger.warning(f"[sync] Insert failed for item date={item.get('date')} store={item.get('store')}: {exc}")
             failed_items.append(item)
     if failed_items:
         q_path = get_queue_path()
-        with open(q_path, 'w') as f: json.dump(failed_items, f)
+        with open(q_path, 'w', encoding='utf-8') as f: json.dump(failed_items, f, ensure_ascii=False)
     else:
         clear_queue()
     return jsonify(status="success", count=success_count, remaining=len(failed_items))
@@ -752,14 +765,14 @@ def update():
         
         # Get current record for audit trail
         try:
-            old_record = supabase.table("audits").select("*").eq("id", uid).execute()
+            old_record = (supabase_admin or supabase).table("audits").select("*").eq("id", uid).execute()
             before_state = old_record.data[0] if old_record.data else None
-        except:
+        except Exception:
             before_state = None
-        
+
         record = {
-            "date": d['date'], 
-            "reg": d['reg'], 
+            "date": d['date'],
+            "reg": d['reg'],
             "staff": d['staff'], 
             "store": d.get('store', 'Main'),
             "gross": float(d['gross']), 
@@ -768,7 +781,7 @@ def update():
             "payload": d
         }
         
-        supabase.table("audits").update(record).eq("id", uid).execute()
+        (supabase_admin or supabase).table("audits").update(record).eq("id", uid).execute()
         
         # Log successful update
         audit_log(
@@ -828,12 +841,13 @@ def delete():
         
         # Get current record for audit trail
         try:
-            old_record = supabase.table("audits").select("*").eq("id", uid).execute()
+            old_record = (supabase_admin or supabase).table("audits").select("*").eq("id", uid).execute()
             before_state = old_record.data[0] if old_record.data else None
-        except:
+        except Exception:
             before_state = None
-        
-        supabase.table("audits").delete().eq("id", uid).execute()
+
+
+        (supabase_admin or supabase).table("audits").delete().eq("id", uid).execute()
         
         # Log successful deletion
         audit_log(
@@ -2509,7 +2523,7 @@ const app = {
         const vl={'balanced':'✓  Balanced','review':'⚠  Review Required','discrepancy':'✗  Discrepancy'}[vc];
         const vn={'balanced':'Cash matches expected amount.','review':'Minor variance — verify before approving.','discrepancy':'Significant variance — explanation required.'}[vc];
         const brand=d.store==='Carthage'?'Carthage Express':'Farmacia Carimas';
-        const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#fff;color:#1e293b;font-size:13px;padding:36px 44px;max-width:680px;margin:0 auto;line-height:1.5}.hdr{text-align:center;padding-bottom:22px;border-bottom:2px solid #e2e8f0;margin-bottom:22px}.hdr img{max-height:64px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto}.brand{font-size:22px;font-weight:700;color:#0097b2;letter-spacing:-0.5px}.sub{font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:2px;color:#94a3b8;margin-top:4px}.meta{display:flex;justify-content:space-between;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 20px;margin-bottom:22px}.mi{text-align:center}.ml{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;margin-bottom:3px}.mv{font-size:14px;font-weight:600;color:#1e293b}.krow{display:flex;gap:10px;margin-bottom:4px}.kpi{flex:1;border:1px solid #e2e8f0;border-radius:10px;padding:14px 10px;text-align:center}.kl{font-size:9px;text-transform:uppercase;letter-spacing:0.8px;color:#94a3b8;margin-bottom:6px}.kv{font-size:18px;font-weight:700;color:#0097b2;font-variant-numeric:tabular-nums}.st{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;color:#0097b2;border-bottom:1px solid #e2e8f0;padding-bottom:7px;margin-bottom:10px;margin-top:22px}.row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:13px}.row:last-child{border-bottom:none}.lbl{color:#475569}.amt{font-weight:600;font-variant-numeric:tabular-nums;color:#1e293b}.dim{color:#e2e8f0}.pg{display:grid;grid-template-columns:1fr 1fr;gap:0 32px}.fml{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;margin-top:10px}.fr{display:flex;justify-content:space-between;padding:5px 0;font-size:13px;font-variant-numeric:tabular-nums;color:#64748b}.fr strong{color:#1e293b;font-weight:600}.frt{border-top:1px solid #cbd5e1;margin-top:8px;padding-top:10px;font-weight:700;font-size:14px;color:#1e293b;display:flex;justify-content:space-between}.fra{display:flex;justify-content:space-between;margin-top:10px;padding-top:12px;border-top:2px solid #1e293b;font-weight:700;font-size:15px;color:#1e293b}.vb{border-radius:12px;padding:20px 26px;display:flex;justify-content:space-between;align-items:center;margin:22px 0}.balanced{background:#f0fdf4;border:1.5px solid #16a34a}.review{background:#fefce8;border:1.5px solid #ca8a04}.discrepancy{background:#fef2f2;border:1.5px solid #dc2626}.vl{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px}.balanced .vl{color:#15803d}.review .vl{color:#92400e}.discrepancy .vl{color:#991b1b}.vn{font-size:11px;margin-top:5px;opacity:0.75}.balanced .vn{color:#15803d}.review .vn{color:#92400e}.discrepancy .vn{color:#991b1b}.va{font-size:36px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-1.5px}.balanced .va{color:#15803d}.review .va{color:#92400e}.discrepancy .va{color:#991b1b}.sigs{display:flex;gap:28px;margin-top:28px;padding-top:20px;border-top:1px solid #e2e8f0}.sig{flex:1}.sl{border-bottom:1px solid #1e293b;height:38px;margin-bottom:8px}.sg{font-size:10px;text-transform:uppercase;letter-spacing:0.8px;color:#94a3b8}.foot{text-align:center;margin-top:22px;padding-top:14px;border-top:1px solid #f1f5f9;font-size:10px;color:#cbd5e1;letter-spacing:0.5px}@media print{body{padding:20px;max-width:100%}.vb{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="hdr"><img src="${logo}"><div class="brand">${brand}</div><div class="sub">Daily Audit Report</div></div><div class="meta"><div class="mi"><div class="ml">Store</div><div class="mv">${d.store}</div></div><div class="mi"><div class="ml">Date</div><div class="mv">${d.date}</div></div><div class="mi"><div class="ml">Staff</div><div class="mv">${d.staff||'—'}</div></div><div class="mi"><div class="ml">Register</div><div class="mv">${d.reg||'—'}</div></div></div><div class="krow"><div class="kpi"><div class="kl">Gross Revenue</div><div class="kv">$${val(d.gross)}</div></div><div class="kpi"><div class="kl">Cash Sales</div><div class="kv">$${val(b.cash)}</div></div><div class="kpi"><div class="kl">Card Sales</div><div class="kv">$${val(cards)}</div></div><div class="kpi"><div class="kl">Net Revenue</div><div class="kv">$${val(net)}</div></div></div><div class="st">Payment Channels</div><div class="pg"><div class="row"><span class="lbl">ATH</span><span class="${b.ath?'amt':'dim'}">$${val(b.ath)}</span></div><div class="row"><span class="lbl">WIC</span><span class="${b.wic?'amt':'dim'}">$${val(b.wic)}</span></div><div class="row"><span class="lbl">ATH Móvil</span><span class="${b.athm?'amt':'dim'}">$${val(b.athm)}</span></div><div class="row"><span class="lbl">MCS</span><span class="${b.mcs?'amt':'dim'}">$${val(b.mcs)}</span></div><div class="row"><span class="lbl">Visa</span><span class="${b.visa?'amt':'dim'}">$${val(b.visa)}</span></div><div class="row"><span class="lbl">Triple S</span><span class="${b.sss?'amt':'dim'}">$${val(b.sss)}</span></div><div class="row"><span class="lbl">Mastercard</span><span class="${b.mc?'amt':'dim'}">$${val(b.mc)}</span></div><div class="row"><span class="lbl">AmEx</span><span class="${b.amex?'amt':'dim'}">$${val(b.amex)}</span></div><div class="row"><span class="lbl">Discover</span><span class="${b.disc?'amt':'dim'}">$${val(b.disc)}</span></div><div class="row" style="border-top:1px solid #e2e8f0;margin-top:4px"><span class="lbl" style="color:#0097b2;font-weight:600">Total Cards</span><span style="font-weight:700;color:#0097b2;font-variant-numeric:tabular-nums">$${val(cards)}</span></div></div><div class="st">Deductions</div><div class="row"><span class="lbl">State Tax (10.5%)</span><span class="${b.taxState?'amt':'dim'}">$${val(b.taxState)}</span></div><div class="row"><span class="lbl">City Tax (1.0%)</span><span class="${b.taxCity?'amt':'dim'}">$${val(b.taxCity)}</span></div>${(b.payoutList||[]).length?`<div style="margin-top:12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;padding-bottom:4px">Payouts</div>`+(b.payoutList||[]).map(p=>`<div class="row"><span class="lbl">${p.r||'Payout'}</span><span class="amt">$${val(p.a)}</span></div>`).join('')+`<div class="row" style="font-weight:600;border-top:1px solid #e2e8f0;margin-top:4px"><span>Total Payouts</span><span class="amt">$${val(b.payouts)}</span></div>`:`<div class="row"><span class="lbl">Total Payouts</span><span class="${b.payouts?'amt':'dim'}">$${val(b.payouts)}</span></div>`}<div class="st">Cash Reconciliation</div><div class="fml"><div class="fr"><span>Opening Float</span><strong>$${val(b.float)}</strong></div><div class="fr"><span>+ Cash Sales</span><strong>$${val(b.cash)}</strong></div><div class="fr"><span>− Total Payouts</span><strong>($${val(b.payouts)})</strong></div><div class="frt"><span>= Expected in Drawer</span><span>$${val(expected)}</span></div><div class="fra"><span>Actual Cash Counted</span><span>$${val(b.actual)}</span></div></div><div class="vb ${vc}"><div><div class="vl">${vl}</div><div class="vn">${vn}</div></div><div class="va">$${val(d.variance)}</div></div><div class="sigs"><div class="sig"><div class="sl"></div><div class="sg">Manager Signature</div></div><div class="sig"><div class="sl"></div><div class="sg">Date</div></div><div class="sig"><div class="sl"></div><div class="sg">Reviewed By</div></div></div><div class="foot">${brand} · ${d.store} · ${d.date} · Printed ${new Date().toLocaleDateString()}</div></body></html>`;
+        const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#fff;color:#1e293b;font-size:13px;padding:36px 44px;max-width:680px;margin:0 auto;line-height:1.5}.hdr{text-align:center;padding-bottom:22px;border-bottom:2px solid #e2e8f0;margin-bottom:22px}.hdr img{max-height:64px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto}.brand{font-size:22px;font-weight:700;color:#0097b2;letter-spacing:-0.5px}.sub{font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:2px;color:#94a3b8;margin-top:4px}.meta{display:flex;justify-content:space-between;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 20px;margin-bottom:22px}.mi{text-align:center}.ml{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;margin-bottom:3px}.mv{font-size:14px;font-weight:600;color:#1e293b}.krow{display:flex;gap:10px;margin-bottom:4px}.kpi{flex:1;border:1px solid #e2e8f0;border-radius:10px;padding:14px 10px;text-align:center}.kl{font-size:9px;text-transform:uppercase;letter-spacing:0.8px;color:#94a3b8;margin-bottom:6px}.kv{font-size:18px;font-weight:700;color:#0097b2;font-variant-numeric:tabular-nums}.st{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;color:#0097b2;border-bottom:1px solid #e2e8f0;padding-bottom:7px;margin-bottom:10px;margin-top:22px}.row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:13px}.row:last-child{border-bottom:none}.lbl{color:#475569}.amt{font-weight:600;font-variant-numeric:tabular-nums;color:#1e293b}.dim{color:#e2e8f0}.pg{display:grid;grid-template-columns:1fr 1fr;gap:0 32px}.fml{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;margin-top:10px}.fr{display:flex;justify-content:space-between;padding:5px 0;font-size:13px;font-variant-numeric:tabular-nums;color:#64748b}.fr strong{color:#1e293b;font-weight:600}.frt{border-top:1px solid #cbd5e1;margin-top:8px;padding-top:10px;font-weight:700;font-size:14px;color:#1e293b;display:flex;justify-content:space-between}.fra{display:flex;justify-content:space-between;margin-top:10px;padding-top:12px;border-top:2px solid #1e293b;font-weight:700;font-size:15px;color:#1e293b}.vb{border-radius:12px;padding:20px 26px;display:flex;justify-content:space-between;align-items:center;margin:22px 0}.balanced{background:#f0fdf4;border:1.5px solid #16a34a}.review{background:#fefce8;border:1.5px solid #ca8a04}.discrepancy{background:#fef2f2;border:1.5px solid #dc2626}.vl{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px}.balanced .vl{color:#15803d}.review .vl{color:#92400e}.discrepancy .vl{color:#991b1b}.vn{font-size:11px;margin-top:5px;opacity:0.75}.balanced .vn{color:#15803d}.review .vn{color:#92400e}.discrepancy .vn{color:#991b1b}.va{font-size:36px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-1.5px}.balanced .va{color:#15803d}.review .va{color:#92400e}.discrepancy .va{color:#991b1b}.sigs{display:flex;gap:28px;margin-top:28px;padding-top:20px;border-top:1px solid #e2e8f0}.sig{flex:1}.sl{border-bottom:1px solid #1e293b;height:38px;margin-bottom:8px}.sg{font-size:10px;text-transform:uppercase;letter-spacing:0.8px;color:#94a3b8}.foot{text-align:center;margin-top:22px;padding-top:14px;border-top:1px solid #f1f5f9;font-size:10px;color:#cbd5e1;letter-spacing:0.5px}@page{size:letter portrait;margin:0.35in}@media print{body{padding:6px 10px;max-width:100%;font-size:12px;line-height:1.3}.hdr{padding-bottom:10px;margin-bottom:12px}.hdr img{max-height:44px;margin-bottom:7px}.brand{font-size:18px}.meta{padding:8px 14px;margin-bottom:12px;border-radius:7px}.mv{font-size:12px}.krow{margin-bottom:2px}.kpi{padding:8px 6px;border-radius:7px}.kv{font-size:14px}.st{margin-top:12px;margin-bottom:7px;padding-bottom:5px}.row{padding:3px 0;font-size:12px}.pg{gap:0 20px}.fml{padding:10px 14px;margin-top:6px;border-radius:7px}.fr{padding:2px 0;font-size:12px}.frt{margin-top:4px;padding-top:7px;font-size:12px}.fra{margin-top:6px;padding-top:8px;font-size:13px}.vb{padding:12px 18px;margin:12px 0;border-radius:8px;-webkit-print-color-adjust:exact;print-color-adjust:exact}.va{font-size:26px}.sigs{margin-top:16px;padding-top:12px;gap:20px}.sl{height:24px;margin-bottom:6px}.foot{margin-top:12px;padding-top:10px}}</style></head><body><div class="hdr"><img src="${logo}"><div class="brand">${brand}</div><div class="sub">Daily Audit Report</div></div><div class="meta"><div class="mi"><div class="ml">Store</div><div class="mv">${d.store}</div></div><div class="mi"><div class="ml">Date</div><div class="mv">${d.date}</div></div><div class="mi"><div class="ml">Staff</div><div class="mv">${d.staff||'—'}</div></div><div class="mi"><div class="ml">Register</div><div class="mv">${d.reg||'—'}</div></div></div><div class="krow"><div class="kpi"><div class="kl">Gross Revenue</div><div class="kv">$${val(d.gross)}</div></div><div class="kpi"><div class="kl">Cash Sales</div><div class="kv">$${val(b.cash)}</div></div><div class="kpi"><div class="kl">Card Sales</div><div class="kv">$${val(cards)}</div></div><div class="kpi"><div class="kl">Net Revenue</div><div class="kv">$${val(net)}</div></div></div><div class="st">Payment Channels</div><div class="pg"><div class="row"><span class="lbl">ATH</span><span class="${b.ath?'amt':'dim'}">$${val(b.ath)}</span></div><div class="row"><span class="lbl">WIC</span><span class="${b.wic?'amt':'dim'}">$${val(b.wic)}</span></div><div class="row"><span class="lbl">ATH Móvil</span><span class="${b.athm?'amt':'dim'}">$${val(b.athm)}</span></div><div class="row"><span class="lbl">MCS</span><span class="${b.mcs?'amt':'dim'}">$${val(b.mcs)}</span></div><div class="row"><span class="lbl">Visa</span><span class="${b.visa?'amt':'dim'}">$${val(b.visa)}</span></div><div class="row"><span class="lbl">Triple S</span><span class="${b.sss?'amt':'dim'}">$${val(b.sss)}</span></div><div class="row"><span class="lbl">Mastercard</span><span class="${b.mc?'amt':'dim'}">$${val(b.mc)}</span></div><div class="row"><span class="lbl">AmEx</span><span class="${b.amex?'amt':'dim'}">$${val(b.amex)}</span></div><div class="row"><span class="lbl">Discover</span><span class="${b.disc?'amt':'dim'}">$${val(b.disc)}</span></div><div class="row" style="border-top:1px solid #e2e8f0;margin-top:4px"><span class="lbl" style="color:#0097b2;font-weight:600">Total Cards</span><span style="font-weight:700;color:#0097b2;font-variant-numeric:tabular-nums">$${val(cards)}</span></div></div><div class="st">Deductions</div><div class="row"><span class="lbl">State Tax (10.5%)</span><span class="${b.taxState?'amt':'dim'}">$${val(b.taxState)}</span></div><div class="row"><span class="lbl">City Tax (1.0%)</span><span class="${b.taxCity?'amt':'dim'}">$${val(b.taxCity)}</span></div>${(b.payoutList||[]).length?`<div style="margin-top:12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;padding-bottom:4px">Payouts</div>`+(b.payoutList||[]).map(p=>`<div class="row"><span class="lbl">${p.r||'Payout'}</span><span class="amt">$${val(p.a)}</span></div>`).join('')+`<div class="row" style="font-weight:600;border-top:1px solid #e2e8f0;margin-top:4px"><span>Total Payouts</span><span class="amt">$${val(b.payouts)}</span></div>`:`<div class="row"><span class="lbl">Total Payouts</span><span class="${b.payouts?'amt':'dim'}">$${val(b.payouts)}</span></div>`}<div class="st">Cash Reconciliation</div><div class="fml"><div class="fr"><span>Opening Float</span><strong>$${val(b.float)}</strong></div><div class="fr"><span>+ Cash Sales</span><strong>$${val(b.cash)}</strong></div><div class="fr"><span>− Total Payouts</span><strong>($${val(b.payouts)})</strong></div><div class="frt"><span>= Expected in Drawer</span><span>$${val(expected)}</span></div><div class="fra"><span>Actual Cash Counted</span><span>$${val(b.actual)}</span></div></div><div class="vb ${vc}"><div><div class="vl">${vl}</div><div class="vn">${vn}</div></div><div class="va">$${val(d.variance)}</div></div><div class="sigs"><div class="sig"><div class="sl"></div><div class="sg">Manager Signature</div></div><div class="sig"><div class="sl"></div><div class="sg">Date</div></div><div class="sig"><div class="sl"></div><div class="sg">Reviewed By</div></div></div><div class="foot">${brand} · ${d.store} · ${d.date} · Printed ${new Date().toLocaleDateString()}</div></body></html>`;
         const frame=document.createElement('iframe');
         frame.style.cssText='position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none';
         frame.srcdoc=html;
@@ -2882,6 +2896,8 @@ try:
         replace_existing=True,
     )
     _scheduler.start()
+    import atexit
+    atexit.register(lambda: _scheduler.shutdown(wait=False))
     logger.info("APScheduler started: EOD reminder at 21:00 PR time")
 except ImportError:
     logger.warning("APScheduler not installed — EOD reminders disabled")
