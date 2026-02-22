@@ -56,4 +56,13 @@ node_modules/
 package-lock.json
 playwright-report/
 test-results/
-playwright/.cache/ 
+playwright/.cache/
+**/.playwright-mcp/
+
+# Database files
+*.db
+
+# Debug screenshots
+login-page*.png
+*-audit.png
+z-reviews-view.png
