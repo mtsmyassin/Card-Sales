@@ -4,6 +4,7 @@ from functools import wraps
 from threading import Timer, Thread
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, session, redirect, send_file
+from flask_wtf.csrf import CSRFProtect, generate_csrf
 from supabase import create_client, Client
 
 # Import our security and config modules
@@ -90,6 +91,8 @@ print(f"--- LAUNCHING {VERSION} ON PORT {PORT} ---")
 app = Flask(__name__)
 app.secret_key = Config.SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=Config.SESSION_TIMEOUT_MINUTES)
+app.config['WTF_CSRF_HEADERS'] = ['X-CSRFToken']
+csrf = CSRFProtect(app)
 
 # --- HTTPS ENFORCEMENT MIDDLEWARE ---
 # Always set HttpOnly and SameSite flags for session security
@@ -373,7 +376,14 @@ def api_get_logo():
         logger.error(f"Error in get_logo: {e}")
         return jsonify(error="Internal server error"), 500
 
+@app.route('/api/csrf-token', methods=['GET'])
+def csrf_token():
+    """Return a fresh CSRF token for the current session."""
+    return jsonify(token=generate_csrf())
+
+
 @app.route('/api/login', methods=['POST'])
+@csrf.exempt
 def login():
     """
     Authenticate user with password hashing and brute-force protection.
@@ -538,7 +548,7 @@ def logout():
     return jsonify(status="ok")
 
 def _send_variance_alert(store: str, date: str, reg: str, variance: float, gross: float, submitted_by: str) -> None:
-    """Send Telegram alert to admin/manager bot users when |variance| > $25."""
+    """Send Telegram alert to admin/manager bot users when |variance| > $5."""
     try:
         from telegram_bot import send_message
         _db = supabase_admin or supabase
@@ -1195,6 +1205,7 @@ def delete_user():
 # ── TELEGRAM BOT WEBHOOK ──────────────────────────────────────────────────────
 
 @app.route('/api/telegram/webhook', methods=['POST'])
+@csrf.exempt
 def telegram_webhook():
     """Receive updates from Telegram and dispatch to bot state machine."""
     # Verify secret token to reject non-Telegram requests
@@ -2327,6 +2338,24 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
 </div>
 
 <script>
+// ── CSRF: fetch token once, then patch window.fetch to inject it automatically ──
+let _csrfToken = null;
+(async () => {
+    try {
+        const r = await window._origFetch('/api/csrf-token');
+        _csrfToken = (await r.json()).token;
+    } catch(e) { console.warn('CSRF token fetch failed', e); }
+})();
+window._origFetch = window.fetch;
+window.fetch = (url, opts = {}) => {
+    const method = (opts.method || 'GET').toUpperCase();
+    if (['POST','PUT','PATCH','DELETE'].includes(method) && _csrfToken) {
+        opts.headers = Object.assign({'X-CSRFToken': _csrfToken}, opts.headers || {});
+    }
+    return window._origFetch(url, opts);
+};
+// ── End CSRF patch ──
+
 const app = {
     data: [], users: [], calDate: new Date(), calInitialized: false, role: '', store: '', _galleryPhotos: [], _galleryIdx: 0,
     init: () => {
