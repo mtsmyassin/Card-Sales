@@ -101,17 +101,29 @@ class TestValidateBreakdown:
 
 @pytest.fixture
 def flask_app():
-    """Create a test Flask app with session and supabase_admin mocked."""
+    """Create a test Flask app with Supabase clients mocked via create_client."""
     import os
+    import importlib
+    from config import Config
     os.environ.setdefault('SUPABASE_URL', 'https://fake.supabase.co')
     os.environ.setdefault('SUPABASE_KEY', 'fake-key')
-    os.environ.setdefault('SUPABASE_SERVICE_KEY', 'fake-service-key')
     os.environ.setdefault('SECRET_KEY', 'test-secret')
 
-    with patch('app.supabase'), patch('app.supabase_admin'):
+    mock_client = MagicMock()
+    with patch('supabase.create_client', return_value=mock_client), \
+         patch.object(Config, 'SUPABASE_SERVICE_KEY', 'fake-service-key'), \
+         patch.object(Config, 'startup_check'):
         import app as _app
+        importlib.reload(_app)
+        import extensions
         _app.app.config['TESTING'] = True
         _app.app.config['SECRET_KEY'] = 'test-secret'
+        _app.app.config['WTF_CSRF_ENABLED'] = False
+        # Routes use extensions.supabase_admin directly.
+        # Exposing it on _app means tests can configure mock return values
+        # via flask_app.supabase_admin and routes will see the same mock.
+        _app.supabase_admin = extensions.supabase_admin
+        _app.supabase = extensions.supabase
         yield _app
 
 

@@ -30,8 +30,9 @@ def _load_main_ui():
 
 
 def _app_source():
+    # Diagnostics patterns live in routes/diagnostics.py after the refactor
     with open(
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py"),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "routes", "diagnostics.py"),
         encoding="utf-8",
     ) as f:
         return f.read()

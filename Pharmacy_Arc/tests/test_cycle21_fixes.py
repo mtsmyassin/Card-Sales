@@ -86,7 +86,7 @@ class TestSessionTimeout:
     def test_login_stamps_last_active(self):
         """Successful login must set session['last_active'] to current UTC time."""
         src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "routes", "auth.py"),
             encoding="utf-8",
         ).read()
         login_fn_start = src.index("def login():")
@@ -99,11 +99,11 @@ class TestSessionTimeout:
     def test_session_timeout_uses_timezone_aware_utc(self):
         """enforce_session_timeout must use datetime.now(timezone.utc), not utcnow()."""
         src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "routes", "auth.py"),
             encoding="utf-8",
         ).read()
         hook_start = src.index("def enforce_session_timeout()")
-        hook_end = src.index("\n\n@app.", hook_start)
+        hook_end = src.index("\n\n@bp.", hook_start)
         hook_block = src[hook_start:hook_end]
         assert "timezone.utc" in hook_block, (
             "enforce_session_timeout must use timezone-aware UTC (datetime.now(timezone.utc))"
@@ -227,7 +227,7 @@ class TestOfflineQueueCap:
         assert callable(app_module.save_to_queue), "save_to_queue must exist"
         # Check the source — return type should be bool
         src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "helpers", "offline_queue.py"),
             encoding="utf-8",
         ).read()
         fn_start = src.index("def save_to_queue(")
@@ -237,28 +237,28 @@ class TestOfflineQueueCap:
         assert "return True" in block, "save_to_queue must return True on success"
 
     def test_queue_max_size_constant_defined(self):
-        """OFFLINE_QUEUE_MAX_SIZE must be defined in app.py."""
+        """OFFLINE_QUEUE_MAX_SIZE must be defined in helpers/offline_queue.py."""
         src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "helpers", "offline_queue.py"),
             encoding="utf-8",
         ).read()
         assert "OFFLINE_QUEUE_MAX_SIZE" in src, (
-            "OFFLINE_QUEUE_MAX_SIZE constant must be defined in app.py"
+            "OFFLINE_QUEUE_MAX_SIZE constant must be defined"
         )
 
     def test_queue_cap_enforced(self, tmp_path, monkeypatch):
         """save_to_queue must return False and drop the record when at max capacity."""
-        app_module = _load_app()
+        import helpers.offline_queue as oq
         q_file = str(tmp_path / "offline_queue.json")
-        monkeypatch.setattr(app_module, "get_queue_path", lambda: q_file)
-        monkeypatch.setattr(app_module, "OFFLINE_QUEUE_MAX_SIZE", 3)
+        monkeypatch.setattr(oq, "get_queue_path", lambda: q_file)
+        monkeypatch.setattr(oq, "OFFLINE_QUEUE_MAX_SIZE", 3)
 
         for i in range(3):
-            result = app_module.save_to_queue({"date": f"01/0{i+1}/2026", "store": "test"})
+            result = oq.save_to_queue({"date": f"01/0{i+1}/2026", "store": "test"})
             assert result is True
 
         # 4th entry should be rejected
-        result = app_module.save_to_queue({"date": "01/04/2026", "store": "test"})
+        result = oq.save_to_queue({"date": "01/04/2026", "store": "test"})
         assert result is False, "save_to_queue must return False when queue is full"
 
         # Queue file must still have only 3 entries
