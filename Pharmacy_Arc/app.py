@@ -1015,7 +1015,7 @@ def diagnostics():
 def list_users():
     """List all users (admin only)."""
     try:
-        result = supabase.table("users").select("*").execute()
+        result = (supabase_admin or supabase).table("users").select("*").execute()
         logger.info(f"User list accessed by {session.get('user')}")
         return jsonify(result.data)
     except Exception as e:
@@ -1040,7 +1040,7 @@ def save_user():
             return jsonify(error="Username is required"), 400
         
         try:
-            existing = supabase.table("users").select("*").eq("username", user_to_save).execute()
+            existing = (supabase_admin or supabase).table("users").select("*").eq("username", user_to_save).execute()
             is_update = len(existing.data) > 0
             before_state = existing.data[0] if is_update else None
         except:
@@ -1077,7 +1077,7 @@ def save_user():
             "store": new_store
         }
         
-        supabase.table("users").upsert(user_data).execute()
+        (supabase_admin or supabase).table("users").upsert(user_data).execute()
         
         # Log the action
         action = "USER_UPDATE" if is_update else "USER_CREATE"
@@ -1137,14 +1137,14 @@ def delete_user():
         
         # Get user details before deletion
         try:
-            existing = supabase.table("users").select("*").eq("username", user_to_delete).execute()
+            existing = (supabase_admin or supabase).table("users").select("*").eq("username", user_to_delete).execute()
             before_state = existing.data[0] if existing.data else None
             if not before_state:
                 return jsonify(error="User not found"), 404
         except:
             before_state = None
         
-        supabase.table("users").delete().eq("username", user_to_delete).execute()
+        (supabase_admin or supabase).table("users").delete().eq("username", user_to_delete).execute()
         
         # Log deletion
         audit_log(
