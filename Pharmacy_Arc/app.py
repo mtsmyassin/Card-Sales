@@ -647,7 +647,7 @@ def save():
             logger.info(f"Audit entry created by {username}: date={d['date']}, store={d.get('store')}")
             # Variance alert — fire-and-forget, never block the response
             variance_val = float(d.get('variance', 0))
-            if abs(variance_val) > 25:
+            if abs(variance_val) > 5:
                 try:
                     _send_variance_alert(
                         store=d.get('store', 'Main'),
