@@ -7,6 +7,7 @@ import os
 import io
 import time
 import logging
+import threading
 import unicodedata
 import requests as http
 
@@ -15,7 +16,9 @@ from ocr import extract_z_report, has_null_fields, NULL_FIELD_NAMES, OCRParseErr
 logger = logging.getLogger(__name__)
 
 # In-memory conversation state: { telegram_id: { state, username, store, ... } }
+# Protected by _bot_state_lock to prevent TOCTOU races across gunicorn workers.
 bot_state: dict = {}
+_bot_state_lock = threading.Lock()
 
 _BOT_TOKEN = None  # loaded lazily from env
 
@@ -214,9 +217,12 @@ def load_session(telegram_id: int) -> dict | None:
 
 
 def _set_state(telegram_id: int, state: dict) -> None:
-    """Update in-memory bot_state and persist to Supabase."""
-    bot_state[telegram_id] = state
-    persist_session(telegram_id, state)
+    """Update in-memory bot_state (under lock) and fire-and-forget persist to Supabase."""
+    with _bot_state_lock:
+        bot_state[telegram_id] = state
+    # Persist asynchronously so the dispatch thread is never blocked by a slow DB write.
+    t = threading.Thread(target=persist_session, args=(telegram_id, state), daemon=True)
+    t.start()
 
 
 # ── User helpers ───────────────────────────────────────────────────────────────
@@ -521,12 +527,14 @@ def handle_update(update: dict) -> None:
     tg_username = msg["from"].get("username", "")
     chat_id = msg["chat"]["id"]
 
-    # Load state: prefer in-memory, fall back to DB (restores state after restart)
-    state = bot_state.get(telegram_id)
+    # Load state: prefer in-memory (under lock), fall back to DB on cache miss.
+    with _bot_state_lock:
+        state = bot_state.get(telegram_id)
     if state is None:
         state = load_session(telegram_id) or {}
         if state:
-            bot_state[telegram_id] = state  # cache locally (no re-persist)
+            with _bot_state_lock:
+                bot_state[telegram_id] = state  # populate cache; no re-persist
     current_state = state.get("state")
 
     # ── photo received ────────────────────────────────────────────────────────

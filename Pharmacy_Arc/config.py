@@ -44,6 +44,9 @@ class Config:
     EMERGENCY_ADMIN_SUPER: str = os.getenv('EMERGENCY_ADMIN_SUPER', '')
     EMERGENCY_ADMIN_BASIC: str = os.getenv('EMERGENCY_ADMIN_BASIC', '')
     
+    # Telegram Bot
+    TELEGRAM_WEBHOOK_SECRET: str = os.getenv('TELEGRAM_WEBHOOK_SECRET', '')
+
     # Security Settings
     SESSION_TIMEOUT_MINUTES: int = int(os.getenv('SESSION_TIMEOUT_MINUTES', '30'))
     MAX_LOGIN_ATTEMPTS: int = int(os.getenv('MAX_LOGIN_ATTEMPTS', '5'))

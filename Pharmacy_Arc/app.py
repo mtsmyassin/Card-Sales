@@ -1,4 +1,4 @@
-import json, webbrowser, os, sys, base64, re, time, io
+import json, webbrowser, os, sys, base64, re, time, io, hmac
 import logging
 from functools import wraps
 from threading import Timer, Thread
@@ -1208,11 +1208,16 @@ def delete_user():
 @csrf.exempt
 def telegram_webhook():
     """Receive updates from Telegram and dispatch to bot state machine."""
-    # Verify secret token to reject non-Telegram requests
-    expected_secret = (Config.SECRET_KEY or "")[:32]
+    # Verify secret token set via TELEGRAM_WEBHOOK_SECRET env var.
+    # Use constant-time compare to prevent timing-oracle attacks.
+    expected_secret = Config.TELEGRAM_WEBHOOK_SECRET
     incoming_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    if expected_secret and incoming_secret != expected_secret:
-        logger.warning("Telegram webhook: invalid secret token")
+    if not expected_secret:
+        logger.warning("Telegram webhook: TELEGRAM_WEBHOOK_SECRET not set — rejecting all requests")
+        return jsonify(ok=False), 403
+    if not hmac.compare_digest(incoming_secret, expected_secret):
+        logger.warning("Telegram webhook: invalid secret token from %s",
+                       request.headers.get("X-Forwarded-For", request.remote_addr))
         return jsonify(ok=False), 403
 
     update = request.json
@@ -2893,6 +2898,7 @@ def _send_eod_reminders() -> None:
             return
         from telegram_bot import send_message
         notified = set()
+        failed = []
         for bu in bot_users_resp.data:
             store = bu.get("store", "")
             tid = bu["telegram_id"]
@@ -2906,9 +2912,12 @@ def _send_eod_reminders() -> None:
                         f"Envía una foto del Reporte Z para registrarlo."
                     )
                     notified.add(tid)
-                except Exception:
-                    pass
-        logger.info(f"EOD reminders sent to {len(notified)} user(s) for {today}")
+                except Exception as exc:
+                    logger.error("EOD reminder failed store=%s tid=%s: %s", store, tid, exc)
+                    failed.append(store)
+        logger.info("EOD reminders: sent=%d failed=%d for %s", len(notified), len(failed), today)
+        if failed:
+            logger.warning("EOD reminder failures for stores: %s", failed)
     except Exception as e:
         logger.warning(f"_send_eod_reminders failed: {e}")
 
