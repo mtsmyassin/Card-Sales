@@ -2,7 +2,7 @@ import json, webbrowser, os, sys, base64, re, time, io, hmac
 import logging
 from functools import wraps
 from threading import Timer, Thread
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template_string, request, jsonify, session, redirect, send_file
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from supabase import create_client, Client
@@ -92,7 +92,12 @@ app = Flask(__name__)
 app.secret_key = Config.SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=Config.SESSION_TIMEOUT_MINUTES)
 app.config['WTF_CSRF_HEADERS'] = ['X-CSRFToken']
+app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5 MB — prevents stalled workers from huge uploads
 csrf = CSRFProtect(app)
+
+@app.errorhandler(413)
+def payload_too_large(e):
+    return jsonify(error="Payload too large (máximo 5 MB)"), 413
 
 # --- HTTPS ENFORCEMENT MIDDLEWARE ---
 # Always set HttpOnly and SameSite flags for session security
@@ -117,6 +122,40 @@ if Config.REQUIRE_HTTPS:
 else:
     app.config['SESSION_COOKIE_SECURE'] = False
     logger.warning("⚠️  SESSION_COOKIE_SECURE disabled - HTTPS not required. Enable for production!")
+
+
+_SESSION_SKIP_ENDPOINTS = frozenset({
+    "login", "telegram_webhook", "csrf_token", "static", "favicon", "health",
+})
+
+@app.before_request
+def enforce_session_timeout():
+    """Expire sessions that have been idle longer than SESSION_TIMEOUT_MINUTES."""
+    if not session.get('logged_in'):
+        return  # unauthenticated — let route handlers deal with it
+    if request.endpoint in _SESSION_SKIP_ENDPOINTS:
+        return
+
+    timeout = timedelta(minutes=Config.SESSION_TIMEOUT_MINUTES)
+    last_str = session.get('last_active')
+    now = datetime.now(timezone.utc)
+
+    if last_str:
+        try:
+            last_dt = datetime.fromisoformat(last_str)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            if now - last_dt > timeout:
+                username = session.get('user', 'unknown')
+                logger.info("Session timeout for user: %s (idle >%dm)", username, Config.SESSION_TIMEOUT_MINUTES)
+                session.clear()
+                return  # require_auth will return 401; frontend shows login screen
+        except (ValueError, TypeError):
+            session.clear()
+            return
+
+    session['last_active'] = now.isoformat()
+    session.modified = True
 
 
 @app.after_request
@@ -146,13 +185,25 @@ SUPABASE_URL = Config.SUPABASE_URL
 SUPABASE_KEY = Config.SUPABASE_KEY
 OFFLINE_FILE = Config.OFFLINE_FILE
 
-supabase = None
-try:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    logger.info("Successfully connected to Supabase")
-except Exception as e:
-    logger.critical(f"Cloud Client Init Failed: {e}")
-    print(f"CRITICAL ERROR: Cloud Client Init Failed. {e}")
+def _init_supabase(url: str, key: str, label: str, max_attempts: int = 3):
+    """Create a Supabase client, retrying on failure (handles cold-start latency)."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            client = create_client(url, key)
+            logger.info("Supabase %s client connected (attempt %d)", label, attempt)
+            return client
+        except Exception as exc:
+            if attempt == max_attempts:
+                logger.critical("Supabase %s: all %d attempts failed: %s", label, max_attempts, exc)
+                return None
+            delay = 2 ** (attempt - 1)  # 1s, 2s
+            logger.warning("Supabase %s: attempt %d failed, retrying in %ds: %s", label, attempt, delay, exc)
+            time.sleep(delay)
+    return None
+
+supabase = _init_supabase(SUPABASE_URL, SUPABASE_KEY, "anon")
+if supabase is None:
+    print("CRITICAL ERROR: Supabase anon client unavailable — app running in offline mode")
 
 # Admin client (service role key) — used for storage operations that require
 # elevated permissions (e.g. creating buckets, bypassing RLS on uploads).
@@ -160,11 +211,9 @@ except Exception as e:
 supabase_admin = None
 _service_key = Config.SUPABASE_SERVICE_KEY
 if _service_key:
-    try:
-        supabase_admin = create_client(SUPABASE_URL, _service_key)
-        logger.info("Supabase admin client (service role) initialized")
-    except Exception as e:
-        logger.warning(f"Supabase admin client init failed: {e}")
+    supabase_admin = _init_supabase(SUPABASE_URL, _service_key, "admin")
+    if supabase_admin is None:
+        logger.warning("Supabase admin client unavailable — photo uploads disabled")
 
 # Switch lockout tracker to Supabase-backed persistence so lockouts survive
 # Railway redeploys (ephemeral filesystem would wipe the local file on every deploy).
@@ -310,7 +359,10 @@ def get_logo(store_name=None):
         return base64.b64encode(fh.read()).decode()
 
 # --- 3. OFFLINE HANDLERS ---
-def save_to_queue(payload):
+OFFLINE_QUEUE_MAX_SIZE = int(os.getenv('OFFLINE_QUEUE_MAX_SIZE', '2000'))
+
+def save_to_queue(payload) -> bool:
+    """Append payload to offline queue. Returns False if queue is full (record dropped)."""
     q_path = get_queue_path()
     queue = []
     if os.path.exists(q_path):
@@ -319,9 +371,17 @@ def save_to_queue(payload):
                 queue = json.load(fh)
         except Exception:
             pass
+    if len(queue) >= OFFLINE_QUEUE_MAX_SIZE:
+        logger.error(
+            "Offline queue FULL (%d/%d) — record dropped: date=%s store=%s",
+            len(queue), OFFLINE_QUEUE_MAX_SIZE,
+            payload.get('date'), payload.get('store'),
+        )
+        return False
     queue.append(payload)
     with open(q_path, 'w', encoding='utf-8') as f:
         json.dump(queue, f, ensure_ascii=False)
+    return True
 
 def load_queue():
     q_path = get_queue_path()
@@ -431,6 +491,7 @@ def login():
                 session['role'] = role
                 session['store'] = 'All'
                 session['login_time'] = datetime.utcnow().isoformat()
+                session['last_active'] = datetime.now(timezone.utc).isoformat()
                 
                 login_tracker.record_successful_login(u)
                 
@@ -479,6 +540,7 @@ def login():
                     session['role'] = user['role']
                     session['store'] = user['store']
                     session['login_time'] = datetime.utcnow().isoformat()
+                    session['last_active'] = datetime.now(timezone.utc).isoformat()
                     
                     login_tracker.record_successful_login(u)
                     

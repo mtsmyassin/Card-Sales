@@ -79,11 +79,11 @@ class AuditLogger:
             Hash string of last entry, or 'GENESIS' if empty log
         """
         try:
-            with open(self.log_file, 'r') as f:
+            with open(self.log_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
                 if not lines:
                     return 'GENESIS'
-                
+
                 last_line = lines[-1].strip()
                 if last_line:
                     last_entry = json.loads(last_line)
@@ -163,12 +163,13 @@ class AuditLogger:
             entry_hash = self._compute_entry_hash(entry)
             entry['entry_hash'] = entry_hash
             
-            # Append to log file
-            with open(self.log_file, 'a') as f:
-                f.write(json.dumps(entry) + '\n')
-
-            # Mirror to Supabase (non-blocking; swallows errors)
+            # Write to Supabase first (canonical store; survives Railway redeploys).
             self._write_to_db(entry)
+
+            # Append to local file as fallback / tamper-evident backup.
+            # 'a' mode + small writes are atomic on Linux; encoding='utf-8' for Windows.
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry) + '\n')
     
     def verify_integrity(self) -> tuple[bool, List[str]]:
         """
@@ -180,9 +181,9 @@ class AuditLogger:
         errors = []
         
         try:
-            with open(self.log_file, 'r') as f:
+            with open(self.log_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
-            
+
             if not lines:
                 return True, []
             
@@ -249,9 +250,9 @@ class AuditLogger:
             List of matching audit entries
         """
         try:
-            with open(self.log_file, 'r') as f:
+            with open(self.log_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
-            
+
             entries = []
             for line in lines:
                 line = line.strip()

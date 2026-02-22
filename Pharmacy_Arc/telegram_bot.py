@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 bot_state: dict = {}
 _bot_state_lock = threading.Lock()
 
-_BOT_TOKEN = None  # loaded lazily from env
+# Load bot token at import time so a missing token is caught at startup, not on the first message.
+_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+if not _BOT_TOKEN:
+    logger.critical("TELEGRAM_BOT_TOKEN is not set — Telegram bot will refuse all requests")
 
 KNOWN_STORES = ["Carimas #1", "Carimas #2", "Carimas #3", "Carthage"]
 STORE_MENU = (
@@ -129,9 +132,10 @@ def _format_register_id(register) -> str:
 
 
 def _token() -> str:
-    global _BOT_TOKEN
-    if _BOT_TOKEN is None:
-        _BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not _BOT_TOKEN:
+        raise RuntimeError(
+            "TELEGRAM_BOT_TOKEN is not set — add it to Railway Variables"
+        )
     return _BOT_TOKEN
 
 
