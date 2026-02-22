@@ -108,7 +108,7 @@ class TestNewBotFlow:
                         handle_update(make_photo_update(100))
 
         assert bot_state[100]["state"] == "AWAITING_DATE"
-        assert any("date" in r.lower() for r in replies)
+        assert any("fecha" in r.lower() for r in replies)
 
     def test_date_ok_leads_to_awaiting_register(self):
         """Replying OK in AWAITING_DATE confirms the OCR date and moves to AWAITING_REGISTER."""
@@ -173,7 +173,7 @@ class TestNewBotFlow:
             handle_update(make_text_update(104, "OK"))
 
         assert bot_state[104]["state"] == "AWAITING_CONFIRMATION"
-        assert any("save" in r.lower() for r in replies)
+        assert any("guardar" in r.lower() for r in replies)
 
     def test_yes_confirmation_saves_entry_and_photo(self):
         """YES in AWAITING_CONFIRMATION calls save_audit_entry + save_photo_record."""
@@ -194,7 +194,7 @@ class TestNewBotFlow:
                         handle_update(make_text_update(105, "YES"))
 
         assert bot_state[105]["state"] == "REGISTERED"
-        assert any("saved" in r.lower() for r in replies)
+        assert any("guardado" in r.lower() for r in replies)
         mock_photo.assert_called_once_with(
             entry_id=99,
             store="Carimas #2",
