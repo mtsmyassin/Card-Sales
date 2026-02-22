@@ -2631,12 +2631,24 @@ const app = {
         try {
             const u = await (await fetch('/api/users/list')).json(); 
             app.users=u; 
-            document.getElementById('userTable').innerHTML='<table><tr><th>User</th><th>Role</th><th>Store</th><th>Pass</th><th>Actions</th></tr>'+u.map(x=>`<tr><td>${x.username}</td><td>${x.role}</td><td>${x.store}</td><td>${app.role==='super_admin'?x.password:'••••'}</td><td><button onclick="app.editUser('${x.username}')" class="action-btn btn-edit">✏️</button><button onclick="app.deleteUser('${x.username}')" class="action-btn btn-del">🗑</button></td></tr>`).join('')+'</table>'; 
+            document.getElementById('userTable').innerHTML='<table><tr><th>User</th><th>Role</th><th>Store</th><th>Pass</th><th>Actions</th></tr>'+u.map(x=>`<tr><td>${x.username}</td><td>${x.role}</td><td>${x.store}</td><td>${app.pwCell(x.username)}</td><td><button onclick="app.editUser('${x.username}')" class="action-btn btn-edit">✏️</button><button onclick="app.deleteUser('${x.username}')" class="action-btn btn-del">🗑</button></td></tr>`).join('')+'</table>'; 
         } catch(e) {
             console.error('Failed to fetch users:', e);
             alert('Failed to load users. Please refresh the page.');
         } finally {
             app.hideLoading();
+        }
+    },
+    pwCell: (un) => {
+        if (app.role !== 'super_admin') return '•••••';
+        const pw = (app.users.find(u=>u.username===un)||{}).password||'';
+        return '<span class="pass-reveal" data-pw="' + pw.replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '" onclick="app.togglePass(this)" title="Click to reveal" style="cursor:pointer;letter-spacing:2px;color:#94a3b8">•••••</span>';
+    },
+    togglePass: (el) => {
+        if (el.classList.contains('revealed')) {
+            el.textContent='•••••'; el.classList.remove('revealed'); el.style.letterSpacing='2px'; el.style.color='#94a3b8';
+        } else {
+            el.textContent=el.dataset.pw; el.classList.add('revealed'); el.style.letterSpacing='0'; el.style.color='#ef4444';
         }
     },
     editUser: (n) => { const u=app.users.find(x=>x.username===n); if(!u)return; document.getElementById('u_name').value=u.username; document.getElementById('u_pass').value=u.password; document.getElementById('u_role').value=u.role; document.getElementById('u_store').value=u.store; const b=document.getElementById('userSaveBtn'); b.innerText="Update User"; b.style.background="#f59e0b"; window.scrollTo({top:0,behavior:'smooth'}); },
