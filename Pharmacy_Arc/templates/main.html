@@ -405,12 +405,6 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
 <script>
 // ── CSRF: fetch token once, then patch window.fetch to inject it automatically ──
 let _csrfToken = null;
-(async () => {
-    try {
-        const r = await window._origFetch('/api/csrf-token');
-        _csrfToken = (await r.json()).token;
-    } catch(e) { console.warn('CSRF token fetch failed', e); }
-})();
 window._origFetch = window.fetch;
 window.fetch = (url, opts = {}) => {
     const method = (opts.method || 'GET').toUpperCase();
@@ -419,6 +413,12 @@ window.fetch = (url, opts = {}) => {
     }
     return window._origFetch(url, opts);
 };
+async function _fetchCsrfToken() {
+    try {
+        const r = await window._origFetch('/api/csrf-token');
+        _csrfToken = (await r.json()).token;
+    } catch(e) { console.warn('CSRF token fetch failed', e); }
+}
 // ── End CSRF patch ──
 
 const app = {
@@ -918,7 +918,7 @@ app.zr = {
     }
 };
 
-app.init();
+_fetchCsrfToken().then(() => app.init());
 </script>
 <!-- Z Report Image Modal -->
 <div id="zreportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
