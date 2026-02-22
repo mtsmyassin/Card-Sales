@@ -67,6 +67,9 @@ def create_app() -> Flask:
 
         @app.before_request
         def enforce_https():
+            # Trust X-Forwarded-Proto from reverse proxies (Railway, Heroku, etc.)
+            if request.headers.get('X-Forwarded-Proto', 'https') == 'https':
+                return  # already secure via proxy
             if not request.is_secure and request.url.startswith('http://'):
                 if not (request.host.startswith('127.0.0.1') or
                         request.host.startswith('localhost')):
