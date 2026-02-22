@@ -1,0 +1,415 @@
+"""Audits Blueprint — CRUD for pharmacy sales audit entries."""
+import json
+import logging
+from flask import Blueprint, request, jsonify, session
+from audit_log import audit_log
+import extensions
+from helpers.auth_utils import require_auth
+from helpers.validation import validate_audit_entry
+from helpers.offline_queue import save_to_queue, load_queue, clear_queue, get_queue_path
+
+logger = logging.getLogger(__name__)
+bp = Blueprint('audits', __name__)
+
+
+def _send_variance_alert(store: str, date: str, reg: str, variance: float, gross: float, submitted_by: str) -> None:
+    """Send Telegram alert to admin/manager bot users when |variance| > $5."""
+    try:
+        from telegram_bot import send_message
+        _db = extensions.supabase_admin or extensions.supabase
+        if _db is None:
+            return
+        bot_users_resp = _db.table("bot_users").select("telegram_id, username, store").execute()
+        if not (bot_users_resp.data):
+            return
+        # Cross-reference roles
+        unames = [u["username"] for u in bot_users_resp.data if u.get("username")]
+        role_map = {}
+        if unames:
+            users_resp = _db.table("users").select("username, role, store").in_("username", unames).execute()
+            role_map = {u["username"]: (u.get("role", "staff"), u.get("store", "")) for u in (users_resp.data or [])}
+        sign = "🔴 Corto" if variance < 0 else "🟡 Sobre"
+        msg = (
+            f"⚠️ Varianza {sign}: ${abs(variance):.2f}\n"
+            f"Tienda: {store} | Caja: {reg} | Fecha: {date}\n"
+            f"Bruto: ${gross:.2f} | Enviado por: {submitted_by}"
+        )
+        for bu in bot_users_resp.data:
+            role, user_store = role_map.get(bu.get("username", ""), ("staff", ""))
+            if role in ("admin", "super_admin", "manager") or user_store == store:
+                try:
+                    send_message(bu["telegram_id"], msg)
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"_send_variance_alert failed: {e}")
+
+
+@bp.route('/api/save', methods=['POST'])
+@require_auth()
+def save():
+    """Create a new audit entry with audit logging and input validation."""
+    try:
+        d = request.json
+        if not d:
+            return jsonify(error="No data provided"), 400
+
+        # Validate input
+        is_valid, error_msg = validate_audit_entry(d)
+        if not is_valid:
+            logger.warning(f"Invalid audit entry data from {session.get('user')}: {error_msg}")
+            return jsonify(error=error_msg), 400
+
+        # Duplicate check — use admin client so RLS doesn't hide existing entries
+        _dup_db = extensions.supabase_admin or extensions.supabase
+        try:
+            dup = _dup_db.table("audits").select("id") \
+                .eq("date", d['date']) \
+                .eq("store", d.get('store', 'Main')) \
+                .eq("reg", d['reg']) \
+                .execute()
+            if dup.data:
+                logger.warning(
+                    f"[save] Duplicate entry rejected: user={session.get('user')!r} "
+                    f"date={d['date']} store={d.get('store')} reg={d['reg']}"
+                )
+                return jsonify(
+                    error=f"Duplicate: a record for {d['date']} / {d.get('store')} / {d['reg']} already exists.",
+                    code="DUPLICATE"
+                ), 409
+        except Exception as e:
+            logger.warning(f"[save] Duplicate check failed (proceeding): {e}")
+
+        username = session.get('user')
+        role = session.get('role')
+
+        record = {
+            "date": d['date'],
+            "reg": d['reg'],
+            "staff": d['staff'],
+            "store": d.get('store', 'Main'),
+            "gross": float(d['gross']),
+            "net": float(d['net']),
+            "variance": float(d['variance']),
+            "payload": d
+        }
+
+        try:
+            result = (extensions.supabase_admin or extensions.supabase).table("audits").insert(record).execute()
+
+            # Log successful creation
+            audit_log(
+                action="CREATE",
+                actor=username,
+                role=role,
+                entity_type="AUDIT_ENTRY",
+                entity_id=str(result.data[0]['id']) if result.data else None,
+                after={"date": d['date'], "store": d.get('store'), "gross": d['gross']},
+                success=True,
+                context={"ip": request.remote_addr}
+            )
+
+            logger.info(f"Audit entry created by {username}: date={d['date']}, store={d.get('store')}")
+            # Variance alert — fire-and-forget, never block the response
+            variance_val = float(d.get('variance', 0))
+            if abs(variance_val) > 5:
+                try:
+                    _send_variance_alert(
+                        store=d.get('store', 'Main'),
+                        date=d['date'],
+                        reg=d['reg'],
+                        variance=variance_val,
+                        gross=float(d['gross']),
+                        submitted_by=username,
+                    )
+                except Exception:
+                    pass
+            return jsonify(status="success")
+
+        except Exception as e:
+            logger.warning(f"Failed to save to database, queuing offline: {e}")
+            save_to_queue(record)
+
+            # Log offline save
+            audit_log(
+                action="CREATE_OFFLINE",
+                actor=username,
+                role=role,
+                entity_type="AUDIT_ENTRY",
+                after={"date": d['date'], "store": d.get('store'), "gross": d['gross']},
+                success=True,
+                context={"ip": request.remote_addr, "reason": "database_unavailable"}
+            )
+
+            return jsonify(status="offline")
+
+    except Exception as e:
+        logger.error(f"Error in save endpoint: {e}", exc_info=True)
+        return jsonify(error="Internal server error"), 500
+
+
+@bp.route('/api/sync', methods=['POST'])
+@require_auth()
+def sync():
+    """Sync offline queue to database (authenticated users only)."""
+    username = session.get('user')
+    role = session.get('role')
+
+    queue = load_queue()
+    if not queue:
+        return jsonify(status="empty")
+    failed_items = []
+    success_count = 0
+    for item in queue:
+        try:
+            # Validate before inserting (offline entries skip the /api/save validation)
+            ok, err = validate_audit_entry(item)
+            if not ok:
+                logger.warning(f"[sync] Skipping invalid queue item: {err} — {item}")
+                failed_items.append(item)
+                continue
+
+            # Duplicate check — DB unique constraint on (date, store, reg)
+            _db = extensions.supabase_admin or extensions.supabase
+            date_val = item.get('date')
+            store_val = item.get('store')
+            reg_val = item.get('reg')
+            dup = _db.table("audits").select("id").eq("date", date_val).eq(
+                "store", store_val).eq("reg", reg_val).limit(1).execute()
+            if dup.data:
+                logger.warning(f"[sync] Skipping duplicate: date={date_val} store={store_val} reg={reg_val}")
+                success_count += 1  # Don't keep retrying a duplicate — remove from queue
+                continue
+
+            _db.table("audits").insert(item).execute()
+            success_count += 1
+
+            # Log successful sync
+            audit_log(
+                action="SYNC",
+                actor=username,
+                role=role,
+                entity_type="OFFLINE_QUEUE",
+                success=True,
+                context={"ip": request.remote_addr, "records": 1}
+            )
+        except Exception as exc:
+            logger.warning(f"[sync] Insert failed for item date={item.get('date')} store={item.get('store')}: {exc}")
+            failed_items.append(item)
+    if failed_items:
+        q_path = get_queue_path()
+        with open(q_path, 'w', encoding='utf-8') as f:
+            json.dump(failed_items, f, ensure_ascii=False)
+    else:
+        clear_queue()
+    return jsonify(status="success", count=success_count, remaining=len(failed_items))
+
+
+@bp.route('/api/update', methods=['POST'])
+@require_auth()
+def update():
+    """Update an audit entry with RBAC, input validation, and audit logging."""
+    username = session.get('user')
+    role = session.get('role')
+
+    # Staff cannot edit
+    if role == 'staff':
+        logger.warning(f"Staff user {username} attempted to edit entry")
+        audit_log(
+            action="UPDATE_DENIED",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            success=False,
+            error="Staff role cannot edit entries",
+            context={"ip": request.remote_addr}
+        )
+        return jsonify(error="Permission Denied: Staff cannot edit entries"), 403
+
+    try:
+        d = request.json
+        if not d:
+            return jsonify(error="No data provided"), 400
+
+        # Validate ID
+        uid = d.get('id')
+        if not uid:
+            return jsonify(error="Missing entry ID"), 400
+
+        # Validate input
+        is_valid, error_msg = validate_audit_entry(d)
+        if not is_valid:
+            logger.warning(f"Invalid audit entry data from {username}: {error_msg}")
+            return jsonify(error=error_msg), 400
+
+        # Get current record for audit trail
+        try:
+            old_record = (extensions.supabase_admin or extensions.supabase).table("audits").select("*").eq("id", uid).execute()
+            before_state = old_record.data[0] if old_record.data else None
+        except Exception:
+            before_state = None
+
+        record = {
+            "date": d['date'],
+            "reg": d['reg'],
+            "staff": d['staff'],
+            "store": d.get('store', 'Main'),
+            "gross": float(d['gross']),
+            "net": float(d['net']),
+            "variance": float(d['variance']),
+            "payload": d
+        }
+
+        (extensions.supabase_admin or extensions.supabase).table("audits").update(record).eq("id", uid).execute()
+
+        # Log successful update
+        audit_log(
+            action="UPDATE",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            entity_id=str(uid),
+            before={"date": before_state['date'], "gross": before_state['gross']} if before_state else None,
+            after={"date": d['date'], "gross": d['gross']},
+            success=True,
+            context={"ip": request.remote_addr}
+        )
+
+        logger.info(f"Audit entry {uid} updated by {username}")
+        return jsonify(status="success")
+
+    except Exception as e:
+        logger.error(f"Error updating entry {uid}: {e}", exc_info=True)
+
+        audit_log(
+            action="UPDATE",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            entity_id=str(uid) if uid else None,
+            success=False,
+            error=str(e),
+            context={"ip": request.remote_addr}
+        )
+
+        return jsonify(error=str(e)), 500
+
+
+@bp.route('/api/delete', methods=['POST'])
+@require_auth()
+def delete():
+    """Delete an audit entry with RBAC and audit logging."""
+    username = session.get('user')
+    role = session.get('role')
+
+    # Staff cannot delete
+    if role == 'staff':
+        logger.warning(f"Staff user {username} attempted to delete entry")
+        audit_log(
+            action="DELETE_DENIED",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            success=False,
+            error="Staff role cannot delete entries",
+            context={"ip": request.remote_addr}
+        )
+        return jsonify(error="Permission Denied: Staff cannot delete entries"), 403
+
+    try:
+        uid = request.json['id']
+
+        # Get current record for audit trail
+        try:
+            old_record = (extensions.supabase_admin or extensions.supabase).table("audits").select("*").eq("id", uid).execute()
+            before_state = old_record.data[0] if old_record.data else None
+        except Exception:
+            before_state = None
+
+        (extensions.supabase_admin or extensions.supabase).table("audits").delete().eq("id", uid).execute()
+
+        # Log successful deletion
+        audit_log(
+            action="DELETE",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            entity_id=str(uid),
+            before={"date": before_state['date'], "gross": before_state['gross'], "store": before_state['store']} if before_state else None,
+            success=True,
+            context={"ip": request.remote_addr}
+        )
+
+        logger.info(f"Audit entry {uid} deleted by {username}")
+        return jsonify(status="success")
+
+    except Exception as e:
+        logger.error(f"Error deleting entry: {e}", exc_info=True)
+
+        audit_log(
+            action="DELETE",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            entity_id=str(request.json.get('id')) if request.json.get('id') else None,
+            success=False,
+            error=str(e),
+            context={"ip": request.remote_addr}
+        )
+
+        return jsonify(error=str(e)), 500
+
+
+@bp.route('/api/list')
+@require_auth()
+def list_audits():
+    """List audit entries filtered by user's store access, with photo counts."""
+    try:
+        user_store = session.get('store')
+        user_role = session.get('role')
+        user = session.get('user')
+
+        _db = extensions.supabase_admin or extensions.supabase
+        logger.info(f"[list_audits] using_admin={extensions.supabase_admin is not None}")
+
+        # Push store filter to DB for non-admin users — avoids fetching all rows
+        query = _db.table("audits").select("*").order("date", desc=True).limit(2000)
+        if user_role not in ('admin', 'super_admin'):
+            query = query.eq("store", user_store)
+        response = query.execute()
+        allowed_rows = response.data
+
+        logger.info(
+            f"[list_audits] user={user!r} role={user_role!r} store={user_store!r} "
+            f"using_admin={extensions.supabase_admin is not None} "
+            f"rows_returned={len(allowed_rows)}"
+        )
+
+        # Batch-fetch photo counts using service-role client to bypass RLS
+        photo_counts: dict = {}
+        if allowed_rows:
+            entry_ids = [r['id'] for r in allowed_rows]
+            photo_resp = _db.table("z_report_photos") \
+                .select("entry_id") \
+                .in_("entry_id", entry_ids) \
+                .execute()
+            for p in photo_resp.data:
+                eid = p['entry_id']
+                photo_counts[eid] = photo_counts.get(eid, 0) + 1
+            logger.info(
+                f"[list_audits] photo_counts fetched: {len(photo_resp.data)} photo rows "
+                f"for {len(entry_ids)} entries → {len(photo_counts)} entries have photos"
+            )
+
+        clean_rows = []
+        for r in allowed_rows:
+            merged = r['payload']
+            merged['id'] = r['id']
+            merged['store'] = r.get('store', 'Main')
+            merged['photo_count'] = photo_counts.get(r['id'], 0)
+            clean_rows.append(merged)
+
+        return jsonify(clean_rows)
+    except Exception as e:
+        logger.error(f"[list_audits] Error: {e}", exc_info=True)
+        return jsonify(error=str(e), code="LIST_ERROR"), 500
