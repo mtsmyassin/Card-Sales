@@ -19,7 +19,8 @@ def post_fork(server, worker):
     """Shut down APScheduler in forked workers — only the master runs it."""
     try:
         import app as _app
-        scheduler = getattr(_app, "_scheduler", None)
+        flask_app = getattr(_app, 'app', None)       # the Flask app instance
+        scheduler = getattr(flask_app, '_scheduler', None)
         if scheduler is not None and scheduler.running:
             scheduler.shutdown(wait=False)
             log.info("APScheduler shut down in worker pid=%s (master handles scheduling)", worker.pid)
