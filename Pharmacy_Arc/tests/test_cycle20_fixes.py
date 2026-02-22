@@ -73,9 +73,9 @@ class TestWebhookSecretValidation:
         assert resp.status_code == 200
 
     def test_webhook_uses_hmac_compare_digest(self):
-        """app.py webhook must use hmac.compare_digest (not plain ==) for token check."""
+        """routes/telegram.py webhook must use hmac.compare_digest for token check."""
         src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "routes", "telegram.py"),
             encoding="utf-8",
         ).read()
         wh_start = src.index("def telegram_webhook():")
@@ -88,7 +88,7 @@ class TestWebhookSecretValidation:
     def test_webhook_uses_dedicated_secret_var(self):
         """Webhook must use TELEGRAM_WEBHOOK_SECRET, not Flask SECRET_KEY."""
         src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "routes", "telegram.py"),
             encoding="utf-8",
         ).read()
         wh_start = src.index("def telegram_webhook():")
@@ -197,12 +197,12 @@ class TestAPSchedulerWorkerSafety:
     def test_eod_reminder_per_recipient_isolation(self):
         """_send_eod_reminders must catch per-recipient exceptions and continue the loop."""
         src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "helpers", "scheduler.py"),
             encoding="utf-8",
         ).read()
         fn_start = src.index("def _send_eod_reminders(")
-        # Function ends just before the APScheduler block
-        fn_end = src.index("# ── APScheduler:", fn_start)
+        # Function ends just before init_scheduler
+        fn_end = src.index("\ndef init_scheduler", fn_start)
         block = src[fn_start:fn_end]
         # Must have try/except inside the per-recipient loop
         assert "except Exception as exc" in block or "except Exception" in block, (
