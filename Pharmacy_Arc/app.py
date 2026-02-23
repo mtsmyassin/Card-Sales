@@ -54,6 +54,7 @@ def create_app() -> Flask:
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=Config.SESSION_TIMEOUT_MINUTES)
     app.config['WTF_CSRF_HEADERS'] = ['X-CSRFToken']
     app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5 MB — prevents stalled workers on huge uploads
+    app.config['APP_VERSION'] = VERSION
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 

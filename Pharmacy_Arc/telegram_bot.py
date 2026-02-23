@@ -18,7 +18,10 @@ from config import Config
 logger = logging.getLogger(__name__)
 
 # In-memory conversation state: { telegram_id: { state, username, store, ... } }
-# Protected by _bot_state_lock to prevent TOCTOU races across gunicorn workers.
+# NOTE: This dict is per-process — not shared across Gunicorn workers.
+# On cache miss, state is loaded from the Supabase bot_sessions table (see load_session).
+# For single-worker deployments (Railway default) this is fine.  For multi-worker,
+# the DB fallback handles it but adds one extra read per first message per worker.
 bot_state: dict = {}
 _bot_state_lock = threading.Lock()
 

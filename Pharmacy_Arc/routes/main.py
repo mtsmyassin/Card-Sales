@@ -1,7 +1,7 @@
 """Main UI Blueprint — serves the SPA shell and favicon."""
 import io
 import os
-from flask import Blueprint, render_template, session, send_file
+from flask import Blueprint, current_app, render_template, session, send_file
 from helpers.offline_queue import get_logo, get_base_path, load_queue
 
 bp = Blueprint('main', __name__)
@@ -13,7 +13,8 @@ def index():
     logo_data = get_logo(current_store)
     has_pending = len(load_queue()) > 0
     template = 'main.html' if session.get('logged_in') else 'login.html'
-    return render_template(template, logo=logo_data, pending=has_pending)
+    version = current_app.config.get('APP_VERSION', '')
+    return render_template(template, logo=logo_data, pending=has_pending, version=version)
 
 
 @bp.route('/favicon.ico')

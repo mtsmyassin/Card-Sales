@@ -1,7 +1,7 @@
 <!DOCTYPE html><html><body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;">
 <div style="background:#1e293b;padding:40px;border-radius:20px;text-align:center;width:320px;border:1px solid #334155;">
 {% if logo %}<img src="data:image/png;base64,{{logo}}" style="max-width:140px;margin-bottom:20px">{% endif %}
-<h2>System Login</h2><small style="color:#0097b2;font-weight:900;font-size:14px">v40-SECURE</small><br><br>
+<h2>System Login</h2><small style="color:#0097b2;font-weight:900;font-size:14px">{{ version }}</small><br><br>
 <div id="errorMsg" style="display:none;background:#fee2e2;color:#991b1b;padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;font-weight:600;"></div>
 <input type="text" id="u" placeholder="Username" style="width:90%;padding:12px;margin-bottom:10px;border-radius:8px;border:none;text-align:center;font-weight:bold;font-size:16px;">
 <input type="password" id="p" placeholder="Password" style="width:90%;padding:12px;margin-bottom:20px;border-radius:8px;border:none;text-align:center;font-weight:bold;font-size:16px;">
