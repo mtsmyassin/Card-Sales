@@ -784,3 +784,20 @@ def test_callback_state_mismatch_sends_expired_message():
             handle_update(update)
 
     assert any("expired" in m.lower() or "expir" in m.lower() for m in messages)
+
+
+# ── /lang command tests ──────────────────────────────────────────────────────
+
+def test_lang_command_shows_language_keyboard():
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[901] = {"state": "REGISTERED", "store": "Test", "username": "u", "lang": "es"}
+    messages = []
+
+    with patch("telegram_bot._tg", return_value=True):
+        with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: messages.append((txt, kw))):
+            handle_update({"message": {"from": {"id": 901, "username": "testuser"}, "chat": {"id": 901}, "text": "/lang"}})
+
+    assert len(messages) >= 1
+    # Should have inline keyboard with language options
+    assert any("reply_markup" in kw for _, kw in messages)

@@ -497,6 +497,7 @@ def persist_session(telegram_id: int, state: dict) -> None:
             "store": state.get("store"),
             "retry_count": state.get("retry_count", 0),
             "pending_data": state.get("pending_data"),
+            "lang": state.get("lang", "es"),
         }).execute()
     except Exception as e:
         logger.warning(f"persist_session failed for {telegram_id}: {e}")
@@ -520,6 +521,7 @@ def load_session(telegram_id: int) -> dict | None:
             "store": row.get("store"),
             "retry_count": row.get("retry_count", 0),
             "pending_data": row.get("pending_data"),
+            "lang": row.get("lang", "es"),
         }
     except Exception as e:
         logger.warning(f"load_session failed for {telegram_id}: {e}")
@@ -1364,6 +1366,12 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
             msg(telegram_id, "broadcast_confirm", count=count, message=broadcast_text),
             reply_markup=_build_inline_broadcast(telegram_id),
         )
+
+    elif cmd == "/lang":
+        lang_kb = _inline_kb([
+            [_inline_btn("English", "lang:en"), _inline_btn("Espanol", "lang:es")],
+        ])
+        send_message(chat_id, msg(telegram_id, "lang_prompt"), reply_markup=lang_kb)
 
     else:
         # Unknown command — show help
