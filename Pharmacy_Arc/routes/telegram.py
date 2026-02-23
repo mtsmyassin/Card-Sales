@@ -238,5 +238,5 @@ def bot_health():
         return jsonify(ok=True, bot_username=result.get("username"), latency_ms=latency)
     except Exception as e:
         latency = round((time.time() - start) * 1000)
-        logger.error(f"bot_health check failed: {e}")
-        return jsonify(ok=False, error=str(e), latency_ms=latency), 503
+        logger.error("bot_health check failed: %s", e)
+        return jsonify(ok=False, error="Bot health check failed", latency_ms=latency), 503

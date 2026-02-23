@@ -165,7 +165,7 @@ def login():
 
         # --- CHECK DATABASE ACCOUNTS ---
         try:
-            res = extensions.get_db().table("users").select("*").eq("username", u).execute()
+            res = extensions.get_db().table("users").select("*").ilike("username", u).execute()
             if res.data:
                 user = res.data[0]
 
@@ -237,6 +237,68 @@ def login():
     except Exception as e:
         logger.error(f"Unexpected error in login: {e}", exc_info=True)
         return jsonify(status="error", error="Internal server error", code="INTERNAL_ERROR"), 500
+
+
+@bp.route('/api/change-password', methods=['POST'])
+@require_auth()
+@extensions.limiter.limit(Config.RATELIMIT_LOGIN)
+def change_password():
+    """Allow any logged-in user to change their own password."""
+    try:
+        data = request.json or {}
+        current_password = data.get('current_password', '')
+        new_password = data.get('new_password', '')
+        username = session.get('user', '')
+
+        if not current_password or not new_password:
+            return jsonify(error="Current and new passwords are required", code="BAD_REQUEST"), 400
+
+        if len(new_password) < 8 or len(new_password) > 100:
+            return jsonify(error="New password must be 8-100 characters", code="BAD_REQUEST"), 400
+
+        # Emergency accounts cannot change password via this endpoint
+        if username in extensions.EMERGENCY_ACCOUNTS:
+            return jsonify(error="Emergency accounts cannot change password here", code="FORBIDDEN"), 403
+
+        # Fetch user from DB and verify current password
+        res = extensions.get_db().table("users").select("id, password").ilike("username", username).execute()
+        if not res.data:
+            return jsonify(error="User not found", code="NOT_FOUND"), 404
+
+        user = res.data[0]
+        if not extensions.password_hasher.verify_password(current_password, user['password']):
+            audit_log(
+                action="PASSWORD_CHANGE_FAILED",
+                actor=username,
+                role=session.get('role', 'unknown'),
+                entity_type="USER",
+                entity_id=str(user['id']),
+                success=False,
+                error="Current password incorrect",
+                context={"ip": request.remote_addr}
+            )
+            return jsonify(error="Current password is incorrect", code="AUTH_FAILED"), 401
+
+        # Hash and update
+        new_hash = extensions.password_hasher.hash_password(new_password)
+        extensions.get_db().table("users").update({"password": new_hash}).eq("id", user['id']).execute()
+
+        logger.info(f"Password changed for user: {username}")
+        audit_log(
+            action="PASSWORD_CHANGED",
+            actor=username,
+            role=session.get('role', 'unknown'),
+            entity_type="USER",
+            entity_id=str(user['id']),
+            success=True,
+            context={"ip": request.remote_addr}
+        )
+
+        return jsonify(status="ok", message="Password changed successfully")
+
+    except Exception as e:
+        logger.error(f"Error changing password for {session.get('user')}: {e}", exc_info=True)
+        return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
 @bp.route('/api/logout', methods=['POST'])

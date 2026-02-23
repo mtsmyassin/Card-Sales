@@ -15,7 +15,8 @@
     </nav>
     <div class="sidebar-footer">
         <div class="sidebar-user" id="userDisplay"></div>
-        <button id="syncBtn" style="background:#f59e0b;color:white;border:none;padding:6px 10px;border-radius:6px;font-weight:bold;font-size:12px;display:none;cursor:pointer">⚠️ Sync</button>
-        <button onclick="app.logout()" style="padding:9px 14px;cursor:pointer;background:#ef4444;color:white;border:none;border-radius:8px;font-size:12px;font-weight:800;width:100%">Log Out</button>
+        <button id="syncBtn" style="background:var(--warn);color:white;border:none;padding:8px 12px;border-radius:8px;font-weight:700;font-size:12px;display:none;cursor:pointer;width:100%;transition:all 0.15s" onmouseover="this.style.filter='brightness(1.1)'" onmouseout="this.style.filter='none'">⚠️ Sync</button>
+        <button onclick="app.openChangePassword()" style="padding:10px 14px;cursor:pointer;background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.8);border:1px solid rgba(255,255,255,0.15);border-radius:8px;font-size:12px;font-weight:600;width:100%;transition:all 0.2s ease;min-height:44px" onmouseover="this.style.background='rgba(255,255,255,0.15)';this.style.color='white'" onmouseout="this.style.background='rgba(255,255,255,0.08)';this.style.color='rgba(255,255,255,0.8)'">Change Password</button>
+        <button onclick="app.logout()" style="padding:10px 14px;cursor:pointer;background:rgba(239,68,68,0.9);color:white;border:none;border-radius:8px;font-size:12px;font-weight:800;width:100%;transition:all 0.15s ease;min-height:44px" onmouseover="this.style.background='#ef4444'" onmouseout="this.style.background='rgba(239,68,68,0.9)'">Log Out</button>
     </div>
 </div>

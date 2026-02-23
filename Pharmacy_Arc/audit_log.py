@@ -342,9 +342,9 @@ if __name__ == '__main__':
         is_valid, errors = logger.verify_integrity()
         
         if is_valid:
-            print(f"✅ Audit log integrity verified: {log_file}")
+            print(f"[OK] Audit log integrity verified: {log_file}")
         else:
-            print(f"❌ Audit log integrity check FAILED: {log_file}")
+            print(f"[FAIL] Audit log integrity check FAILED: {log_file}")
             for error in errors:
                 print(f"   - {error}")
             sys.exit(1)

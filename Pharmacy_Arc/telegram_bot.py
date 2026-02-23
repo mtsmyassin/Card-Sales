@@ -595,8 +595,8 @@ def verify_web_credentials(username: str, password: str) -> dict | None:
                 return {"username": username, "role": role, "store": "All"}
             return None
 
-        # Check database accounts
-        result = supabase.table("users").select("*").eq("username", username).execute()
+        # Check database accounts (case-insensitive)
+        result = supabase.table("users").select("*").ilike("username", username).execute()
         if not result.data:
             return None
         user = result.data[0]

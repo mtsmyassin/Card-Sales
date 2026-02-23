@@ -9,16 +9,22 @@ from typing import Optional
 from dotenv import load_dotenv
 
 # Load environment variables from .env file.
-# When running as a PyInstaller frozen exe, __file__ is unreliable for path
-# resolution. Instead: look next to the exe first (user-editable), then fall
-# back to the bundled copy inside sys._MEIPASS.
+# Search order (first found wins):
+#   1. %LOCALAPPDATA%/PharmacyDirector/.env  (secure, never syncs to cloud)
+#   2. Next to the executable (for portable installs)
+#   3. Bundled inside PyInstaller temp dir (fallback)
+#   4. Same folder as config.py (development)
 def _find_env() -> Path:
+    # Always check %LOCALAPPDATA% first — credentials stay off cloud-synced dirs
+    appdata = os.environ.get('LOCALAPPDATA')
+    if appdata:
+        secure_env = Path(appdata) / 'PharmacyDirector' / '.env'
+        if secure_env.exists():
+            return secure_env
     if getattr(sys, 'frozen', False):
-        # Packaged exe: prefer .env sitting next to PharmacyDirector.exe
         beside_exe = Path(sys.executable).parent / '.env'
         if beside_exe.exists():
             return beside_exe
-        # Fall back to the file bundled inside the PyInstaller temp dir
         return Path(sys._MEIPASS) / '.env'
     # Development: .env lives in the same folder as config.py
     return Path(__file__).parent / '.env'
@@ -84,7 +90,7 @@ class Config:
     RATELIMIT_LOGIN: str = '5 per minute'
     RATELIMIT_WRITE: str = '30 per minute'
     RATELIMIT_READ: str = '60 per minute'
-    RATELIMIT_STORAGE_URI: str = 'memory://'
+    RATELIMIT_STORAGE_URI: str = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
 
     # ── Resilience / Retry ────────────────────────────────────────────────────
     MATH_TOLERANCE: float = 0.02          # 2-cent floating-point tolerance
@@ -174,13 +180,13 @@ class Config:
             print("CONFIGURATION ERRORS DETECTED:", file=sys.stderr)
             print("="*70, file=sys.stderr)
             for error in errors:
-                print(f"  ❌ {error}", file=sys.stderr)
+                print(f"  [ERROR] {error}", file=sys.stderr)
             print("="*70, file=sys.stderr)
             print("\nPlease fix the above errors in your .env file.", file=sys.stderr)
             print("Copy .env.example to .env and fill in the correct values.\n", file=sys.stderr)
             sys.exit(1)
-        
-        print("✅ Configuration validated successfully")
+
+        print("[OK] Configuration validated successfully")
         print(f"   Port: {cls.PORT}")
         print(f"   Debug: {cls.DEBUG}")
         print(f"   Session Timeout: {cls.SESSION_TIMEOUT_MINUTES} minutes")

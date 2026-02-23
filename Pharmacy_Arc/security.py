@@ -371,9 +371,9 @@ if __name__ == '__main__':
         hash_val = sys.argv[3]
         
         if PasswordHasher.verify_password(password, hash_val):
-            print("✅ Password matches!")
+            print("[OK] Password matches!")
         else:
-            print("❌ Password does not match")
+            print("[FAIL] Password does not match")
     
     elif command == 'genkey':
         key = generate_secret_key()

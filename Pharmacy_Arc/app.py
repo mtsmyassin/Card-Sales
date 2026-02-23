@@ -6,10 +6,36 @@ import logging
 import uuid as _uuid
 from logging.handlers import RotatingFileHandler
 from datetime import timedelta
+from pathlib import Path
 from flask import Flask, jsonify, redirect, request
 from supabase import create_client
 from config import Config
 import extensions
+
+# ── Crash logging for windowed exe ────────────────────────────────────────────
+# When running as a PyInstaller exe with console=False, unhandled exceptions
+# vanish silently. This hook writes them to a crash log in %LOCALAPPDATA%.
+if getattr(sys, 'frozen', False):
+    _crash_dir = Path(os.environ.get('LOCALAPPDATA', '.')) / 'PharmacyDirector'
+    _crash_dir.mkdir(parents=True, exist_ok=True)
+    _crash_log = _crash_dir / 'crash.log'
+    _crash_handler = RotatingFileHandler(
+        str(_crash_log), maxBytes=1 * 1024 * 1024, backupCount=3, encoding='utf-8',
+    )
+    _crash_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - CRASH - %(message)s'
+    ))
+    _crash_logger = logging.getLogger('pharmacy.crash')
+    _crash_logger.addHandler(_crash_handler)
+    _crash_logger.setLevel(logging.ERROR)
+
+    def _crash_hook(exc_type, exc_value, exc_tb):
+        _crash_logger.error(
+            "Unhandled exception", exc_info=(exc_type, exc_value, exc_tb),
+        )
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _crash_hook
 from helpers.offline_queue import (
     save_to_queue, load_queue, clear_queue, get_queue_path,
     OFFLINE_QUEUE_MAX_SIZE, OFFLINE_FILE,
@@ -23,8 +49,14 @@ except ImportError:
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 _log_level = getattr(logging, Config.LOG_LEVEL)
+# When running as a frozen exe, write logs to %LOCALAPPDATA% (Program Files is read-only).
+_log_path = Config.LOG_FILE
+if getattr(sys, 'frozen', False) and not os.path.isabs(_log_path):
+    _log_dir = Path(os.environ.get('LOCALAPPDATA', '.')) / 'PharmacyDirector'
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    _log_path = str(_log_dir / _log_path)
 _file_handler = RotatingFileHandler(
-    Config.LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5, encoding='utf-8',
+    _log_path, maxBytes=10 * 1024 * 1024, backupCount=5, encoding='utf-8',
 )
 _stream_handler = logging.StreamHandler(sys.stdout)
 
@@ -244,4 +276,9 @@ def create_app() -> Flask:
 app = create_app()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=PORT, debug=Config.DEBUG)
+    if Config.DEBUG:
+        app.run(host='0.0.0.0', port=PORT, debug=True)
+    else:
+        from waitress import serve
+        logger.info("Starting waitress on port %d", PORT)
+        serve(app, host='0.0.0.0', port=PORT)

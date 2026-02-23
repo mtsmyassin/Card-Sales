@@ -274,7 +274,8 @@ def zr_approve(audit_id: int):
     try:
         _zr_validate_breakdown(payouts_total, payouts_breakdown)
     except ValueError as e:
-        return jsonify(error=str(e), code="INVALID_INPUT"), 400
+        logger.warning("Z-report breakdown validation failed: %s", e)
+        return jsonify(error="Invalid breakdown values", code="INVALID_INPUT"), 400
 
     try:
         audit = db.table('audits').select('*').eq('id', audit_id).single().execute().data
@@ -291,7 +292,8 @@ def zr_approve(audit_id: int):
         try:
             calc = _zr_recalculate(breakdown, payouts_total, cash_actual)
         except ValueError as e:
-            return jsonify(error=str(e), code="INVALID_INPUT"), 400
+            logger.warning("Z-report recalculation failed: %s", e)
+            return jsonify(error="Invalid input for recalculation", code="INVALID_INPUT"), 400
 
         old_status = audit['review_status']
         completed_steps = []

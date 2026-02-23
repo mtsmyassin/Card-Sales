@@ -85,6 +85,31 @@ const app = {
         }
     },
     logout: () => fetch('/api/logout', {method:'POST'}).then(()=>location.reload()).catch(()=>location.reload()),
+    openChangePassword: () => {
+        document.getElementById('cpCurrent').value = '';
+        document.getElementById('cpNew').value = '';
+        document.getElementById('cpConfirm').value = '';
+        document.getElementById('changePwError').style.display = 'none';
+        document.getElementById('changePwSuccess').style.display = 'none';
+        document.getElementById('changePwModal').style.display = 'flex';
+    },
+    changePassword: async () => {
+        const errEl = document.getElementById('changePwError');
+        const okEl = document.getElementById('changePwSuccess');
+        errEl.style.display = 'none'; okEl.style.display = 'none';
+        const cur = document.getElementById('cpCurrent').value;
+        const nw = document.getElementById('cpNew').value;
+        const cf = document.getElementById('cpConfirm').value;
+        if (!cur || !nw || !cf) { errEl.textContent = 'All fields are required'; errEl.style.display = 'block'; return; }
+        if (nw.length < 8) { errEl.textContent = 'New password must be at least 8 characters'; errEl.style.display = 'block'; return; }
+        if (nw !== cf) { errEl.textContent = 'New passwords do not match'; errEl.style.display = 'block'; return; }
+        try {
+            const res = await fetch('/api/change-password', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({current_password:cur, new_password:nw})});
+            const d = await res.json();
+            if (res.ok) { okEl.textContent = 'Password changed successfully!'; okEl.style.display = 'block'; document.getElementById('cpCurrent').value = ''; document.getElementById('cpNew').value = ''; document.getElementById('cpConfirm').value = ''; }
+            else { errEl.textContent = d.error || 'Failed to change password'; errEl.style.display = 'block'; }
+        } catch(e) { errEl.textContent = 'Network error. Please try again.'; errEl.style.display = 'block'; }
+    },
     tab: (id) => {
         if(app.role==='staff' && (id!=='dash' && id!=='logs')) return;
         if(app.role==='manager' && (id!=='dash' && id!=='logs' && id!=='calendar' && id!=='zreviews')) return;

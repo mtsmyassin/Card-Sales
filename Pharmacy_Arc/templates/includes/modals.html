@@ -1,18 +1,37 @@
 <!-- Z Report Review Modal -->
-<div id="zrModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9998;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
-  <div style="background:white;border-radius:16px;padding:30px;width:560px;max-width:95vw;max-height:88vh;overflow-y:auto;position:relative;">
-    <button onclick="document.getElementById('zrModal').style.display='none'" style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:22px;cursor:pointer;color:#64748b">✕</button>
-    <h3 id="zrModalTitle" style="margin:0 0 16px;color:#1e293b">Review Z Report</h3>
+<div id="zrModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;align-items:center;justify-content:center;backdrop-filter:blur(3px)" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:white;border-radius:var(--radius);padding:32px;width:560px;max-width:95vw;max-height:88vh;overflow-y:auto;position:relative;box-shadow:var(--shadow-lg)">
+    <button onclick="document.getElementById('zrModal').style.display='none'" style="position:absolute;top:14px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);transition:color 0.15s" onmouseover="this.style.color='var(--txt)'" onmouseout="this.style.color='var(--muted)'">&#10005;</button>
+    <h3 id="zrModalTitle" style="margin:0 0 18px;color:var(--txt);font-size:18px">Review Z Report</h3>
     <div id="zrModalBody"></div>
   </div>
 </div>
 
+<!-- Change Password Modal -->
+<div id="changePwModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;align-items:center;justify-content:center;backdrop-filter:blur(3px)" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:white;border-radius:var(--radius);padding:32px;width:400px;max-width:95vw;position:relative;box-shadow:var(--shadow-lg)">
+    <button onclick="document.getElementById('changePwModal').style.display='none'" style="position:absolute;top:14px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);transition:color 0.15s" onmouseover="this.style.color='var(--txt)'" onmouseout="this.style.color='var(--muted)'">&#10005;</button>
+    <h3 style="margin:0 0 22px;color:var(--txt);font-size:18px">Change Password</h3>
+    <div id="changePwError" style="display:none;background:#fee2e2;color:#991b1b;padding:12px 14px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;margin-bottom:16px"></div>
+    <div id="changePwSuccess" style="display:none;background:#dcfce7;color:#166534;padding:12px 14px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;margin-bottom:16px"></div>
+    <label>Current Password</label>
+    <input type="password" id="cpCurrent" placeholder="Enter current password" style="margin-bottom:12px">
+    <label>New Password</label>
+    <input type="password" id="cpNew" placeholder="Min 8 characters" style="margin-bottom:12px">
+    <label>Confirm New Password</label>
+    <input type="password" id="cpConfirm" placeholder="Re-enter new password" style="margin-bottom:22px">
+    <button class="btn-main" onclick="app.changePassword()" style="width:100%">Update Password</button>
+  </div>
+</div>
+
 <!-- Bill Counter Modal -->
-<div id="modalCount" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);justify-content:center;align-items:center;z-index:9999;">
-    <div style="background:white;padding:30px;border-radius:15px;width:350px;border:2px solid var(--p);">
-        <h2>Bill Counter</h2><div id="billRows"></div><hr>
-        <h3>Total: <span id="billTotal">$0.00</span></h3>
-        <button class="btn-main" onclick="app.applyCount()">Apply Total</button>
-        <button onclick="document.getElementById('modalCount').style.display='none'" style="margin-top:10px;width:100%;padding:10px;border:none;background:#fee2e2;color:red;border-radius:10px;cursor:pointer">Cancel</button>
+<div id="modalCount" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);justify-content:center;align-items:center;z-index:9999;backdrop-filter:blur(3px)">
+    <div style="background:white;padding:32px;border-radius:var(--radius);width:360px;max-width:95vw;border:2px solid var(--p);box-shadow:var(--shadow-lg)">
+        <h2 style="margin:0 0 16px;font-size:18px;color:var(--txt)">Bill Counter</h2>
+        <div id="billRows"></div>
+        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+        <h3 style="margin:0 0 16px;font-size:20px;color:var(--txt)">Total: <span id="billTotal" style="color:var(--p)">$0.00</span></h3>
+        <button class="btn-main" onclick="app.applyCount()" style="width:100%">Apply Total</button>
+        <button onclick="document.getElementById('modalCount').style.display='none'" style="margin-top:10px;width:100%;padding:11px;border:none;background:#fef2f2;color:#b91c1c;border-radius:var(--radius-sm);cursor:pointer;font-weight:700;font-size:13px;transition:background 0.15s" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='#fef2f2'">Cancel</button>
     </div>
 </div>

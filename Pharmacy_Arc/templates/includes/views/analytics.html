@@ -3,7 +3,7 @@
         <div class="control-bar">
             <div class="control-group">
                 <span class="control-label">Scope</span>
-                <select id="anStoreFilter" onchange="app.renderAnalytics()" style="width:200px;margin:0;font-weight:600">
+                <select id="anStoreFilter" onchange="app.renderAnalytics()" style="width:200px;margin:0">
                     <option value="All">All Locations</option>
                     <option>Carimas #1</option>
                     <option>Carimas #2</option>
@@ -14,7 +14,7 @@
             </div>
             <div class="control-group">
                 <span class="control-label">Period</span>
-                <select id="anFilter" onchange="app.toggleCustomRange()" style="width:160px;margin:0;font-weight:600">
+                <select id="anFilter" onchange="app.toggleCustomRange()" style="width:160px;margin:0">
                     <option value="all">All Time</option>
                     <option value="30">Last 30 Days</option>
                     <option value="7">Last 7 Days</option>
@@ -23,47 +23,49 @@
                     <option value="custom">Custom Range</option>
                 </select>
                 <div id="customRange" style="display:none; gap:10px; align-items:center;">
-                    <input type="date" id="startRange" style="margin:0;padding:8px;border:1px solid #cbd5e1;border-radius:6px">
+                    <input type="date" id="startRange" style="margin:0;padding:8px 12px;border:1.5px solid var(--border);border-radius:20px;font-size:13px">
                     <span style="color:#94a3b8;font-weight:bold">-</span>
-                    <input type="date" id="endRange" style="margin:0;padding:8px;border:1px solid #cbd5e1;border-radius:6px">
-                    <button onclick="app.renderAnalytics()" class="btn-main" style="padding:8px 16px; width:auto; font-size:12px; margin:0">Update</button>
+                    <input type="date" id="endRange" style="margin:0;padding:8px 12px;border:1.5px solid var(--border);border-radius:20px;font-size:13px">
+                    <button onclick="app.renderAnalytics()" class="btn-main" style="padding:8px 18px; width:auto; font-size:12px; margin:0; border-radius:20px">Update</button>
                 </div>
             </div>
         </div>
 
         <div class="cc-container">
+            <!-- KPI Overview -->
             <div>
                 <div class="section-header">Performance Overview</div>
                 <div class="kpi-row">
                     <div class="kpi-card kpi-accent-teal">
                         <div class="kpi-label">Gross Revenue</div>
                         <div class="kpi-val" id="kGross">-</div>
-                        <div id="tGross" style="font-size:12px;font-weight:700;margin-top:5px"></div>
+                        <div id="tGross" style="font-size:12px;font-weight:700;margin-top:4px"></div>
                     </div>
                     <div class="kpi-card kpi-accent-green">
-                        <div class="kpi-label">Net (Gross − Payouts)</div>
+                        <div class="kpi-label">Net (Gross - Payouts)</div>
                         <div class="kpi-val" id="kNet">-</div>
-                        <div id="tNet" style="font-size:12px;font-weight:700;margin-top:5px"></div>
+                        <div id="tNet" style="font-size:12px;font-weight:700;margin-top:4px"></div>
                     </div>
                     <div class="kpi-card kpi-accent-blue">
                         <div class="kpi-label">Projected EOM</div>
                         <div class="kpi-val" id="kProj" style="color:#3b82f6">-</div>
-                        <div style="font-size:11px;color:#94a3b8;margin-top:5px;font-weight:600">Based on Daily Avg</div>
+                        <div style="font-size:11px;color:var(--muted);margin-top:4px;font-weight:600">Based on Daily Avg</div>
                     </div>
                     <div class="kpi-card kpi-accent-amber">
                         <div class="kpi-label">Avg Ticket</div>
                         <div class="kpi-val" id="kAvg" style="color:#f59e0b">-</div>
-                        <div style="font-size:11px;color:#94a3b8;margin-top:5px;font-weight:600">Gross / Transactions</div>
+                        <div style="font-size:11px;color:var(--muted);margin-top:4px;font-weight:600">Gross / Transactions</div>
                     </div>
                 </div>
             </div>
 
+            <!-- Revenue Trend (full width chart) -->
             <div>
                 <div class="section-header">Revenue Trend</div>
                 <div class="hero-row">
                     <div class="chart-shell">
                         <h4>Sales Trajectory</h4>
-                        <div style="flex:1; position:relative; min-height:300px; width:100%;">
+                        <div style="flex:1; position:relative; min-height:320px; width:100%;">
                             <canvas id="lineChart"></canvas>
                         </div>
                     </div>
@@ -74,24 +76,25 @@
                 </div>
             </div>
 
+            <!-- Operational Signals -->
             <div>
                 <div class="section-header">Operational Signals & Diagnostics</div>
                 <div class="signals-row">
                     <div class="chart-shell">
                         <h4>Weekly Rhythm (Avg)</h4>
-                        <div style="flex:1; position:relative; min-height:200px;">
+                        <div style="flex:1; position:relative; min-height:220px;">
                             <canvas id="dowChart"></canvas>
                         </div>
                     </div>
                     <div class="chart-shell">
                         <h4>Register Volume</h4>
-                        <div style="flex:1; position:relative; min-height:200px;">
+                        <div style="flex:1; position:relative; min-height:220px;">
                             <canvas id="regChart"></canvas>
                         </div>
                     </div>
                     <div class="chart-shell">
                         <h4>Expense Breakdown</h4>
-                        <div style="flex:1; position:relative; min-height:200px;">
+                        <div style="flex:1; position:relative; min-height:220px;">
                             <canvas id="payoutChart"></canvas>
                         </div>
                     </div>
