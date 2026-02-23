@@ -25,16 +25,17 @@ _BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 if not _BOT_TOKEN:
     logger.critical("TELEGRAM_BOT_TOKEN is not set — Telegram bot will refuse all requests")
 
-KNOWN_STORES = ["Carimas #1", "Carimas #2", "Carimas #3", "Carthage"]
+KNOWN_STORES = ["Carimas #1", "Carimas #2", "Carimas #3", "Carimas #4", "Carthage"]
 STORE_MENU = (
     "¿Para cuál tienda es este reporte?\n"
     "1 — Carimas #1\n"
     "2 — Carimas #2\n"
     "3 — Carimas #3\n"
-    "4 — Carthage\n"
+    "4 — Carimas #4\n"
+    "5 — Carthage\n"
     "Responde con el número."
 )
-_STORE_CHOICE = {"1": "Carimas #1", "2": "Carimas #2", "3": "Carimas #3", "4": "Carthage"}
+_STORE_CHOICE = {"1": "Carimas #1", "2": "Carimas #2", "3": "Carimas #3", "4": "Carimas #4", "5": "Carthage"}
 
 # ── Messages (Spanish) ─────────────────────────────────────────────────────────
 MSG_REGISTER_START = "Bienvenido a Carimas Bot. Ingresa tu usuario para registrarte:"
@@ -62,7 +63,7 @@ MSG_SAVED = (
     "Si no lo ves en la app, selecciona el filtro 'Todos'."
 )
 MSG_CANCELLED = "Cancelado. Envía otra foto cuando estés listo."
-MSG_INVALID_STORE = "Responde con 1, 2, 3 o 4."
+MSG_INVALID_STORE = "Responde con 1, 2, 3, 4 o 5."
 MSG_STORE_CONFIRM = "Tienda: {store}. Envía la foto del Reporte Z."
 MSG_OCR_FAIL_RETRY = (
     "No se pudo leer el reporte. Toma la foto más cerca con mejor iluminación e inténtalo de nuevo. "
@@ -441,6 +442,15 @@ def save_audit_entry(
         )
         return entry_id
     except Exception as e:
+        err_str = str(e)
+        if '23505' in err_str or 'unique' in err_str.lower() or 'duplicate' in err_str.lower():
+            logger.warning(
+                f"[BOT] Duplicate rejected by DB constraint — "
+                f"store={store!r} date={record['date']!r} reg={record['reg']!r}"
+            )
+            raise ValueError(
+                f"Ya existe un reporte para {record['date']} / {store} / {record['reg']}"
+            ) from e
         # Do NOT fall back to the filesystem queue — it is ephemeral on Railway
         # and will be silently lost on every redeploy.  Raise loudly instead.
         logger.error(
@@ -458,7 +468,6 @@ def save_photo_record(
     uploaded_by: str,
     storage_path: str,
     content_type: str = "image/jpeg",
-    source: str = "telegram",
 ) -> None:
     """Insert a photo record into z_report_photos, linked to an audit entry."""
     from app import supabase, supabase_admin
@@ -476,7 +485,6 @@ def save_photo_record(
             "uploaded_by": uploaded_by,
             "storage_path": storage_path,
             "content_type": content_type,
-            "source": source,
         }).execute()
         photo_id = result.data[0]["id"] if result.data else None
         logger.info(
@@ -857,6 +865,18 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
         # 2. Save audit entry → get entry_id (raises on DB failure — do NOT swallow)
         try:
             entry_id = save_audit_entry(ocr_data, store, username)
+        except ValueError as e:
+            # Duplicate entry rejected by DB unique constraint
+            logger.warning(f"[BOT sid={sid}] Duplicate rejected: {e}")
+            send_message(chat_id, f"⚠️ {e}")
+            new_state = {
+                "state": "REGISTERED",
+                "store": state.get("store"),
+                "username": state.get("username"),
+                "retry_count": 0,
+            }
+            _set_state(telegram_id, new_state)
+            return
         except Exception as e:
             logger.error(f"[BOT sid={sid}] save_audit_entry FAILED: {e}")
             send_message(chat_id, MSG_DB_ERROR)

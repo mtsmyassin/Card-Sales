@@ -15,7 +15,7 @@ bp = Blueprint('users', __name__)
 def list_users():
     """List all users (admin only)."""
     try:
-        result = (extensions.supabase_admin or extensions.supabase).table("users").select("*").execute()
+        result = (extensions.supabase_admin or extensions.supabase).table("users").select("username, role, store").execute()
         logger.info(f"User list accessed by {session.get('user')}")
         return jsonify(result.data)
     except Exception as e:

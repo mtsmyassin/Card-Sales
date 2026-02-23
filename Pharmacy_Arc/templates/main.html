@@ -761,19 +761,8 @@ const app = {
             app.hideLoading();
         }
     },
-    pwCell: (un) => {
-        if (app.role !== 'super_admin') return '•••••';
-        const pw = (app.users.find(u=>u.username===un)||{}).password||'';
-        return '<span class="pass-reveal" data-pw="' + pw.replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '" onclick="app.togglePass(this)" title="Click to reveal" style="cursor:pointer;letter-spacing:2px;color:#94a3b8">•••••</span>';
-    },
-    togglePass: (el) => {
-        if (el.classList.contains('revealed')) {
-            el.textContent='•••••'; el.classList.remove('revealed'); el.style.letterSpacing='2px'; el.style.color='#94a3b8';
-        } else {
-            el.textContent=el.dataset.pw; el.classList.add('revealed'); el.style.letterSpacing='0'; el.style.color='#ef4444';
-        }
-    },
-    editUser: (n) => { const u=app.users.find(x=>x.username===n); if(!u)return; document.getElementById('u_name').value=u.username; document.getElementById('u_pass').value=u.password; document.getElementById('u_role').value=u.role; document.getElementById('u_store').value=u.store; const b=document.getElementById('userSaveBtn'); b.innerText="Update User"; b.style.background="#f59e0b"; window.scrollTo({top:0,behavior:'smooth'}); },
+    pwCell: () => '•••••',
+    editUser: (n) => { const u=app.users.find(x=>x.username===n); if(!u)return; document.getElementById('u_name').value=u.username; document.getElementById('u_pass').value=''; document.getElementById('u_pass').placeholder='Leave blank to keep current'; document.getElementById('u_role').value=u.role; document.getElementById('u_store').value=u.store; const b=document.getElementById('userSaveBtn'); b.innerText="Update User"; b.style.background="#f59e0b"; window.scrollTo({top:0,behavior:'smooth'}); },
     saveUser: async () => { 
         app.showLoading();
         try {

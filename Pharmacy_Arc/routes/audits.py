@@ -96,37 +96,18 @@ def save():
 
         try:
             result = (extensions.supabase_admin or extensions.supabase).table("audits").insert(record).execute()
-
-            # Log successful creation
-            audit_log(
-                action="CREATE",
-                actor=username,
-                role=role,
-                entity_type="AUDIT_ENTRY",
-                entity_id=str(result.data[0]['id']) if result.data else None,
-                after={"date": d['date'], "store": d.get('store'), "gross": d['gross']},
-                success=True,
-                context={"ip": request.remote_addr}
-            )
-
-            logger.info(f"Audit entry created by {username}: date={d['date']}, store={d.get('store')}")
-            # Variance alert — fire-and-forget, never block the response
-            variance_val = float(d.get('variance', 0))
-            if abs(variance_val) > 5:
-                try:
-                    _send_variance_alert(
-                        store=d.get('store', 'Main'),
-                        date=d['date'],
-                        reg=d['reg'],
-                        variance=variance_val,
-                        gross=float(d['gross']),
-                        submitted_by=username,
-                    )
-                except Exception:
-                    pass
-            return jsonify(status="success")
-
         except Exception as e:
+            err_str = str(e)
+            # Unique constraint violation (PostgREST code 23505)
+            if '23505' in err_str or 'unique' in err_str.lower() or 'duplicate' in err_str.lower():
+                logger.warning(
+                    f"[save] DB duplicate rejected: user={username!r} "
+                    f"date={d['date']} store={d.get('store')} reg={d['reg']}"
+                )
+                return jsonify(
+                    error=f"Duplicate: a record for {d['date']} / {d.get('store')} / {d['reg']} already exists.",
+                    code="DUPLICATE"
+                ), 409
             logger.warning(f"Failed to save to database, queuing offline: {e}")
             save_to_queue(record)
 
@@ -142,6 +123,35 @@ def save():
             )
 
             return jsonify(status="offline")
+
+        # Log successful creation
+        audit_log(
+            action="CREATE",
+            actor=username,
+            role=role,
+            entity_type="AUDIT_ENTRY",
+            entity_id=str(result.data[0]['id']) if result.data else None,
+            after={"date": d['date'], "store": d.get('store'), "gross": d['gross']},
+            success=True,
+            context={"ip": request.remote_addr}
+        )
+
+        logger.info(f"Audit entry created by {username}: date={d['date']}, store={d.get('store')}")
+        # Variance alert — fire-and-forget, never block the response
+        variance_val = float(d.get('variance', 0))
+        if abs(variance_val) > 5:
+            try:
+                _send_variance_alert(
+                    store=d.get('store', 'Main'),
+                    date=d['date'],
+                    reg=d['reg'],
+                    variance=variance_val,
+                    gross=float(d['gross']),
+                    submitted_by=username,
+                )
+            except Exception:
+                pass
+        return jsonify(status="success")
 
     except Exception as e:
         logger.error(f"Error in save endpoint: {e}", exc_info=True)
@@ -194,6 +204,11 @@ def sync():
                 context={"ip": request.remote_addr, "records": 1}
             )
         except Exception as exc:
+            exc_str = str(exc)
+            if '23505' in exc_str or 'unique' in exc_str.lower() or 'duplicate' in exc_str.lower():
+                logger.warning(f"[sync] Skipping DB duplicate: date={item.get('date')} store={item.get('store')} reg={item.get('reg')}")
+                success_count += 1  # Remove from queue — don't retry duplicates
+                continue
             logger.warning(f"[sync] Insert failed for item date={item.get('date')} store={item.get('store')}: {exc}")
             failed_items.append(item)
     if failed_items:
