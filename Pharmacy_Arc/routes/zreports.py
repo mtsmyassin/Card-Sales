@@ -88,7 +88,7 @@ def zr_list():
         return jsonify(result.data)
     except Exception as e:
         logger.error(f"[zr_list] {e}", exc_info=True)
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/z-reports/<int:audit_id>')
@@ -105,7 +105,7 @@ def zr_detail(audit_id: int):
         return jsonify({'audit': audit.data, 'review': review.data if review else None})
     except Exception as e:
         logger.error(f"[zr_detail] audit_id={audit_id}: {e}", exc_info=True)
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/z-reports/<int:audit_id>/lock', methods=['POST'])
@@ -160,7 +160,7 @@ def zr_lock(audit_id: int):
         return jsonify(ok=True)
     except Exception as e:
         logger.error(f"[zr_lock] audit_id={audit_id}: {e}", exc_info=True)
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/z-reports/<int:audit_id>/lock', methods=['DELETE'])
@@ -196,7 +196,7 @@ def zr_unlock(audit_id: int):
         return jsonify(ok=True)
     except Exception as e:
         logger.error(f"[zr_unlock] audit_id={audit_id}: {e}", exc_info=True)
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/z-reports/<int:audit_id>/approve', methods=['POST'])
@@ -276,7 +276,7 @@ def zr_approve(audit_id: int):
         return jsonify(ok=True, **calc)
     except Exception as e:
         logger.error(f"[zr_approve] audit_id={audit_id}: {e}", exc_info=True)
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/z-reports/<int:audit_id>/reject', methods=['POST'])
@@ -342,7 +342,7 @@ def zr_reject(audit_id: int):
         return jsonify(ok=True)
     except Exception as e:
         logger.error(f"[zr_reject] audit_id={audit_id}: {e}", exc_info=True)
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/z-reports/<int:audit_id>/reopen', methods=['POST'])
@@ -382,7 +382,7 @@ def zr_reopen(audit_id: int):
         return jsonify(ok=True)
     except Exception as e:
         logger.error(f"[zr_reopen] audit_id={audit_id}: {e}", exc_info=True)
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/z-reports/<int:audit_id>/amend', methods=['POST'])
@@ -449,7 +449,7 @@ def zr_amend(audit_id: int):
         return jsonify(ok=True)
     except Exception as e:
         logger.error(f"[zr_amend] audit_id={audit_id}: {e}", exc_info=True)
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/z-reports/<int:audit_id>/history')
@@ -465,7 +465,7 @@ def zr_history(audit_id: int):
         return jsonify(result.data)
     except Exception as e:
         logger.error(f"[zr_history] audit_id={audit_id}: {e}", exc_info=True)
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/z-reports/<int:audit_id>/audit-log')
@@ -481,7 +481,7 @@ def zr_audit_log(audit_id: int):
         return jsonify(result.data)
     except Exception as e:
         logger.error(f"[zr_audit_log] audit_id={audit_id}: {e}", exc_info=True)
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/z-reports/unlock-timed-out', methods=['POST'])
@@ -512,4 +512,4 @@ def zr_unlock_timed_out():
         return jsonify(ok=True, unlocked=count)
     except Exception as e:
         logger.error(f"[zr_unlock_timed_out] {e}", exc_info=True)
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500

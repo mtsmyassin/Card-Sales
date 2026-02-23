@@ -111,7 +111,7 @@ def save_user():
             context={"ip": request.remote_addr}
         )
 
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/users/delete', methods=['POST'])

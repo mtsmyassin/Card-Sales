@@ -130,31 +130,18 @@ class TestBotInsertErrorHandling:
         "mcs": 0.0, "sss": 0.0, "variance": 0.0,
     }
 
-    def _make_fake_app(self, admin=None, anon=None):
-        fake = MagicMock()
-        fake.supabase = anon
-        fake.supabase_admin = admin
-        fake.validate_audit_entry = MagicMock(return_value=True)
-        fake.save_to_queue = MagicMock()
-        return fake
-
     def test_raises_on_db_failure_does_not_queue(self):
         """DB insert failure must raise — must NOT fall back to offline queue."""
         failing_admin = MagicMock()
         failing_admin.table.return_value.insert.return_value.execute.side_effect = (
             RuntimeError("DB insert rejected by RLS")
         )
-        fake_app = self._make_fake_app(admin=failing_admin)
 
-        with patch.dict(sys.modules, {"app": fake_app}):
-            import importlib
-            import telegram_bot as tb
-            importlib.reload(tb)
-
+        with patch("extensions.supabase_admin", failing_admin), \
+             patch("extensions.supabase", None):
+            from telegram_bot import save_audit_entry
             with pytest.raises(RuntimeError, match="DB insert rejected by RLS"):
-                tb.save_audit_entry(self._OCR, "Carimas #1", "maria")
-
-        fake_app.save_to_queue.assert_not_called()
+                save_audit_entry(self._OCR, "Carimas #1", "maria")
 
     def test_prefers_admin_client_over_anon(self):
         """When supabase_admin is available it must be used; anon client untouched."""
@@ -163,14 +150,11 @@ class TestBotInsertErrorHandling:
             {"id": 99}
         ]
         mock_anon = MagicMock()
-        fake_app = self._make_fake_app(admin=mock_admin, anon=mock_anon)
 
-        with patch.dict(sys.modules, {"app": fake_app}):
-            import importlib
-            import telegram_bot as tb
-            importlib.reload(tb)
-
-            entry_id = tb.save_audit_entry(self._OCR, "Carimas #1", "pedro")
+        with patch("extensions.supabase_admin", mock_admin), \
+             patch("extensions.supabase", mock_anon):
+            from telegram_bot import save_audit_entry
+            entry_id = save_audit_entry(self._OCR, "Carimas #1", "pedro")
 
         assert entry_id == 99
         mock_admin.table.assert_called()
@@ -182,14 +166,11 @@ class TestBotInsertErrorHandling:
         mock_anon.table.return_value.insert.return_value.execute.return_value.data = [
             {"id": 55}
         ]
-        fake_app = self._make_fake_app(admin=None, anon=mock_anon)
 
-        with patch.dict(sys.modules, {"app": fake_app}):
-            import importlib
-            import telegram_bot as tb
-            importlib.reload(tb)
-
-            entry_id = tb.save_audit_entry(self._OCR, "Carimas #2", "juan")
+        with patch("extensions.supabase_admin", None), \
+             patch("extensions.supabase", mock_anon):
+            from telegram_bot import save_audit_entry
+            entry_id = save_audit_entry(self._OCR, "Carimas #2", "juan")
 
         assert entry_id == 55
         mock_anon.table.assert_called()

@@ -307,7 +307,7 @@ def update():
             context={"ip": request.remote_addr}
         )
 
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/delete', methods=['POST'])
@@ -375,7 +375,7 @@ def delete():
             context={"ip": request.remote_addr}
         )
 
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Internal server error"), 500
 
 
 @bp.route('/api/list')
