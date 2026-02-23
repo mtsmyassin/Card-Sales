@@ -23,7 +23,7 @@ def require_auth(allowed_roles=None):
         def decorated_function(*args, **kwargs):
             if not session.get('logged_in'):
                 logger.warning(f"Unauthorized access attempt to {request.endpoint}")
-                return jsonify(error="Authentication required"), 401
+                return jsonify(error="Authentication required", code="AUTH_REQUIRED"), 401
             if allowed_roles:
                 user_role = session.get('role')
                 if user_role not in allowed_roles:
@@ -43,7 +43,7 @@ def require_auth(allowed_roles=None):
                         error=f"Insufficient permissions (requires: {allowed_roles})",
                         context={"ip": request.remote_addr}
                     )
-                    return jsonify(error="Insufficient permissions"), 403
+                    return jsonify(error="Insufficient permissions", code="FORBIDDEN"), 403
             return f(*args, **kwargs)
         return decorated_function
     return decorator

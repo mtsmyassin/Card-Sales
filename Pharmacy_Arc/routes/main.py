@@ -1,9 +1,10 @@
-"""Main UI Blueprint — serves the SPA shell, favicon, and health check."""
+"""Main UI Blueprint — serves the SPA shell, favicon, health check, and metrics."""
 import io
 import os
 import logging
 from flask import Blueprint, current_app, jsonify, render_template, session, send_file
 from helpers.offline_queue import get_logo, get_base_path, load_queue
+from helpers.auth_utils import require_auth
 import extensions
 from config import Config
 
@@ -26,8 +27,20 @@ def health():
     status = "ok" if db_ok else "degraded"
     return jsonify(
         status=status, version=extensions.VERSION,
-        database="connected" if db_ok else "unreachable"
+        database="connected" if db_ok else "unreachable",
+        admin_client="configured" if extensions.has_admin_client() else "missing",
     ), 200 if db_ok else 503
+
+
+@bp.route('/metrics')
+@require_auth(['admin', 'super_admin'])
+def metrics():
+    """Admin-only operational metrics endpoint."""
+    return jsonify(
+        version=extensions.VERSION,
+        offline_queue_depth=len(load_queue()),
+        admin_client_available=extensions.has_admin_client(),
+    )
 
 
 @bp.route('/')

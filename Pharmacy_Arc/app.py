@@ -47,8 +47,10 @@ VERSION = extensions.VERSION
 PORT = int(os.getenv('PORT', str(Config.PORT)))
 
 
-def _init_supabase(url: str, key: str, label: str, max_attempts: int = 3):
+def _init_supabase(url: str, key: str, label: str, max_attempts: int = None):
     """Create a Supabase client, retrying on failure (handles cold-start latency)."""
+    if max_attempts is None:
+        max_attempts = Config.SUPABASE_CONNECT_RETRIES
     for attempt in range(1, max_attempts + 1):
         try:
             client = create_client(url, key)
@@ -79,6 +81,9 @@ def create_app() -> Flask:
 
     # CSRF — extensions.csrf is a CSRFProtect() instance created in extensions.py
     extensions.csrf.init_app(app)
+
+    # Rate limiting
+    extensions.limiter.init_app(app)
 
     # HTTPS enforcement
     if Config.REQUIRE_HTTPS:
@@ -193,30 +198,34 @@ def create_app() -> Flask:
     # ── Error handlers ───────────────────────────────────────────────────────
     @app.errorhandler(400)
     def bad_request(e):
-        return jsonify(error="Bad request"), 400
+        return jsonify(error="Bad request", code="BAD_REQUEST"), 400
 
     @app.errorhandler(404)
     def not_found(e):
-        return jsonify(error="Not found"), 404
+        return jsonify(error="Not found", code="NOT_FOUND"), 404
 
     @app.errorhandler(405)
     def method_not_allowed(e):
-        return jsonify(error="Method not allowed"), 405
+        return jsonify(error="Method not allowed", code="METHOD_NOT_ALLOWED"), 405
 
     @app.errorhandler(413)
     def payload_too_large(e):
         max_mb = Config.MAX_UPLOAD_SIZE // (1024 * 1024)
-        return jsonify(error=f"Payload too large (maximo {max_mb} MB)"), 413
+        return jsonify(error=f"Payload too large (maximo {max_mb} MB)", code="PAYLOAD_TOO_LARGE"), 413
+
+    @app.errorhandler(429)
+    def rate_limited(e):
+        return jsonify(error="Too many requests — please slow down", code="RATE_LIMITED"), 429
 
     @app.errorhandler(500)
     def internal_error(e):
         logger.error("Unhandled 500: %s", e, exc_info=True)
-        return jsonify(error="Internal server error"), 500
+        return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
     @app.errorhandler(Exception)
     def handle_exception(e):
         logger.error("Unhandled exception: %s", e, exc_info=True)
-        return jsonify(error="Internal server error"), 500
+        return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
     # APScheduler — EOD reminders (helpers/scheduler.py)
     from helpers.scheduler import init_scheduler

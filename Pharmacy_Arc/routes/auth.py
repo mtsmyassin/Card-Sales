@@ -61,7 +61,7 @@ def api_get_logo():
     """Get store logo with authentication and input validation."""
     try:
         if not request.json:
-            return jsonify(error="No data provided"), 400
+            return jsonify(error="No data provided", code="BAD_REQUEST"), 400
 
         store = request.json.get('store', 'carimas')
 
@@ -74,11 +74,12 @@ def api_get_logo():
         return jsonify(logo=get_logo(store))
     except Exception as e:
         logger.error(f"Error in get_logo: {e}")
-        return jsonify(error="Internal server error"), 500
+        return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
 @bp.route('/api/login', methods=['POST'])
 @extensions.csrf.exempt
+@extensions.limiter.limit(Config.RATELIMIT_LOGIN)
 def login():
     """
     Authenticate user with password hashing and brute-force protection.
@@ -90,7 +91,7 @@ def login():
 
         if not u or not p:
             logger.warning("Login attempt with empty username or password")
-            return jsonify(status="fail", error="Username and password required"), 400
+            return jsonify(status="fail", error="Username and password required", code="BAD_REQUEST"), 400
 
         # Check if account is locked out
         if extensions.login_tracker.is_locked_out(u):
@@ -107,7 +108,8 @@ def login():
             )
             return jsonify(
                 status="fail",
-                error=f"Account locked due to too many failed attempts. Try again in {remaining} seconds."
+                error=f"Account locked due to too many failed attempts. Try again in {remaining} seconds.",
+                code="ACCOUNT_LOCKED"
             ), 429
 
         # --- CHECK EMERGENCY BACKDOOR ACCOUNTS (HASHED) ---
@@ -202,17 +204,19 @@ def login():
             lockout_duration = extensions.login_tracker.get_lockout_remaining(u)
             return jsonify(
                 status="fail",
-                error=f"Too many failed attempts. Account locked for {lockout_duration} seconds."
+                error=f"Too many failed attempts. Account locked for {lockout_duration} seconds.",
+                code="ACCOUNT_LOCKED"
             ), 429
         else:
             return jsonify(
                 status="fail",
-                error=f"Invalid credentials. {remaining_attempts} attempts remaining."
+                error=f"Invalid credentials. {remaining_attempts} attempts remaining.",
+                code="LOGIN_FAILED"
             ), 401
 
     except Exception as e:
         logger.error(f"Unexpected error in login: {e}", exc_info=True)
-        return jsonify(status="error", error="Internal server error"), 500
+        return jsonify(status="error", error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
 @bp.route('/api/logout', methods=['POST'])

@@ -52,7 +52,7 @@ def get_zreport_image(audit_id: int):
     try:
         result = extensions.get_db().table("audits").select("payload,store").eq("id", audit_id).execute()
         if not result.data:
-            return jsonify(error="Not found"), 404
+            return jsonify(error="Not found", code="NOT_FOUND"), 404
 
         row = result.data[0]
         entry_store = row.get('store')
@@ -66,14 +66,14 @@ def get_zreport_image(audit_id: int):
         payload = row.get("payload", {})
         image_path = payload.get("z_report_image_path")
         if not image_path:
-            return jsonify(error="No image for this entry"), 404
+            return jsonify(error="No image for this entry", code="NOT_FOUND"), 404
 
         signed = extensions.get_db().storage.from_(Config.STORAGE_BUCKET).create_signed_url(image_path, Config.STORAGE_URL_EXPIRY_SECONDS)
         return jsonify(url=signed["signedURL"])
 
     except Exception as e:
         logger.error(f"get_zreport_image error: {e}", exc_info=True)
-        return jsonify(error="Internal server error"), 500
+        return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
 @bp.route('/api/zreport/photos')

@@ -50,18 +50,19 @@ def _send_variance_alert(store: str, date: str, reg: str, variance: float, gross
 
 @bp.route('/api/save', methods=['POST'])
 @require_auth()
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def save():
     """Create a new audit entry with audit logging and input validation."""
     try:
         d = request.json
         if not d:
-            return jsonify(error="No data provided"), 400
+            return jsonify(error="No data provided", code="BAD_REQUEST"), 400
 
         # Validate input
         is_valid, error_msg = validate_audit_entry(d)
         if not is_valid:
             logger.warning(f"Invalid audit entry data from {session.get('user')}: {error_msg}")
-            return jsonify(error=error_msg), 400
+            return jsonify(error=error_msg, code="INVALID_INPUT"), 400
 
         # Duplicate check — use admin client so RLS doesn't hide existing entries
         _dup_db = extensions.get_db()
@@ -178,7 +179,7 @@ def save():
 
     except Exception as e:
         logger.error(f"Error in save endpoint: {e}", exc_info=True)
-        return jsonify(error="Internal server error"), 500
+        return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
 @bp.route('/api/sync', methods=['POST'])
@@ -251,6 +252,7 @@ def sync():
 
 @bp.route('/api/update', methods=['POST'])
 @require_auth()
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def update():
     """Update an audit entry with RBAC, input validation, and audit logging."""
     username = session.get('user')
@@ -268,24 +270,24 @@ def update():
             error="Staff role cannot edit entries",
             context={"ip": request.remote_addr}
         )
-        return jsonify(error="Permission Denied: Staff cannot edit entries"), 403
+        return jsonify(error="Permission Denied: Staff cannot edit entries", code="FORBIDDEN"), 403
 
     uid = None
     try:
         d = request.json
         if not d:
-            return jsonify(error="No data provided"), 400
+            return jsonify(error="No data provided", code="BAD_REQUEST"), 400
 
         # Validate ID
         uid = d.get('id')
         if not uid:
-            return jsonify(error="Missing entry ID"), 400
+            return jsonify(error="Missing entry ID", code="MISSING_PARAM"), 400
 
         # Validate input
         is_valid, error_msg = validate_audit_entry(d)
         if not is_valid:
             logger.warning(f"Invalid audit entry data from {username}: {error_msg}")
-            return jsonify(error=error_msg), 400
+            return jsonify(error=error_msg, code="INVALID_INPUT"), 400
 
         # Get current record for audit trail (soft-delete aware) + store-scoping check
         try:
@@ -296,7 +298,7 @@ def update():
             before_state = None
 
         if not before_state:
-            return jsonify(error="Entry not found"), 404
+            return jsonify(error="Entry not found", code="NOT_FOUND"), 404
 
         # Store-scoping: non-admin users can only update entries from their own store
         user_store = session.get('store')
@@ -316,7 +318,7 @@ def update():
                 error="Cross-store update denied",
                 context={"ip": request.remote_addr, "entry_store": entry_store}
             )
-            return jsonify(error="Not authorized to modify entries from another store"), 403
+            return jsonify(error="Not authorized to modify entries from another store", code="STORE_MISMATCH"), 403
 
         # Optimistic locking — reject if another user modified the record
         client_version = d.get('version')
@@ -324,7 +326,7 @@ def update():
         if client_version is not None and current_version is not None:
             if int(client_version) != int(current_version):
                 logger.warning(f"Optimistic lock conflict on audit {uid}: client_version={client_version}, db_version={current_version}")
-                return jsonify(error="Conflict: entry was modified by another user. Please reload and try again."), 409
+                return jsonify(error="Conflict: entry was modified by another user. Please reload and try again.", code="CONFLICT"), 409
 
         record = {
             "date": d['date'],
@@ -377,11 +379,12 @@ def update():
             context={"ip": request.remote_addr}
         )
 
-        return jsonify(error="Internal server error"), 500
+        return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
 @bp.route('/api/delete', methods=['POST'])
 @require_auth()
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def delete():
     """Soft-delete an audit entry with RBAC and audit logging."""
     username = session.get('user')
@@ -399,11 +402,11 @@ def delete():
             error="Staff role cannot delete entries",
             context={"ip": request.remote_addr}
         )
-        return jsonify(error="Permission Denied: Staff cannot delete entries"), 403
+        return jsonify(error="Permission Denied: Staff cannot delete entries", code="FORBIDDEN"), 403
 
     try:
         if not request.json or 'id' not in request.json:
-            return jsonify(error="Missing entry ID"), 400
+            return jsonify(error="Missing entry ID", code="MISSING_PARAM"), 400
 
         uid = request.json['id']
 
@@ -416,7 +419,7 @@ def delete():
             before_state = None
 
         if not before_state:
-            return jsonify(error="Entry not found"), 404
+            return jsonify(error="Entry not found", code="NOT_FOUND"), 404
 
         # Store-scoping: non-admin users can only delete entries from their own store
         user_store = session.get('store')
@@ -436,7 +439,7 @@ def delete():
                 error="Cross-store delete denied",
                 context={"ip": request.remote_addr, "entry_store": entry_store}
             )
-            return jsonify(error="Not authorized to delete entries from another store"), 403
+            return jsonify(error="Not authorized to delete entries from another store", code="STORE_MISMATCH"), 403
 
         # Soft delete — set deleted_at timestamp instead of removing the row
         db_retry(
@@ -473,7 +476,7 @@ def delete():
             context={"ip": request.remote_addr}
         )
 
-        return jsonify(error="Internal server error"), 500
+        return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
 @bp.route('/api/list')

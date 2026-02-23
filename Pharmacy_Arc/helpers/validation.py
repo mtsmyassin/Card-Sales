@@ -56,7 +56,7 @@ def validate_audit_entry(data: dict) -> tuple[bool, str]:
             payouts = float(b.get('payouts', 0))
             float_amount = float(b.get('float', 0))
             actual = float(b.get('actual', 0))
-            TOLERANCE = 0.02  # 2-cent floating-point tolerance
+            TOLERANCE = Config.MATH_TOLERANCE
 
             expected_gross = cash_sales + card_sales
             if abs(gross - expected_gross) > TOLERANCE:

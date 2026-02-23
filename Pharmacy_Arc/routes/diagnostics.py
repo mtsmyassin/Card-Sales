@@ -106,4 +106,4 @@ def diagnostics():
 
     except Exception as e:
         logger.error(f"Error in diagnostics endpoint: {e}", exc_info=True)
-        return jsonify(error="Internal server error"), 500
+        return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500

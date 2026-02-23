@@ -1,11 +1,12 @@
 """Database retry helper for transient Supabase failures."""
 import time
 import logging
+from config import Config
 
 logger = logging.getLogger(__name__)
 
 
-def db_retry(operation, label="db_call", max_attempts=3, backoff_factor=2):
+def db_retry(operation, label="db_call", max_attempts=None, backoff_factor=2):
     """Execute a Supabase operation with exponential backoff retry.
 
     Args:
@@ -20,6 +21,8 @@ def db_retry(operation, label="db_call", max_attempts=3, backoff_factor=2):
     Raises:
         The last exception if all attempts fail
     """
+    if max_attempts is None:
+        max_attempts = Config.DB_RETRY_MAX_ATTEMPTS
     last_err = None
     for attempt in range(1, max_attempts + 1):
         try:

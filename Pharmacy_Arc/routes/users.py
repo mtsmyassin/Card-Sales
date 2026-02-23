@@ -3,6 +3,7 @@ import logging
 from flask import Blueprint, request, jsonify, session
 from audit_log import audit_log
 import extensions
+from config import Config
 from helpers.auth_utils import require_auth
 from helpers.validation import validate_user_data
 from helpers.db import db_retry
@@ -21,11 +22,12 @@ def list_users():
         return jsonify(result.data)
     except Exception as e:
         logger.error(f"Error listing users: {e}")
-        return jsonify([])
+        return jsonify(error="Failed to list users", code="LIST_ERROR"), 500
 
 
 @bp.route('/api/users/save', methods=['POST'])
 @require_auth(['admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def save_user():
     """Create or update a user (admin only) with password hashing and input validation."""
     username = session.get('user')
@@ -34,12 +36,12 @@ def save_user():
     try:
         u = request.json
         if not u:
-            return jsonify(error="No data provided"), 400
+            return jsonify(error="No data provided", code="BAD_REQUEST"), 400
 
         # Check if user exists to determine if this is create or update
         user_to_save = u.get('username')
         if not user_to_save:
-            return jsonify(error="Username is required"), 400
+            return jsonify(error="Username is required", code="MISSING_PARAM"), 400
 
         try:
             existing = extensions.get_db().table("users").select("*").eq("username", user_to_save).execute()
@@ -54,7 +56,7 @@ def save_user():
         is_valid, error_msg = validate_user_data(u, is_update=is_update)
         if not is_valid:
             logger.warning(f"Invalid user data from {username}: {error_msg}")
-            return jsonify(error=error_msg), 400
+            return jsonify(error=error_msg, code="INVALID_INPUT"), 400
 
         password = u.get('password', '')
         new_role = u['role']
@@ -71,7 +73,7 @@ def save_user():
             if is_update and before_state:
                 hashed_password = before_state['password']
             else:
-                return jsonify(error="Password is required for new users"), 400
+                return jsonify(error="Password is required for new users", code="MISSING_PARAM"), 400
 
         user_data = {
             "username": user_to_save,
@@ -116,11 +118,12 @@ def save_user():
             context={"ip": request.remote_addr}
         )
 
-        return jsonify(error="Internal server error"), 500
+        return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
 @bp.route('/api/users/delete', methods=['POST'])
 @require_auth(['admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def delete_user():
     """Delete a user (admin only) with audit logging and input validation."""
     username = session.get('user')
@@ -128,26 +131,26 @@ def delete_user():
 
     try:
         if not request.json or 'username' not in request.json:
-            return jsonify(error="Username is required"), 400
+            return jsonify(error="Username is required", code="MISSING_PARAM"), 400
 
         user_to_delete = request.json['username']
 
         # Validate username format
         if not user_to_delete or not isinstance(user_to_delete, str):
-            return jsonify(error="Invalid username"), 400
+            return jsonify(error="Invalid username", code="INVALID_INPUT"), 400
         if len(user_to_delete) < 3 or len(user_to_delete) > 50:
-            return jsonify(error="Invalid username length"), 400
+            return jsonify(error="Invalid username length", code="INVALID_INPUT"), 400
 
         # Prevent self-deletion
         if user_to_delete == username:
-            return jsonify(error="Cannot delete your own account"), 403
+            return jsonify(error="Cannot delete your own account", code="FORBIDDEN"), 403
 
         # Get user details before deletion
         try:
             existing = extensions.get_db().table("users").select("*").eq("username", user_to_delete).execute()
             before_state = existing.data[0] if existing.data else None
             if not before_state:
-                return jsonify(error="User not found"), 404
+                return jsonify(error="User not found", code="NOT_FOUND"), 404
         except Exception as fetch_err:
             logger.warning(f"[delete_user] Failed to fetch user {user_to_delete!r}: {fetch_err}")
             before_state = None
@@ -186,4 +189,4 @@ def delete_user():
             context={"ip": request.remote_addr}
         )
 
-        return jsonify(error="Internal server error"), 500
+        return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500

@@ -79,6 +79,16 @@ class Config:
     STORAGE_URL_EXPIRY_SECONDS: int = int(os.getenv('STORAGE_URL_EXPIRY_SECONDS', '3600'))
     MAX_UPLOAD_SIZE: int = int(os.getenv('MAX_UPLOAD_SIZE', str(5 * 1024 * 1024)))
 
+    # ── Rate Limiting ──────────────────────────────────────────────────────────
+    RATELIMIT_LOGIN: str = '5 per minute'
+    RATELIMIT_WRITE: str = '30 per minute'
+    RATELIMIT_STORAGE_URI: str = 'memory://'
+
+    # ── Resilience / Retry ────────────────────────────────────────────────────
+    MATH_TOLERANCE: float = 0.02          # 2-cent floating-point tolerance
+    DB_RETRY_MAX_ATTEMPTS: int = 3        # db_retry() default max attempts
+    SUPABASE_CONNECT_RETRIES: int = 3     # _init_supabase() startup retries
+
     # ── Crypto ────────────────────────────────────────────────────────────────
     BCRYPT_ROUNDS: int = int(os.getenv('BCRYPT_ROUNDS', '12'))
     
