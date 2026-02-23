@@ -154,17 +154,6 @@ def create_app() -> Flask:
 
 app = create_app()
 
-# ── Backwards-compatibility re-exports ────────────────────────────────────────
-# Allow legacy code (telegram_bot.py, tests) to do `from app import supabase_admin` etc.
-supabase = extensions.supabase
-supabase_admin = extensions.supabase_admin
-EMERGENCY_ACCOUNTS = extensions.EMERGENCY_ACCOUNTS
-password_hasher = extensions.password_hasher
-
-from helpers.validation import validate_audit_entry  # noqa: E402
-from helpers.auth_utils import can_access_photo as _can_access_photo  # noqa: E402
-from routes.zreports import _zr_recalculate, _zr_validate_breakdown  # noqa: E402
-
 _main_tmpl = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates', 'main.html')
 try:
     with open(_main_tmpl, encoding='utf-8') as _f:

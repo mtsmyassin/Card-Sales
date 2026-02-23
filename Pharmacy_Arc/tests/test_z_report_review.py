@@ -10,7 +10,7 @@ class TestRecalculate:
     """_zr_recalculate: server-side math must match pharmacy-sales-math spec."""
 
     def _calc(self, breakdown, payouts=0.0, actual=0.0):
-        from app import _zr_recalculate
+        from routes.zreports import _zr_recalculate
         return _zr_recalculate(breakdown, payouts, actual)
 
     def test_gross_sums_all_payment_fields(self):
@@ -53,7 +53,7 @@ class TestRecalculate:
         assert r['variance'] == -100.0
 
     def test_payouts_exceed_gross_raises(self):
-        from app import _zr_recalculate
+        from routes.zreports import _zr_recalculate
         bd = {'cash': 10, 'ath': 0, 'athm': 0, 'visa': 0, 'mc': 0,
               'amex': 0, 'disc': 0, 'wic': 0, 'mcs': 0, 'sss': 0}
         with pytest.raises(ValueError, match="exceeds gross"):
@@ -76,7 +76,7 @@ class TestValidateBreakdown:
     """_zr_validate_breakdown: breakdown values must sum to payouts_total."""
 
     def _validate(self, payouts_total, breakdown):
-        from app import _zr_validate_breakdown
+        from routes.zreports import _zr_validate_breakdown
         return _zr_validate_breakdown(payouts_total, breakdown)
 
     def test_none_breakdown_passes(self):
@@ -89,7 +89,7 @@ class TestValidateBreakdown:
         self._validate(50.0, {'supplies': 30.0, 'cleaning': 20.0})
 
     def test_mismatched_sum_raises(self):
-        from app import _zr_validate_breakdown
+        from routes.zreports import _zr_validate_breakdown
         with pytest.raises(ValueError, match="breakdown sum"):
             _zr_validate_breakdown(50.0, {'supplies': 10.0})
 

@@ -31,43 +31,29 @@ class TestFormatRegisterId:
 
 class TestUploadImageToStorage:
     def test_raises_when_supabase_admin_none(self):
-        import sys
-        from unittest.mock import MagicMock
-        fake_app = MagicMock()
-        fake_app.supabase_admin = None  # service-role client missing → should raise
-        with patch.dict(sys.modules, {"app": fake_app}):
-            import importlib
-            import telegram_bot as tb
-            importlib.reload(tb)
+        from telegram_bot import upload_image_to_storage
+        with patch("extensions.supabase_admin", None):
             with pytest.raises(Exception):
-                tb.upload_image_to_storage(b"bytes", "Carimas #1", "2026-02-20", 2)
+                upload_image_to_storage(b"bytes", "Carimas #1", "2026-02-20", 2)
 
 
 # ── Task 4: save_audit_entry returns id ───────────────────────────────────────
 
 class TestSaveAuditEntryReturnsId:
     def test_returns_entry_id_on_success(self):
-        import sys
         mock_supabase = MagicMock()
         mock_supabase.table.return_value.insert.return_value.execute.return_value.data = [{"id": 42}]
 
-        fake_app = MagicMock()
-        fake_app.supabase = mock_supabase
-        fake_app.supabase_admin = None  # force fallback to anon supabase mock
-        fake_app.validate_audit_entry = MagicMock(return_value=True)
-        fake_app.save_to_queue = MagicMock()
-
-        with patch.dict(sys.modules, {"app": fake_app}):
-            import importlib
-            import telegram_bot as tb
-            importlib.reload(tb)
+        with patch("extensions.supabase_admin", None), \
+             patch("extensions.supabase", mock_supabase):
+            from telegram_bot import save_audit_entry
             ocr = {
                 "register": 2, "date": "2026-02-20",
                 "cash": 100.0, "ath": 0.0, "athm": 0.0, "visa": 0.0,
                 "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0,
                 "mcs": 0.0, "sss": 0.0, "variance": -5.0,
             }
-            entry_id = tb.save_audit_entry(ocr, "Carimas #1", "maria", payouts=0.0, actual_cash=95.0, variance=-5.0)
+            entry_id = save_audit_entry(ocr, "Carimas #1", "maria", payouts=0.0, actual_cash=95.0, variance=-5.0)
 
         assert entry_id == 42
 
@@ -209,23 +195,23 @@ class TestNewBotFlow:
 
 class TestCanAccessPhoto:
     def test_staff_cannot_access_other_store(self):
-        from app import _can_access_photo
+        from helpers.auth_utils import can_access_photo as _can_access_photo
         assert _can_access_photo("Carimas #1", "staff", "Carimas #2") is False
 
     def test_staff_can_access_own_store(self):
-        from app import _can_access_photo
+        from helpers.auth_utils import can_access_photo as _can_access_photo
         assert _can_access_photo("Carimas #1", "staff", "Carimas #1") is True
 
     def test_manager_can_access_own_store(self):
-        from app import _can_access_photo
+        from helpers.auth_utils import can_access_photo as _can_access_photo
         assert _can_access_photo("Carimas #3", "manager", "Carimas #3") is True
 
     def test_admin_can_access_any_store(self):
-        from app import _can_access_photo
+        from helpers.auth_utils import can_access_photo as _can_access_photo
         assert _can_access_photo("Carimas #1", "admin", "All") is True
 
     def test_super_admin_can_access_any_store(self):
-        from app import _can_access_photo
+        from helpers.auth_utils import can_access_photo as _can_access_photo
         assert _can_access_photo("Carthage", "super_admin", "Carimas #1") is True
 
 

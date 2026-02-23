@@ -12,6 +12,8 @@ import unicodedata
 import requests as http
 
 from ocr import extract_z_report, has_null_fields, NULL_FIELD_NAMES, OCRParseError
+import extensions
+from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -179,8 +181,7 @@ def persist_session(telegram_id: int, state: dict) -> None:
         );
     """
     try:
-        from app import supabase_admin, supabase
-        client = supabase_admin or supabase
+        client = extensions.supabase_admin or extensions.supabase
         if client is None:
             return
         # Exclude image bytes (binary, too large) and pending_photo_msg (Telegram dict)
@@ -201,8 +202,7 @@ def load_session(telegram_id: int) -> dict | None:
     Returns None if not found or DB unavailable.
     """
     try:
-        from app import supabase_admin, supabase
-        client = supabase_admin or supabase
+        client = extensions.supabase_admin or extensions.supabase
         if client is None:
             return None
         result = client.table("bot_sessions").select("*").eq("telegram_id", telegram_id).execute()
@@ -234,11 +234,10 @@ def _set_state(telegram_id: int, state: dict) -> None:
 
 def is_registered(telegram_id: int) -> bool:
     """Check if telegram_id exists in bot_users Supabase table."""
-    from app import supabase  # imported here to avoid circular import at module load
-    if supabase is None:
+    if extensions.supabase is None:
         return False
     try:
-        result = supabase.table("bot_users").select("telegram_id").eq(
+        result = extensions.supabase.table("bot_users").select("telegram_id").eq(
             "telegram_id", telegram_id
         ).execute()
         return len(result.data) > 0
@@ -249,11 +248,10 @@ def is_registered(telegram_id: int) -> bool:
 
 def get_bot_user(telegram_id: int) -> dict | None:
     """Return bot_users row for telegram_id, or None."""
-    from app import supabase
-    if supabase is None:
+    if extensions.supabase is None:
         return None
     try:
-        result = supabase.table("bot_users").select("*").eq(
+        result = extensions.supabase.table("bot_users").select("*").eq(
             "telegram_id", telegram_id
         ).execute()
         return result.data[0] if result.data else None
@@ -270,9 +268,11 @@ def verify_web_credentials(username: str, password: str) -> dict | None:
     Returns the user row dict if valid, None if invalid.
     """
     try:
-        from app import supabase, EMERGENCY_ACCOUNTS, password_hasher
+        supabase = extensions.supabase
+        EMERGENCY_ACCOUNTS = extensions.EMERGENCY_ACCOUNTS
+        password_hasher = extensions.password_hasher
     except Exception as e:
-        logger.error(f"verify_web_credentials: import from app failed: {e}")
+        logger.error(f"verify_web_credentials: extensions access failed: {e}")
         return None
 
     if supabase is None:
@@ -296,16 +296,8 @@ def verify_web_credentials(username: str, password: str) -> dict | None:
         if stored.startswith("$2b$"):
             valid = password_hasher.verify_password(password, stored)
         else:
-            valid = (stored == password)
-            if valid:
-                try:
-                    from app import supabase_admin
-                    hashed = password_hasher.hash_password(password)
-                    _db = supabase_admin or supabase
-                    _db.table("users").update({"password": hashed}).eq("username", username).execute()
-                    logger.warning(f"[bot] Auto-hashed plaintext password for {username!r}")
-                except Exception as _he:
-                    logger.warning(f"[bot] Could not auto-hash password for {username!r}: {_he}")
+            logger.error(f"[bot] User {username!r} has unhashed password in DB — rejecting login")
+            valid = False
         return user if valid else None
     except Exception as e:
         logger.error(f"verify_web_credentials failed: {e}", exc_info=True)
@@ -314,10 +306,9 @@ def verify_web_credentials(username: str, password: str) -> dict | None:
 
 def save_bot_user(telegram_id: int, username: str, tg_username: str, store: str) -> None:
     """Upsert a row in bot_users."""
-    from app import supabase
-    if supabase is None:
+    if extensions.supabase is None:
         return
-    supabase.table("bot_users").upsert({
+    extensions.supabase.table("bot_users").upsert({
         "telegram_id": telegram_id,
         "username": username,
         "store": store,
@@ -348,17 +339,16 @@ def upload_image_to_storage(image_bytes: bytes, store: str, date: str, register)
     Raises StorageUploadError on any failure — never returns empty string.
     Requires SUPABASE_SERVICE_KEY to be set (service role key bypasses RLS).
     """
-    from app import supabase_admin
-    if supabase_admin is None:
+    if extensions.supabase_admin is None:
         raise StorageUploadError(
             "SUPABASE_SERVICE_KEY not configured — photo upload disabled"
         )
-    _ensure_bucket(supabase_admin)
+    _ensure_bucket(extensions.supabase_admin)
     store_slug = store.replace(" ", "_").replace("#", "")
     reg_num = int(register) if register else 0
     path = f"{store_slug}/{date}/reg{reg_num}_{int(time.time())}.jpg"
     try:
-        supabase_admin.storage.from_("z-reports").upload(
+        extensions.supabase_admin.storage.from_("z-reports").upload(
             path,
             image_bytes,
             {"content-type": "image/jpeg"},
@@ -381,9 +371,8 @@ def save_audit_entry(
     Returns the new entry id (int), or None if saved to offline queue.
     No longer stores z_report_image_path — photos go in z_report_photos table.
     """
-    from app import supabase, supabase_admin, validate_audit_entry, save_to_queue
     # Use service-role client so RLS doesn't block bot inserts
-    client = supabase_admin or supabase
+    client = extensions.supabase_admin or extensions.supabase
     if client is None:
         return None
 
@@ -470,9 +459,8 @@ def save_photo_record(
     content_type: str = "image/jpeg",
 ) -> None:
     """Insert a photo record into z_report_photos, linked to an audit entry."""
-    from app import supabase, supabase_admin
     # Prefer service-role client so RLS doesn't block the insert
-    client = supabase_admin or supabase
+    client = extensions.supabase_admin or extensions.supabase
     if client is None:
         logger.warning("save_photo_record: no supabase client available")
         return
@@ -942,8 +930,7 @@ def register_webhook() -> None:
     domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "carimas.up.railway.app")
     webhook_url = f"https://{domain}/api/telegram/webhook"
 
-    from app import Config as _Config
-    secret = (_Config.SECRET_KEY or "")[:32]
+    secret = (Config.SECRET_KEY or "")[:32]
     resp = http.post(
         f"https://api.telegram.org/bot{token}/setWebhook",
         json={
