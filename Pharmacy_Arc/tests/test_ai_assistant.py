@@ -208,13 +208,13 @@ def test_analyze_variance_trend_detects_pattern():
 
 def test_preguntar_ai_button_enters_ai_chat():
     """Tapping 'Preguntar AI' button transitions to AI_CHAT."""
-    from telegram_bot import handle_update, bot_state, BTN_AI
+    from telegram_bot import handle_update, bot_state, MESSAGES
     bot_state.clear()
     bot_state[800] = {"state": "REGISTERED", "store": "Carimas #1", "username": "maria", "retry_count": 0}
     replies = []
 
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
-        handle_update(make_text_update(800, BTN_AI))
+        handle_update(make_text_update(800, MESSAGES["es"]["btn_ask_ai"]))
 
     assert bot_state[800]["state"] == "AI_CHAT"
     assert any("asistente ai" in r.lower() or "modo" in r.lower() for r in replies)
@@ -222,13 +222,13 @@ def test_preguntar_ai_button_enters_ai_chat():
 
 def test_cancel_button_exits_ai_chat():
     """Tapping 'Cancelar' button from AI_CHAT returns to REGISTERED."""
-    from telegram_bot import handle_update, bot_state, BTN_CANCEL
+    from telegram_bot import handle_update, bot_state, MESSAGES
     bot_state.clear()
     bot_state[801] = {"state": "AI_CHAT", "store": "Carimas #1", "username": "maria", "retry_count": 0}
     replies = []
 
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
-        handle_update(make_text_update(801, BTN_CANCEL))
+        handle_update(make_text_update(801, MESSAGES["es"]["btn_cancel"]))
 
     assert bot_state[801]["state"] == "REGISTERED"
     assert any("desactivado" in r.lower() for r in replies)

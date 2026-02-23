@@ -45,136 +45,316 @@ if not _BOT_TOKEN:
     logger.critical("TELEGRAM_BOT_TOKEN is not set — Telegram bot will refuse all requests")
 
 KNOWN_STORES = Config.STORES
-STORE_MENU = (
-    "¿Para cuál tienda es este reporte?\n"
-    + "\n".join(f"{i} — {s}" for i, s in enumerate(KNOWN_STORES, 1))
-    + "\nResponde con el número."
-)
 _STORE_CHOICE = {str(i): s for i, s in enumerate(KNOWN_STORES, 1)}
 
-# ── Messages (Spanish) ─────────────────────────────────────────────────────────
-MSG_REGISTER_START = "Bienvenido a Carimas Bot. Ingresa tu usuario para registrarte:"
-MSG_ENTER_PASSWORD = "Contraseña:"
-MSG_BAD_CREDENTIALS = "Usuario o contraseña incorrectos. Ingresa tu usuario:"
-MSG_REGISTERED = "✅ Registrado. Tienda: {store}.\nEnvía una foto del Reporte Z para comenzar."
-MSG_WELCOME_BACK = "Registrado en {store}. Envía la foto del Reporte Z."
-MSG_PHOTO_SEND = "Envía la foto del Reporte Z."
-MSG_PROCESSING = "Procesando... por favor espera."
-MSG_OCR_DATE = (
-    "¿Cuál es la fecha del reporte Z?\n"
-    "OCR: {date}\n"
-    "Escribe la fecha (MM/DD/AAAA) o responde OK para confirmar."
-)
-MSG_OCR_REG = (
-    "¿Número de caja registradora?\n"
-    "OCR: {reg}\n"
-    "Escribe el número o responde OK para confirmar."
-)
-MSG_BAD_DATE = "No se pudo leer la fecha. Usa MM/DD/AAAA (ej. 02/20/2026) o responde OK."
-MSG_BAD_REG = "Ingresa un número de caja (ej. 1) o responde OK para mantener el valor del OCR."
-MSG_YES_NO = "Responde SÍ para guardar o NO para cancelar."
-MSG_SAVED = (
-    "✅ Guardado{photo_note}. Caja #{reg} — ${gross:.2f} bruto.\n"
-    "Si no lo ves en la app, selecciona el filtro 'Todos'."
-)
-MSG_CANCELLED = "Cancelado. Envía otra foto cuando estés listo."
-MSG_INVALID_STORE = "Responde con 1, 2, 3, 4 o 5."
-MSG_STORE_CONFIRM = "Tienda: {store}. Envía la foto del Reporte Z."
-MSG_OCR_FAIL_RETRY = (
-    "⚠️ No se pudo leer el reporte.\n"
-    "Consejos: sostén la cámara directamente encima del recibo, "
-    "con buena iluminación y sin sombras. (Intento {attempt} de 2)"
-)
-MSG_OCR_FAIL_FINAL = (
-    "⚠️ No se pudo procesar la foto después de 2 intentos.\n"
-    "Consejos:\n"
-    "  • Superficie plana, cámara directamente encima\n"
-    "  • Buena iluminación, sin flash directo\n"
-    "  • Todo el recibo visible en la foto\n"
-    "Ingresa este reporte manualmente en la app web."
-)
-MSG_NULL_RETRY = (
-    "⚠️ No se pudo leer: {fields}.\n"
-    "Asegúrate de que esas secciones del recibo estén visibles.\n"
-    "Toma la foto más cerca, con buena iluminación y sin sombras. (Intento {attempt} de 2)"
-)
-MSG_NULL_FINAL = (
-    "⚠️ No se pudo leer: {fields}.\n"
-    "Fallo tras 2 intentos. Consejos:\n"
-    "  • Coloca el recibo en una superficie plana\n"
-    "  • Sostén la cámara directamente encima\n"
-    "  • Usa buena iluminación, sin flash directo\n"
-    "Ingresa este reporte manualmente en la app web."
-)
-MSG_PHOTO_WARN = "⚠️ No se pudo subir la foto. El reporte se guardará sin ella."
-MSG_DB_ERROR = "❌ Error guardando el reporte. Por favor ingrésalo manualmente en la app web."
-MSG_PHOTO_DL_ERROR = "No se pudo descargar la foto. Inténtalo de nuevo."
-MSG_OCR_ERROR = "Error procesando la imagen. Inténtalo de nuevo."
-MSG_SESSION_RESET = (
-    "Tu sesión fue restaurada después de un reinicio del sistema.\n"
-    "Por favor envía la foto del Reporte Z de nuevo."
-)
-MSG_HELP = (
-    "📋 Carimas Bot — Ayuda\n\n"
-    "Comandos disponibles:\n"
-    "  /help      — Ver esta ayuda\n"
-    "  /status    — Ver tu estado actual\n"
-    "  /cancel    — Cancelar la operación en curso\n"
-    "  /last      — Ver el último reporte enviado\n"
-    "  /broadcast — Enviar mensaje a todos (solo admin)\n\n"
-    "Cómo enviar un Reporte Z:\n"
-    "  1. Regístrate con tu usuario y contraseña del sistema\n"
-    "  2. Envía una foto clara y bien iluminada del Reporte Z\n"
-    "  3. Confirma la fecha y número de caja\n"
-    "  4. Responde SÍ para guardar el reporte\n\n"
-    "🤖 Asistente AI:\n"
-    "  Toca 'Preguntar AI' para consultar datos de ventas y varianzas."
-)
-MSG_STATUS_REGISTERED = (
-    "Estado: ✅ Registrado\n"
-    "Tienda: {store}\n"
-    "Usuario: {username}\n"
-    "Listo para recibir fotos de Reporte Z."
-)
-MSG_STATUS_UNREGISTERED = (
-    "Estado: ❌ No registrado\n"
-    "Envía cualquier mensaje para comenzar el registro."
-)
-MSG_STATUS_MIDFLOW = (
-    "Estado: En proceso ({state})\n"
-    "Usuario: {username}\n"
-    "Usa /cancel para reiniciar."
-)
-MSG_CANCEL_OK = "Operación cancelada. Envía una foto del Reporte Z cuando estés listo."
-MSG_CANCEL_NOTHING = "No hay ninguna operación activa en este momento."
-MSG_AI_WELCOME = (
-    "🤖 Modo Asistente AI activado.\n\n"
-    "Puedes preguntarme sobre ventas, varianzas, o cualquier dato de tu tienda.\n"
-    "Ejemplos:\n"
-    "  • ¿Cuánto fue el bruto de ayer?\n"
-    "  • ¿Cuál caja tiene más varianza?\n"
-    "  • Resume las ventas de esta semana\n\n"
-    "Envía /cancel para salir del modo AI.\n"
-    "Enviar una foto sigue funcionando normalmente."
-)
-MSG_AI_EXIT = "Modo AI desactivado. Envía una foto del Reporte Z cuando estés listo."
-MSG_PAYOUTS = (
-    "💵 ¿Cuánto fue el total de payouts/desembolsos?\n"
-    "Escribe el monto (ej. 50.00) o toca el botón si no hubo."
-)
-MSG_ACTUAL_CASH = (
-    "💰 ¿Cuánto efectivo hay en la caja?\n"
-    "Escribe el monto contado, o toca Omitir para usar la varianza del OCR."
-)
-MSG_BAD_AMOUNT = "Ingresa un monto válido (ej. 50.00 o 0)."
-MSG_BROADCAST_CONFIRM = (
-    "📢 Mensaje a enviar a {count} usuarios:\n\n"
-    "{message}\n\n"
-    "¿Confirmar envío?"
-)
-MSG_BROADCAST_SENT = "✅ Mensaje enviado a {sent} de {total} usuarios."
-MSG_BROADCAST_CANCELLED = "Envío cancelado."
-MSG_BROADCAST_NO_PERMISSION = "⛔ Solo administradores pueden usar /broadcast."
+# ── Bilingual message system ──────────────────────────────────────────────────
+MESSAGES: dict[str, dict[str, str]] = {
+    "es": {
+        "register_start": "Bienvenido a Carimas Bot. Ingresa tu usuario para registrarte:",
+        "enter_password": "Contrasena:",
+        "bad_credentials": "Usuario o contrasena incorrectos. Ingresa tu usuario:",
+        "registered": "Registrado. Tienda: {store}.\nEnvia una foto del Reporte Z para comenzar.",
+        "welcome_back": "Registrado en {store}. Envia la foto del Reporte Z.",
+        "photo_send": "Envia la foto del Reporte Z.",
+        "processing": "Procesando... por favor espera.",
+        "ocr_date": (
+            "Cual es la fecha del reporte Z?\n"
+            "OCR: {date}\n"
+            "Escribe la fecha (MM/DD/AAAA) o responde OK para confirmar."
+        ),
+        "ocr_reg": (
+            "Numero de caja registradora?\n"
+            "OCR: {reg}\n"
+            "Escribe el numero o responde OK para confirmar."
+        ),
+        "bad_date": "No se pudo leer la fecha. Usa MM/DD/AAAA (ej. 02/20/2026) o responde OK.",
+        "bad_reg": "Ingresa un numero de caja (ej. 1) o responde OK para mantener el valor del OCR.",
+        "yes_no": "Responde SI para guardar o NO para cancelar.",
+        "saved": (
+            "Guardado{photo_note}. Caja #{reg} -- ${gross:.2f} bruto.\n"
+            "Si no lo ves en la app, selecciona el filtro 'Todos'."
+        ),
+        "cancelled": "Cancelado. Envia otra foto cuando estes listo.",
+        "invalid_store": "Responde con 1, 2, 3, 4 o 5.",
+        "store_confirm": "Tienda: {store}. Envia la foto del Reporte Z.",
+        "store_prompt": (
+            "Para cual tienda es este reporte?\n"
+            + "\n".join(f"{i} -- {s}" for i, s in enumerate(Config.STORES, 1))
+            + "\nResponde con el numero."
+        ),
+        "ocr_fail_retry": (
+            "No se pudo leer el reporte.\n"
+            "Consejos: sosten la camara directamente encima del recibo, "
+            "con buena iluminacion y sin sombras. (Intento {attempt} de 2)"
+        ),
+        "ocr_fail_final": (
+            "No se pudo procesar la foto despues de 2 intentos.\n"
+            "Consejos:\n"
+            "  - Superficie plana, camara directamente encima\n"
+            "  - Buena iluminacion, sin flash directo\n"
+            "  - Todo el recibo visible en la foto\n"
+            "Ingresa este reporte manualmente en la app web."
+        ),
+        "null_retry": (
+            "No se pudo leer: {fields}.\n"
+            "Asegurate de que esas secciones del recibo esten visibles.\n"
+            "Toma la foto mas cerca, con buena iluminacion y sin sombras. (Intento {attempt} de 2)"
+        ),
+        "null_final": (
+            "No se pudo leer: {fields}.\n"
+            "Fallo tras 2 intentos. Consejos:\n"
+            "  - Coloca el recibo en una superficie plana\n"
+            "  - Sosten la camara directamente encima\n"
+            "  - Usa buena iluminacion, sin flash directo\n"
+            "Ingresa este reporte manualmente en la app web."
+        ),
+        "photo_warn": "No se pudo subir la foto. El reporte se guardara sin ella.",
+        "db_error": "Error guardando el reporte. Por favor ingresalo manualmente en la app web.",
+        "photo_dl_error": "No se pudo descargar la foto. Intentalo de nuevo.",
+        "ocr_error": "Error procesando la imagen. Intentalo de nuevo.",
+        "session_reset": (
+            "Tu sesion fue restaurada despues de un reinicio del sistema.\n"
+            "Por favor envia la foto del Reporte Z de nuevo."
+        ),
+        "help": (
+            "Carimas Bot -- Ayuda\n\n"
+            "Comandos disponibles:\n"
+            "  /help      -- Ver esta ayuda\n"
+            "  /status    -- Ver tu estado actual\n"
+            "  /cancel    -- Cancelar la operacion en curso\n"
+            "  /last      -- Ver el ultimo reporte enviado\n"
+            "  /broadcast -- Enviar mensaje a todos (solo admin)\n\n"
+            "Como enviar un Reporte Z:\n"
+            "  1. Registrate con tu usuario y contrasena del sistema\n"
+            "  2. Envia una foto clara y bien iluminada del Reporte Z\n"
+            "  3. Confirma la fecha y numero de caja\n"
+            "  4. Responde SI para guardar el reporte\n\n"
+            "Asistente AI:\n"
+            "  Toca 'Preguntar AI' para consultar datos de ventas y varianzas."
+        ),
+        "status_registered": (
+            "Estado: Registrado\n"
+            "Tienda: {store}\n"
+            "Usuario: {username}\n"
+            "Listo para recibir fotos de Reporte Z."
+        ),
+        "status_unregistered": (
+            "Estado: No registrado\n"
+            "Envia cualquier mensaje para comenzar el registro."
+        ),
+        "status_midflow": (
+            "Estado: En proceso ({state})\n"
+            "Usuario: {username}\n"
+            "Usa /cancel para reiniciar."
+        ),
+        "cancel_ok": "Operacion cancelada. Envia una foto del Reporte Z cuando estes listo.",
+        "cancel_nothing": "No hay ninguna operacion activa en este momento.",
+        "ai_welcome": (
+            "Modo Asistente AI activado.\n\n"
+            "Puedes preguntarme sobre ventas, varianzas, o cualquier dato de tu tienda.\n"
+            "Ejemplos:\n"
+            "  - Cuanto fue el bruto de ayer?\n"
+            "  - Cual caja tiene mas varianza?\n"
+            "  - Resume las ventas de esta semana\n\n"
+            "Envia /cancel para salir del modo AI.\n"
+            "Enviar una foto sigue funcionando normalmente."
+        ),
+        "ai_exit": "Modo AI desactivado. Envia una foto del Reporte Z cuando estes listo.",
+        "payouts": (
+            "Cuanto fue el total de payouts/desembolsos?\n"
+            "Escribe el monto (ej. 50.00) o toca el boton si no hubo."
+        ),
+        "actual_cash": (
+            "Cuanto efectivo hay en la caja?\n"
+            "Escribe el monto contado, o toca Omitir para usar la varianza del OCR."
+        ),
+        "bad_amount": "Ingresa un monto valido (ej. 50.00 o 0).",
+        "broadcast_confirm": (
+            "Mensaje a enviar a {count} usuarios:\n\n"
+            "{message}\n\n"
+            "Confirmar envio?"
+        ),
+        "broadcast_sent": "Mensaje enviado a {sent} de {total} usuarios.",
+        "broadcast_cancelled": "Envio cancelado.",
+        "broadcast_no_permission": "Solo administradores pueden usar /broadcast.",
+        "error_connection": "Error de conexion. Intentalo de nuevo.",
+        "error_state_expired": "Tu sesion expiro. Envia una foto para comenzar de nuevo.",
+        "error_button_expired": "Este boton ya no es valido. Envia una foto para comenzar de nuevo.",
+        "error_database": "Error de base de datos. Intentalo de nuevo.",
+        "error_unknown": "Ocurrio un error inesperado. Intentalo de nuevo.",
+        "lang_prompt": "Selecciona tu idioma / Select your language:",
+        "lang_set": "Idioma configurado: Espanol.",
+        "btn_ok": "OK",
+        "btn_edit": "Corregir",
+        "btn_save_yes": "SI Guardar",
+        "btn_save_no": "NO Cancelar",
+        "btn_no_payouts": "Sin payouts ($0)",
+        "btn_skip": "Omitir",
+        "btn_send": "Enviar",
+        "btn_cancel": "Cancelar",
+        "btn_ask_ai": "Preguntar AI",
+        "preview_header": "Reporte Z leido:",
+        "preview_register": "Caja: #{register}  |  Fecha: {date}",
+        "preview_save_prompt": "Guardar este reporte? Responde SI o NO",
+    },
+    "en": {
+        "register_start": "Welcome to Carimas Bot. Enter your username to register:",
+        "enter_password": "Password:",
+        "bad_credentials": "Invalid username or password. Enter your username:",
+        "registered": "Registered. Store: {store}.\nSend a Z Report photo to get started.",
+        "welcome_back": "Registered at {store}. Send the Z Report photo.",
+        "photo_send": "Send the Z Report photo.",
+        "processing": "Processing... please wait.",
+        "ocr_date": (
+            "What is the Z report date?\n"
+            "OCR: {date}\n"
+            "Type the date (MM/DD/YYYY) or reply OK to confirm."
+        ),
+        "ocr_reg": (
+            "Register number?\n"
+            "OCR: {reg}\n"
+            "Type the number or reply OK to confirm."
+        ),
+        "bad_date": "Could not read the date. Use MM/DD/YYYY (e.g. 02/20/2026) or reply OK.",
+        "bad_reg": "Enter a register number (e.g. 1) or reply OK to keep the OCR value.",
+        "yes_no": "Reply YES to save or NO to cancel.",
+        "saved": (
+            "Saved{photo_note}. Register #{reg} -- ${gross:.2f} gross.\n"
+            "If you don't see it in the app, select the 'All' filter."
+        ),
+        "cancelled": "Cancelled. Send another photo when ready.",
+        "invalid_store": "Reply with 1, 2, 3, 4, or 5.",
+        "store_confirm": "Store: {store}. Send the Z Report photo.",
+        "store_prompt": (
+            "Which store is this report for?\n"
+            + "\n".join(f"{i} -- {s}" for i, s in enumerate(Config.STORES, 1))
+            + "\nReply with the number."
+        ),
+        "ocr_fail_retry": (
+            "Could not read the report.\n"
+            "Tips: hold the camera directly above the receipt, "
+            "with good lighting and no shadows. (Attempt {attempt} of 2)"
+        ),
+        "ocr_fail_final": (
+            "Could not process the photo after 2 attempts.\n"
+            "Tips:\n"
+            "  - Flat surface, camera directly above\n"
+            "  - Good lighting, no direct flash\n"
+            "  - Entire receipt visible in the photo\n"
+            "Enter this report manually in the web app."
+        ),
+        "null_retry": (
+            "Could not read: {fields}.\n"
+            "Make sure those sections of the receipt are visible.\n"
+            "Take the photo closer, with good lighting and no shadows. (Attempt {attempt} of 2)"
+        ),
+        "null_final": (
+            "Could not read: {fields}.\n"
+            "Failed after 2 attempts. Tips:\n"
+            "  - Place the receipt on a flat surface\n"
+            "  - Hold the camera directly above\n"
+            "  - Use good lighting, no direct flash\n"
+            "Enter this report manually in the web app."
+        ),
+        "photo_warn": "Could not upload the photo. The report will be saved without it.",
+        "db_error": "Error saving the report. Please enter it manually in the web app.",
+        "photo_dl_error": "Could not download the photo. Please try again.",
+        "ocr_error": "Error processing the image. Please try again.",
+        "session_reset": (
+            "Your session was restored after a system restart.\n"
+            "Please send the Z Report photo again."
+        ),
+        "help": (
+            "Carimas Bot -- Help\n\n"
+            "Available commands:\n"
+            "  /help      -- Show this help\n"
+            "  /status    -- Show your current status\n"
+            "  /cancel    -- Cancel the current operation\n"
+            "  /last      -- Show the last submitted report\n"
+            "  /broadcast -- Send a message to everyone (admin only)\n\n"
+            "How to submit a Z Report:\n"
+            "  1. Register with your system username and password\n"
+            "  2. Send a clear, well-lit photo of the Z Report\n"
+            "  3. Confirm the date and register number\n"
+            "  4. Reply YES to save the report\n\n"
+            "AI Assistant:\n"
+            "  Tap 'Ask AI' to query sales data and variances."
+        ),
+        "status_registered": (
+            "Status: Registered\n"
+            "Store: {store}\n"
+            "User: {username}\n"
+            "Ready to receive Z Report photos."
+        ),
+        "status_unregistered": (
+            "Status: Not registered\n"
+            "Send any message to start registration."
+        ),
+        "status_midflow": (
+            "Status: In progress ({state})\n"
+            "User: {username}\n"
+            "Use /cancel to reset."
+        ),
+        "cancel_ok": "Operation cancelled. Send a Z Report photo when ready.",
+        "cancel_nothing": "No active operation at this time.",
+        "ai_welcome": (
+            "AI Assistant mode activated.\n\n"
+            "You can ask me about sales, variances, or any data from your store.\n"
+            "Examples:\n"
+            "  - What was yesterday's gross?\n"
+            "  - Which register has the most variance?\n"
+            "  - Summarize this week's sales\n\n"
+            "Send /cancel to exit AI mode.\n"
+            "Sending a photo still works normally."
+        ),
+        "ai_exit": "AI mode deactivated. Send a Z Report photo when ready.",
+        "payouts": (
+            "What was the total payouts amount?\n"
+            "Type the amount (e.g. 50.00) or tap the button if there were none."
+        ),
+        "actual_cash": (
+            "How much cash is in the drawer?\n"
+            "Type the counted amount, or tap Skip to use the OCR variance."
+        ),
+        "bad_amount": "Enter a valid amount (e.g. 50.00 or 0).",
+        "broadcast_confirm": (
+            "Message to send to {count} users:\n\n"
+            "{message}\n\n"
+            "Confirm send?"
+        ),
+        "broadcast_sent": "Message sent to {sent} of {total} users.",
+        "broadcast_cancelled": "Broadcast cancelled.",
+        "broadcast_no_permission": "Only administrators can use /broadcast.",
+        "error_connection": "Connection error. Please try again.",
+        "error_state_expired": "Your session expired. Send a photo to start again.",
+        "error_button_expired": "This button is no longer valid. Send a photo to start again.",
+        "error_database": "Database error. Please try again.",
+        "error_unknown": "An unexpected error occurred. Please try again.",
+        "lang_prompt": "Selecciona tu idioma / Select your language:",
+        "lang_set": "Language set: English.",
+        "btn_ok": "OK",
+        "btn_edit": "Edit",
+        "btn_save_yes": "YES Save",
+        "btn_save_no": "NO Cancel",
+        "btn_no_payouts": "No payouts ($0)",
+        "btn_skip": "Skip",
+        "btn_send": "Send",
+        "btn_cancel": "Cancel",
+        "btn_ask_ai": "Ask AI",
+        "preview_header": "Z Report read:",
+        "preview_register": "Register: #{register}  |  Date: {date}",
+        "preview_save_prompt": "Save this report? Reply YES or NO",
+    },
+}
+
+
+def msg(telegram_id: int, key: str, **fmt) -> str:
+    """Return a message string in the user's preferred language."""
+    with _bot_state_lock:
+        state = bot_state.get(telegram_id, {})
+    lang = state.get("lang", "es")
+    template = MESSAGES.get(lang, MESSAGES["es"]).get(key, key)
+    return template.format(**fmt) if fmt else template
 
 
 # ── Photo system helpers ───────────────────────────────────────────────────────
@@ -577,18 +757,24 @@ def save_photo_record(
         raise
 
 
-def _format_preview(data: dict) -> str:
-    """Format OCR result as a Spanish confirmation message."""
+def _format_preview(data: dict, telegram_id: int = 0) -> str:
+    """Format OCR result as a bilingual confirmation message."""
     def fmt(v):
         return f"${v:.2f}" if v is not None else "?"
 
+    header = msg(telegram_id, "preview_header")
+    reg_line = msg(telegram_id, "preview_register",
+                   register=data.get("register", "?"),
+                   date=data.get("date", "?"))
+    prompt = msg(telegram_id, "preview_save_prompt")
+
     return (
-        f"Reporte Z leído:\n"
-        f"Caja: #{data.get('register', '?')}  |  Fecha: {data.get('date', '?')}\n"
-        f"─────────────────────────\n"
+        f"{header}\n"
+        f"{reg_line}\n"
+        f"------------------------------\n"
         f"Efectivo:      {fmt(data.get('cash'))}\n"
         f"ATH:           {fmt(data.get('ath'))}\n"
-        f"ATH Móvil:     {fmt(data.get('athm'))}\n"
+        f"ATH Movil:     {fmt(data.get('athm'))}\n"
         f"VISA:          {fmt(data.get('visa'))}\n"
         f"Master Card:   {fmt(data.get('mc'))}\n"
         f"American Exp:  {fmt(data.get('amex'))}\n"
@@ -597,28 +783,25 @@ def _format_preview(data: dict) -> str:
         f"MCS OTC:       {fmt(data.get('mcs'))}\n"
         f"Triple-S OTC:  {fmt(data.get('sss'))}\n"
         f"Sobre/Corto:   {fmt(data.get('variance'))}\n"
-        f"─────────────────────────\n"
-        f"¿Guardar este reporte? Responde SÍ o NO"
+        f"------------------------------\n"
+        f"{prompt}"
     )
 
 
 # ── Keyboard helpers ──────────────────────────────────────────────────────
 
-BTN_AI = "🤖 Preguntar AI"
-BTN_CANCEL = "❌ Cancelar"
-
-def _kb_registered() -> dict:
+def _kb_registered(tid: int) -> dict:
     """Reply keyboard for REGISTERED state — includes AI button."""
     return {
-        "keyboard": [[BTN_AI]],
+        "keyboard": [[msg(tid, "btn_ask_ai")]],
         "resize_keyboard": True,
         "one_time_keyboard": False,
     }
 
-def _kb_ai_chat() -> dict:
+def _kb_ai_chat(tid: int) -> dict:
     """Reply keyboard for AI_CHAT state — shows cancel button."""
     return {
-        "keyboard": [[BTN_CANCEL]],
+        "keyboard": [[msg(tid, "btn_cancel")]],
         "resize_keyboard": True,
         "one_time_keyboard": False,
     }
@@ -637,6 +820,7 @@ def _inline_btn(text: str, callback_data: str) -> dict:
     return {"text": text, "callback_data": callback_data}
 
 
+# Static: store names don't change by language
 INLINE_STORES = _inline_kb([
     [_inline_btn(s, f"store:{i}") for i, s in enumerate(KNOWN_STORES, 1)
      if i <= 3],
@@ -644,29 +828,40 @@ INLINE_STORES = _inline_kb([
      if i > 3],
 ])
 
-INLINE_CONFIRM_DATE = _inline_kb([
-    [_inline_btn("\u2705 OK", "date:ok"), _inline_btn("\u270f\ufe0f Corregir", "date:edit")],
-])
 
-INLINE_CONFIRM_REG = _inline_kb([
-    [_inline_btn("\u2705 OK", "reg:ok"), _inline_btn("\u270f\ufe0f Corregir", "reg:edit")],
-])
+def _build_inline_confirm_date(tid: int) -> dict:
+    return _inline_kb([
+        [_inline_btn(msg(tid, "btn_ok"), "date:ok"),
+         _inline_btn(msg(tid, "btn_edit"), "date:edit")],
+    ])
 
-INLINE_SAVE = _inline_kb([
-    [_inline_btn("\u2705 S\u00cd Guardar", "save:yes"), _inline_btn("\u274c NO Cancelar", "save:no")],
-])
+def _build_inline_confirm_reg(tid: int) -> dict:
+    return _inline_kb([
+        [_inline_btn(msg(tid, "btn_ok"), "reg:ok"),
+         _inline_btn(msg(tid, "btn_edit"), "reg:edit")],
+    ])
 
-INLINE_PAYOUTS_ZERO = _inline_kb([
-    [_inline_btn("Sin payouts ($0)", "payouts:0")],
-])
+def _build_inline_save(tid: int) -> dict:
+    return _inline_kb([
+        [_inline_btn(msg(tid, "btn_save_yes"), "save:yes"),
+         _inline_btn(msg(tid, "btn_save_no"), "save:no")],
+    ])
 
-INLINE_SKIP_CASH = _inline_kb([
-    [_inline_btn("Omitir", "actual_cash:skip")],
-])
+def _build_inline_payouts_zero(tid: int) -> dict:
+    return _inline_kb([
+        [_inline_btn(msg(tid, "btn_no_payouts"), "payouts:0")],
+    ])
 
-INLINE_BROADCAST_CONFIRM = _inline_kb([
-    [_inline_btn("✅ Enviar", "broadcast:yes"), _inline_btn("❌ Cancelar", "broadcast:no")],
-])
+def _build_inline_skip_cash(tid: int) -> dict:
+    return _inline_kb([
+        [_inline_btn(msg(tid, "btn_skip"), "actual_cash:skip")],
+    ])
+
+def _build_inline_broadcast(tid: int) -> dict:
+    return _inline_kb([
+        [_inline_btn(msg(tid, "btn_send"), "broadcast:yes"),
+         _inline_btn(msg(tid, "btn_cancel"), "broadcast:no")],
+    ])
 
 
 def _handle_ai_message(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
@@ -690,7 +885,7 @@ def _handle_ai_message(telegram_id: int, chat_id: int, text: str, state: dict) -
     history.append({"role": "assistant", "content": response})
     _ai_history[telegram_id] = history[-10:]
 
-    send_message(chat_id, response, reply_markup=_kb_ai_chat())
+    send_message(chat_id, response, reply_markup=_kb_ai_chat(telegram_id))
 
 
 # ── Placeholder stubs (implemented in later tasks) ───────────────────────────
@@ -701,12 +896,13 @@ def _handle_payouts(telegram_id, chat_id, text, state):
     try:
         payouts = float(text)
     except ValueError:
-        send_message(chat_id, MSG_BAD_AMOUNT)
+        send_message(chat_id, msg(telegram_id, "bad_amount"))
         return
     state["pending_payouts"] = round(payouts, 2)
     state["state"] = "AWAITING_ACTUAL_CASH"
     _set_state(telegram_id, state)
-    send_message(chat_id, MSG_ACTUAL_CASH, reply_markup=INLINE_SKIP_CASH)
+    send_message(chat_id, msg(telegram_id, "actual_cash"),
+                 reply_markup=_build_inline_skip_cash(telegram_id))
 
 def _handle_actual_cash(telegram_id, chat_id, text, state):
     """Handle AWAITING_ACTUAL_CASH — parse cash amount or skip."""
@@ -720,7 +916,7 @@ def _handle_actual_cash(telegram_id, chat_id, text, state):
         try:
             actual_cash = float(text_clean)
         except ValueError:
-            send_message(chat_id, MSG_BAD_AMOUNT)
+            send_message(chat_id, msg(telegram_id, "bad_amount"))
             return
         state["pending_actual_cash"] = round(actual_cash, 2)
         # variance = actual_cash - (ocr_cash - payouts)
@@ -730,7 +926,8 @@ def _handle_actual_cash(telegram_id, chat_id, text, state):
 
     state["state"] = "AWAITING_CONFIRMATION"
     _set_state(telegram_id, state)
-    send_message(chat_id, _format_preview(state["pending_data"]), reply_markup=INLINE_SAVE)
+    send_message(chat_id, _format_preview(state["pending_data"], telegram_id),
+                 reply_markup=_build_inline_save(telegram_id))
 
 def _handle_broadcast_confirm(telegram_id, chat_id, text, state):
     """Handle BROADCAST_CONFIRM — send or cancel the broadcast."""
@@ -760,7 +957,7 @@ def _handle_broadcast_confirm(telegram_id, chat_id, text, state):
             "retry_count": 0,
         }
         _set_state(telegram_id, new_state)
-        send_message(chat_id, MSG_BROADCAST_SENT.format(sent=sent, total=total))
+        send_message(chat_id, msg(telegram_id, "broadcast_sent", sent=sent, total=total))
     else:
         new_state = {
             "state": "REGISTERED",
@@ -769,7 +966,7 @@ def _handle_broadcast_confirm(telegram_id, chat_id, text, state):
             "retry_count": 0,
         }
         _set_state(telegram_id, new_state)
-        send_message(chat_id, MSG_BROADCAST_CANCELLED)
+        send_message(chat_id, msg(telegram_id, "broadcast_cancelled"))
 
 
 # ── Callback query handler ────────────────────────────────────────────────────
@@ -802,11 +999,11 @@ def _handle_callback(cb: dict) -> None:
             state["store"] = chosen
             state["state"] = "REGISTERED"
             _set_state(telegram_id, state)
-            saved_msg = state.pop("pending_photo_msg", None)
-            if saved_msg:
-                _handle_photo(telegram_id, chat_id, "", saved_msg, state)
+            saved_photo = state.pop("pending_photo_msg", None)
+            if saved_photo:
+                _handle_photo(telegram_id, chat_id, "", saved_photo, state)
             else:
-                send_message(chat_id, MSG_STORE_CONFIRM.format(store=chosen))
+                send_message(chat_id, msg(telegram_id, "store_confirm", store=chosen))
 
     elif prefix == "date" and current_state == "AWAITING_DATE":
         if value == "ok":
@@ -846,13 +1043,13 @@ def handle_update(update: dict) -> None:
         _handle_callback(cb)
         return
 
-    msg = update.get("message")
-    if not msg:
+    tg_msg = update.get("message")
+    if not tg_msg:
         return  # ignore non-message updates (e.g., edited_message)
 
-    telegram_id = msg["from"]["id"]
-    tg_username = msg["from"].get("username", "")
-    chat_id = msg["chat"]["id"]
+    telegram_id = tg_msg["from"]["id"]
+    tg_username = tg_msg["from"].get("username", "")
+    chat_id = tg_msg["chat"]["id"]
 
     # Load state: prefer in-memory (under lock), fall back to DB on cache miss.
     with _bot_state_lock:
@@ -865,13 +1062,13 @@ def handle_update(update: dict) -> None:
     current_state = state.get("state")
 
     # ── photo received ────────────────────────────────────────────────────────
-    if "photo" in msg:
+    if "photo" in tg_msg:
         if not current_state or current_state not in ("REGISTERED", "AI_CHAT"):
             # Not registered yet — nudge them to register first
             if not is_registered(telegram_id):
                 new_state = {"state": "AWAITING_USERNAME", "retry_count": 0}
                 _set_state(telegram_id, new_state)
-                send_message(chat_id, MSG_REGISTER_START)
+                send_message(chat_id, msg(telegram_id, "register_start"))
                 return
             else:
                 # Reload state from DB on bot restart
@@ -886,30 +1083,32 @@ def handle_update(update: dict) -> None:
                 state = new_state
                 current_state = "REGISTERED"
 
-        _handle_photo(telegram_id, chat_id, tg_username, msg, state)
+        _handle_photo(telegram_id, chat_id, tg_username, tg_msg, state)
         return
 
     # ── text received ─────────────────────────────────────────────────────────
-    text = (msg.get("text") or "").strip()
+    text = (tg_msg.get("text") or "").strip()
 
     # Slash commands — handled regardless of current state
     if text.startswith("/"):
         _handle_slash(telegram_id, chat_id, text, state)
         return
 
-    # ── "Preguntar AI" button press ──────────────────────────────────────────
-    if text == BTN_AI and current_state == "REGISTERED":
+    # ── "Preguntar AI" / "Ask AI" button press ─────────────────────────────────
+    if text in (MESSAGES["en"]["btn_ask_ai"], MESSAGES["es"]["btn_ask_ai"]) and current_state == "REGISTERED":
         state["state"] = "AI_CHAT"
         _set_state(telegram_id, state)
-        send_message(chat_id, MSG_AI_WELCOME, reply_markup=_kb_ai_chat())
+        send_message(chat_id, msg(telegram_id, "ai_welcome"),
+                     reply_markup=_kb_ai_chat(telegram_id))
         return
 
-    # ── "Cancelar" button press from AI_CHAT ─────────────────────────────────
-    if text == BTN_CANCEL and current_state == "AI_CHAT":
+    # ── "Cancelar" / "Cancel" button press from AI_CHAT ──────────────────────
+    if text in (MESSAGES["en"]["btn_cancel"], MESSAGES["es"]["btn_cancel"]) and current_state == "AI_CHAT":
         _ai_history.pop(telegram_id, None)
         state["state"] = "REGISTERED"
         _set_state(telegram_id, state)
-        send_message(chat_id, MSG_AI_EXIT, reply_markup=_kb_registered())
+        send_message(chat_id, msg(telegram_id, "ai_exit"),
+                     reply_markup=_kb_registered(telegram_id))
         return
 
     # ── AI_CHAT state — route text to AI ─────────────────────────────────────
@@ -944,17 +1143,17 @@ def handle_update(update: dict) -> None:
     if current_state == "AWAITING_STORE":
         chosen = _STORE_CHOICE.get(text)
         if not chosen:
-            send_message(chat_id, MSG_INVALID_STORE)
+            send_message(chat_id, msg(telegram_id, "invalid_store"))
             return
         state["store"] = chosen
         state["state"] = "REGISTERED"
         _set_state(telegram_id, state)
         # Now process the saved photo
-        saved_msg = state.pop("pending_photo_msg", None)
-        if saved_msg:
-            _handle_photo(telegram_id, chat_id, tg_username, saved_msg, state)
+        saved_photo_msg = state.pop("pending_photo_msg", None)
+        if saved_photo_msg:
+            _handle_photo(telegram_id, chat_id, tg_username, saved_photo_msg, state)
         else:
-            send_message(chat_id, MSG_STORE_CONFIRM.format(store=chosen))
+            send_message(chat_id, msg(telegram_id, "store_confirm", store=chosen))
         return
 
     if current_state == "AWAITING_PASSWORD":
@@ -965,7 +1164,7 @@ def handle_update(update: dict) -> None:
         state["username"] = text
         state["state"] = "AWAITING_PASSWORD"
         _set_state(telegram_id, state)
-        send_message(chat_id, MSG_ENTER_PASSWORD)
+        send_message(chat_id, msg(telegram_id, "enter_password"))
         return
 
     # ── default: start registration or show welcome ───────────────────────────
@@ -978,12 +1177,12 @@ def handle_update(update: dict) -> None:
             "retry_count": 0,
         }
         _set_state(telegram_id, new_state)
-        send_message(chat_id, MSG_WELCOME_BACK.format(store=user_row["store"]),
-                     reply_markup=_kb_registered())
+        send_message(chat_id, msg(telegram_id, "welcome_back", store=user_row["store"]),
+                     reply_markup=_kb_registered(telegram_id))
     else:
         new_state = {"state": "AWAITING_USERNAME", "retry_count": 0}
         _set_state(telegram_id, new_state)
-        send_message(chat_id, MSG_REGISTER_START)
+        send_message(chat_id, msg(telegram_id, "register_start"))
 
 
 # ── Slash command handler ──────────────────────────────────────────────────────
@@ -993,19 +1192,19 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
     cmd = text.split()[0].lower().split("@")[0]  # strip bot name suffix if present
 
     if cmd == "/help":
-        send_message(chat_id, MSG_HELP)
+        send_message(chat_id, msg(telegram_id, "help"))
 
     elif cmd == "/status":
         current = state.get("state")
         if not current or current == "AWAITING_USERNAME":
-            send_message(chat_id, MSG_STATUS_UNREGISTERED)
+            send_message(chat_id, msg(telegram_id, "status_unregistered"))
         elif current == "REGISTERED":
-            send_message(chat_id, MSG_STATUS_REGISTERED.format(
+            send_message(chat_id, msg(telegram_id, "status_registered",
                 store=state.get("store", "?"),
                 username=state.get("username", "?"),
             ))
         else:
-            send_message(chat_id, MSG_STATUS_MIDFLOW.format(
+            send_message(chat_id, msg(telegram_id, "status_midflow",
                 state=current,
                 username=state.get("username", "?"),
             ))
@@ -1013,7 +1212,7 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
     elif cmd == "/cancel":
         current = state.get("state")
         if not current or current in ("AWAITING_USERNAME", "AWAITING_PASSWORD"):
-            send_message(chat_id, MSG_CANCEL_NOTHING)
+            send_message(chat_id, msg(telegram_id, "cancel_nothing"))
         elif current == "AI_CHAT":
             _ai_history.pop(telegram_id, None)
             new_state = {
@@ -1023,7 +1222,8 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
                 "retry_count": 0,
             }
             _set_state(telegram_id, new_state)
-            send_message(chat_id, MSG_AI_EXIT, reply_markup=_kb_registered())
+            send_message(chat_id, msg(telegram_id, "ai_exit"),
+                         reply_markup=_kb_registered(telegram_id))
         else:
             # Reset to REGISTERED if we have a username/store, else fresh start
             if state.get("username") and state.get("store") and current != "AWAITING_USERNAME":
@@ -1036,7 +1236,7 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
             else:
                 new_state = {"state": "AWAITING_USERNAME", "retry_count": 0}
             _set_state(telegram_id, new_state)
-            send_message(chat_id, MSG_CANCEL_OK)
+            send_message(chat_id, msg(telegram_id, "cancel_ok"))
 
     elif cmd == "/last":
         store = state.get("store")
@@ -1071,13 +1271,13 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
         user_row = get_bot_user(telegram_id)
         role = user_row.get("role", "staff") if user_row else "staff"
         if role not in ("admin", "super_admin"):
-            send_message(chat_id, MSG_BROADCAST_NO_PERMISSION)
+            send_message(chat_id, msg(telegram_id, "broadcast_no_permission"))
             return
         parts = text.split(None, 1)
         if len(parts) < 2 or not parts[1].strip():
             send_message(chat_id, "Uso: /broadcast <mensaje>")
             return
-        broadcast_msg = parts[1].strip()
+        broadcast_text = parts[1].strip()
         try:
             db = extensions.get_db()
             users_resp = db.table("bot_users").select("telegram_id").execute()
@@ -1085,16 +1285,16 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
         except Exception:
             count = "?"
         state["state"] = "BROADCAST_CONFIRM"
-        state["pending_broadcast"] = broadcast_msg
+        state["pending_broadcast"] = broadcast_text
         _set_state(telegram_id, state)
         send_message(chat_id,
-            MSG_BROADCAST_CONFIRM.format(count=count, message=broadcast_msg),
-            reply_markup=INLINE_BROADCAST_CONFIRM,
+            msg(telegram_id, "broadcast_confirm", count=count, message=broadcast_text),
+            reply_markup=_build_inline_broadcast(telegram_id),
         )
 
     else:
         # Unknown command — show help
-        send_message(chat_id, MSG_HELP)
+        send_message(chat_id, msg(telegram_id, "help"))
 
 
 # ── State-specific handlers ────────────────────────────────────────────────────
@@ -1107,7 +1307,7 @@ def _handle_password(telegram_id, chat_id, tg_username, password, state):
         state["state"] = "AWAITING_USERNAME"
         state.pop("username", None)
         _set_state(telegram_id, state)
-        send_message(chat_id, MSG_BAD_CREDENTIALS)
+        send_message(chat_id, msg(telegram_id, "bad_credentials"))
         return
 
     # Success — register
@@ -1119,29 +1319,30 @@ def _handle_password(telegram_id, chat_id, tg_username, password, state):
         "retry_count": 0,
     }
     _set_state(telegram_id, new_state)
-    send_message(chat_id, MSG_REGISTERED.format(store=user_row["store"]),
-                 reply_markup=_kb_registered())
+    send_message(chat_id, msg(telegram_id, "registered", store=user_row["store"]),
+                 reply_markup=_kb_registered(telegram_id))
 
 
-def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
+def _handle_photo(telegram_id, chat_id, tg_username, photo_msg, state):
     # If user has "All" store access, ask which store before processing
     if state.get("store") == "All":
-        state["pending_photo_msg"] = msg
+        state["pending_photo_msg"] = photo_msg
         state["state"] = "AWAITING_STORE"
         _set_state(telegram_id, state)
-        send_message(chat_id, STORE_MENU, reply_markup=INLINE_STORES)
+        send_message(chat_id, msg(telegram_id, "store_prompt"),
+                     reply_markup=INLINE_STORES)
         return
 
-    send_message(chat_id, MSG_PROCESSING)
+    send_message(chat_id, msg(telegram_id, "processing"))
 
     # Pick the largest photo (last in array)
-    file_id = msg["photo"][-1]["file_id"]
+    file_id = photo_msg["photo"][-1]["file_id"]
 
     try:
         image_bytes = download_photo(file_id)
     except Exception as e:
         logger.error(f"Photo download failed: {e}")
-        send_message(chat_id, MSG_PHOTO_DL_ERROR)
+        send_message(chat_id, msg(telegram_id, "photo_dl_error"))
         return
 
     retry_count = state.get("retry_count", 0)
@@ -1154,7 +1355,7 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
         return
     except Exception as e:
         logger.error(f"OCR unexpected error: {e}")
-        send_message(chat_id, MSG_OCR_ERROR)
+        send_message(chat_id, msg(telegram_id, "ocr_error"))
         return
 
     if has_null_fields(ocr_data):
@@ -1162,11 +1363,12 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
         if retry_count >= 1:
             state["retry_count"] = 0
             _set_state(telegram_id, state)
-            send_message(chat_id, MSG_NULL_FINAL.format(fields=null_names))
+            send_message(chat_id, msg(telegram_id, "null_final", fields=null_names))
             return
         state["retry_count"] = retry_count + 1
         _set_state(telegram_id, state)
-        send_message(chat_id, MSG_NULL_RETRY.format(fields=null_names, attempt=retry_count + 1))
+        send_message(chat_id, msg(telegram_id, "null_retry",
+                                  fields=null_names, attempt=retry_count + 1))
         return
 
     # All fields readable — ask for date confirmation
@@ -1176,18 +1378,19 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
     state["retry_count"] = 0
     _set_state(telegram_id, state)
     ocr_date = ocr_data.get("date") or "desconocida"
-    send_message(chat_id, MSG_OCR_DATE.format(date=ocr_date), reply_markup=INLINE_CONFIRM_DATE)
+    send_message(chat_id, msg(telegram_id, "ocr_date", date=ocr_date),
+                 reply_markup=_build_inline_confirm_date(telegram_id))
 
 
 def _handle_ocr_failure(telegram_id, chat_id, state, retry_count):
     if retry_count >= 1:
         state["retry_count"] = 0
         _set_state(telegram_id, state)
-        send_message(chat_id, MSG_OCR_FAIL_FINAL)
+        send_message(chat_id, msg(telegram_id, "ocr_fail_final"))
     else:
         state["retry_count"] = retry_count + 1
         _set_state(telegram_id, state)
-        send_message(chat_id, MSG_OCR_FAIL_RETRY.format(attempt=retry_count + 1))
+        send_message(chat_id, msg(telegram_id, "ocr_fail_retry", attempt=retry_count + 1))
 
 
 def _parse_date(text: str) -> str | None:
@@ -1216,14 +1419,15 @@ def _handle_date(telegram_id: int, chat_id: int, text: str, state: dict) -> None
     else:
         parsed = _parse_date(text)
         if parsed is None:
-            send_message(chat_id, MSG_BAD_DATE)
+            send_message(chat_id, msg(telegram_id, "bad_date"))
             return
         state["pending_data"]["date"] = parsed
 
     ocr_reg = state["pending_data"].get("register") or "desconocido"
     state["state"] = "AWAITING_REGISTER"
     _set_state(telegram_id, state)
-    send_message(chat_id, MSG_OCR_REG.format(reg=ocr_reg), reply_markup=INLINE_CONFIRM_REG)
+    send_message(chat_id, msg(telegram_id, "ocr_reg", reg=ocr_reg),
+                 reply_markup=_build_inline_confirm_reg(telegram_id))
 
 
 def _handle_register(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
@@ -1233,13 +1437,14 @@ def _handle_register(telegram_id: int, chat_id: int, text: str, state: dict) -> 
         try:
             reg_num = int(text_stripped)
         except ValueError:
-            send_message(chat_id, MSG_BAD_REG)
+            send_message(chat_id, msg(telegram_id, "bad_reg"))
             return
         state["pending_data"]["register"] = reg_num
 
     state["state"] = "AWAITING_PAYOUTS"
     _set_state(telegram_id, state)
-    send_message(chat_id, MSG_PAYOUTS, reply_markup=INLINE_PAYOUTS_ZERO)
+    send_message(chat_id, msg(telegram_id, "payouts"),
+                 reply_markup=_build_inline_payouts_zero(telegram_id))
 
 
 def _ascii_upper(text: str) -> str:
@@ -1273,7 +1478,7 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
                 logger.info(f"[BOT sid={sid}] Upload OK: path={storage_path!r}")
             except Exception as e:
                 logger.error(f"[BOT sid={sid}] Image upload failed: {e}")
-                send_message(chat_id, MSG_PHOTO_WARN)
+                send_message(chat_id, msg(telegram_id, "photo_warn"))
 
         # 2. Save audit entry → get entry_id (raises on DB failure — do NOT swallow)
         payouts = state.get("pending_payouts", 0.0) or 0.0
@@ -1301,7 +1506,7 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
             return
         except Exception as e:
             logger.error(f"[BOT sid={sid}] save_audit_entry FAILED: {e}")
-            send_message(chat_id, MSG_DB_ERROR)
+            send_message(chat_id, msg(telegram_id, "db_error"))
             return
 
         # 3. Save photo record (only if upload succeeded and we have an entry_id)
@@ -1332,7 +1537,7 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
         }
         _set_state(telegram_id, new_state)
         photo_note = " (foto adjunta)" if storage_path and entry_id else ""
-        saved_msg = MSG_SAVED.format(
+        saved_text = msg(telegram_id, "saved",
             photo_note=photo_note,
             reg=ocr_data.get("register", "?"),
             gross=gross,
@@ -1344,14 +1549,14 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
             try:
                 insight = ask_ai(
                     f"Varianza de ${variance:.2f} en Caja #{ocr_data.get('register', '?')}. "
-                    f"¿Es normal o preocupante? Una oración.",
+                    f"Es normal o preocupante? Una oracion.",
                     store, "system", username,
                 )
-                saved_msg += f"\n\n💡 {insight}"
+                saved_text += f"\n\n{insight}"
             except Exception as e:
                 logger.debug(f"[BOT sid={sid}] AI insight skipped: {e}")
 
-        send_message(chat_id, saved_msg, reply_markup=_kb_registered())
+        send_message(chat_id, saved_text, reply_markup=_kb_registered(telegram_id))
 
     elif _ascii_upper(text) == "NO":
         new_state = {
@@ -1361,9 +1566,9 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
             "retry_count": 0,
         }
         _set_state(telegram_id, new_state)
-        send_message(chat_id, MSG_CANCELLED)
+        send_message(chat_id, msg(telegram_id, "cancelled"))
     else:
-        send_message(chat_id, MSG_YES_NO)
+        send_message(chat_id, msg(telegram_id, "yes_no"))
 
 
 def register_webhook() -> None:

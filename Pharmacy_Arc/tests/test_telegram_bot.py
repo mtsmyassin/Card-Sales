@@ -326,7 +326,7 @@ def test_ai_chat_builds_history():
 
 def test_ai_history_cleared_on_cancel_button():
     """AI history is cleared when user taps Cancel button."""
-    from telegram_bot import handle_update, bot_state, _ai_history, BTN_CANCEL
+    from telegram_bot import handle_update, bot_state, _ai_history, MESSAGES
     bot_state.clear()
     _ai_history.clear()
     _ai_history[921] = [
@@ -336,7 +336,7 @@ def test_ai_history_cleared_on_cancel_button():
     bot_state[921] = {"state": "AI_CHAT", "store": "Carimas #1", "username": "maria", "retry_count": 0}
 
     with patch("telegram_bot.send_message"):
-        handle_update(make_text_update(921, BTN_CANCEL))
+        handle_update(make_text_update(921, MESSAGES["es"]["btn_cancel"]))
 
     assert 921 not in _ai_history
     assert bot_state[921]["state"] == "REGISTERED"
@@ -663,3 +663,36 @@ def test_send_message_safe_returns_false_on_error():
 
     with patch("telegram_bot.send_message", side_effect=Exception("network")):
         assert send_message_safe(123, "hello") is False
+
+
+# ── bilingual msg() helper tests ─────────────────────────────────────────────
+
+def test_msg_returns_spanish_by_default():
+    from telegram_bot import msg, bot_state
+    bot_state.clear()
+    bot_state[999] = {"lang": "es"}
+    result = msg(999, "processing")
+    assert "espera" in result.lower()
+
+
+def test_msg_returns_english_when_set():
+    from telegram_bot import msg, bot_state
+    bot_state.clear()
+    bot_state[999] = {"lang": "en"}
+    result = msg(999, "processing")
+    assert "wait" in result.lower()
+
+
+def test_msg_formats_placeholders():
+    from telegram_bot import msg, bot_state
+    bot_state.clear()
+    bot_state[999] = {"lang": "en"}
+    result = msg(999, "registered", store="Test Store")
+    assert "Test Store" in result
+
+
+def test_msg_defaults_to_spanish_for_unknown_user():
+    from telegram_bot import msg, bot_state
+    bot_state.clear()
+    result = msg(0, "processing")
+    assert "espera" in result.lower()
