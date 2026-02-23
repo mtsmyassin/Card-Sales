@@ -222,9 +222,17 @@ class TestCSRFProtection:
 
     def test_frontend_fetch_patch_present(self):
         """Main UI JS must patch window.fetch to inject X-CSRFToken."""
-        src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "main.html"),
-            encoding="utf-8",
-        ).read()
+        import re
+        templates_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
+        with open(os.path.join(templates_dir, "main.html"), encoding="utf-8") as f:
+            src = f.read()
+        # Resolve {% include %} directives so we can check included JS content
+        def _resolve(match):
+            inc_path = os.path.join(templates_dir, match.group(1))
+            if os.path.exists(inc_path):
+                with open(inc_path, encoding="utf-8") as fh:
+                    return fh.read()
+            return match.group(0)
+        src = re.sub(r"\{%\s*include\s+['\"]([^'\"]+)['\"]\s*%\}", _resolve, src)
         assert "X-CSRFToken" in src
         assert "window._origFetch" in src

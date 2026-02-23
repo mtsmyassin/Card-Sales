@@ -1,0 +1,36 @@
+<div id="dash" class="view active">
+    <div class="panel" id="dashPanel">
+        <input type="hidden" id="editId" value="">
+        <div class="section" style="margin-top:0" id="modeLabel"><span><span class="section-badge">1</span>Store & Metadata</span></div>
+        <div class="grid-form">
+            <div><label>Store Location</label><select id="storeLoc" onchange="app.checkStore()">{% for s in stores %}<option>{{ s }}</option>{% endfor %}</select></div>
+            <div><label>Date</label><input type="date" id="date"></div>
+            <div><label>Register</label><select id="reg"><option>Reg 1</option><option>Reg 2</option><option>Reg 3</option><option>Reg 4</option><option>Reg 5</option><option>Reg 6</option><option>Reg 7</option><option>Reg 8</option></select></div>
+            <div><label>Staff Name</label><input type="text" id="staff" list="staffList" placeholder="Name"><datalist id="staffList"><option>Manager</option><option>Pharmacist</option><option>Clerk</option></datalist></div>
+        </div>
+        <div class="section"><span><span class="section-badge">2</span>Revenue</span></div>
+        <div style="display:grid;grid-template-columns:1fr 4fr;gap:20px">
+            <div><label>Cash Sales</label><input type="number" id="cash" placeholder="0.00"></div>
+            <div class="grid-form">
+                <div><label>ATH</label><input type="number" id="ath" placeholder="0.00"></div>
+                <div><label>ATHM</label><input type="number" id="athm" placeholder="0.00"></div>
+                <div><label>Visa</label><input type="number" id="visa" placeholder="0.00"></div>
+                <div><label>MC</label><input type="number" id="mc" placeholder="0.00"></div>
+                <div><label>AmEx</label><input type="number" id="amex" placeholder="0.00"></div>
+                <div><label>Disc</label><input type="number" id="disc" placeholder="0.00"></div>
+                <div><label>WIC</label><input type="number" id="wic" placeholder="0.00"></div>
+                <div><label>MCS</label><input type="number" id="mcs" placeholder="0.00"></div>
+                <div><label>Triple S</label><input type="number" id="sss" placeholder="0.00" style="border:2px solid var(--p)"></div>
+            </div>
+        </div>
+        <div id="tipsSection" class="hidden" style="margin-top:5px;background:#ecfdf5;padding:10px;border:1px solid #10b981;border-radius:8px;">
+            <div style="color:#047857;font-weight:800;font-size:12px">Carthage Tip Tracker</div><input type="number" id="ccTips" placeholder="Total CC Tips" style="margin:0;width:150px">
+        </div>
+        <div class="section"><span><span class="section-badge">3</span>Deductions</span> <button onclick="app.calcTax()" style="cursor:pointer;font-size:10px;padding:2px 8px;border:1px solid #cbd5e1;border-radius:4px;background:white;color:var(--sidebar);font-weight:700;">Auto 11.5%</button></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px"><div><label>State (10.5%)</label><input type="number" id="taxState"></div><div><label>City (1%)</label><input type="number" id="taxCity"></div></div>
+        <div class="section"><span><span class="section-badge">4</span>Payouts</span> <button onclick="app.addPayout()" style="cursor:pointer;font-size:10px;padding:2px 8px;border:1px solid #cbd5e1;border-radius:4px;background:white;color:var(--sidebar);font-weight:700;">+ Add</button></div><div id="payoutList"></div>
+        <div class="section"><span><span class="section-badge">5</span>Reconciliation</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px"><div><label>Opening Float</label><input type="number" id="float" value="150.00"></div><div><label>Actual Cash</label><input type="number" id="actual" onclick="app.openCount()"></div></div>
+        <div style="display:flex;gap:12px;margin-top:24px;justify-content:flex-start"><button id="saveBtn" class="btn-main" onclick="app.save()">Finalize & Upload</button><button id="cancelBtn" class="btn-main" onclick="app.resetForm()" style="background:#64748b;display:none;">Cancel</button></div>
+    </div>
+</div>

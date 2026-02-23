@@ -15,13 +15,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _load_main_ui():
-    """Load main.html template source for structural HTML checks."""
-    template_path = os.path.join(
+    """Load main.html template source with {% include %} directives resolved."""
+    import re
+    templates_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "templates", "main.html",
+        "templates",
     )
-    with open(template_path, encoding="utf-8") as f:
-        return f.read()
+    with open(os.path.join(templates_dir, "main.html"), encoding="utf-8") as f:
+        src = f.read()
+    # Resolve {% include 'path' %} directives for structural HTML checks
+    def _resolve(match):
+        inc_path = os.path.join(templates_dir, match.group(1))
+        if os.path.exists(inc_path):
+            with open(inc_path, encoding="utf-8") as fh:
+                return fh.read()
+        return match.group(0)
+    return re.sub(r"\{%\s*include\s+['\"]([^'\"]+)['\"]\s*%\}", _resolve, src)
 
 
 def _app_source():

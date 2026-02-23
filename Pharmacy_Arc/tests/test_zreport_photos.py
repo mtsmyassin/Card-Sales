@@ -229,12 +229,21 @@ class TestRegressionNoHtmlInScript:
 
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-        template_path = os.path.join(
+        import re
+        templates_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "templates", "main.html",
+            "templates",
         )
-        with open(template_path, encoding="utf-8") as f:
+        with open(os.path.join(templates_dir, "main.html"), encoding="utf-8") as f:
             main_ui = f.read()
+        # Resolve {% include %} directives for structural checks
+        def _resolve(match):
+            inc_path = os.path.join(templates_dir, match.group(1))
+            if os.path.exists(inc_path):
+                with open(inc_path, encoding="utf-8") as fh:
+                    return fh.read()
+            return match.group(0)
+        main_ui = re.sub(r"\{%\s*include\s+['\"]([^'\"]+)['\"]\s*%\}", _resolve, main_ui)
 
         script_close = main_ui.rfind('</script>')
         modal_pos = main_ui.find('id="zreportModal"')

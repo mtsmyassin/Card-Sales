@@ -1,0 +1,16 @@
+<div id="logs" class="view">
+    <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <h3>Entry Log</h3>
+            <div style="display:flex;gap:10px;">
+                <select id="histRange" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="9999" selected>All</option><option value="30">Last 30 Days</option><option value="7">Last 7 Days</option><option value="0">Today</option><option value="custom">Custom</option></select>
+                <input type="date" id="historyFilter" onchange="document.getElementById('histRange').value='custom';app.filterHistory()" style="margin:0;padding:5px;">
+                <select id="histStoreFilter" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="All">All Stores</option><option>Carimas #1</option><option>Carimas #2</option><option>Carimas #3</option><option>Carimas #4</option><option>Carthage</option></select>
+                <button onclick="app.fetch()" class="btn-main" style="padding:7px 14px;font-size:12px;width:auto;">↻ Refresh</button>
+                <button onclick="app.exportCSV()" class="btn-main" style="padding:7px 14px;font-size:12px;width:auto;background:#047857;">📥 CSV</button>
+            </div>
+        </div>
+        <div id="logTable" style="max-height:600px;overflow-y:auto"></div>
+        <div id="histHidden" style="display:none;margin-top:8px;padding:6px 10px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:13px;color:#92400e"></div>
+    </div>
+</div>
