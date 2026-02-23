@@ -63,7 +63,7 @@ def api_get_logo():
         if not request.json:
             return jsonify(error="No data provided", code="BAD_REQUEST"), 400
 
-        store = request.json.get('store', 'carimas')
+        store = request.json.get('store', Config.STORES[0])
 
         # Whitelist validation to prevent path traversal
         valid_stores = Config.STORES + ['Carimas', None]

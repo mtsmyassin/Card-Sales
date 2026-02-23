@@ -3,6 +3,7 @@ import os
 import json
 import base64
 import anthropic
+from config import Config
 
 NUMERIC_FIELDS = ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss", "variance"]
 
@@ -84,7 +85,7 @@ def extract_z_report(image_bytes: bytes) -> dict:
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
 
     message = client.messages.create(
-        model="claude-sonnet-4-6",
+        model=Config.AI_MODEL,
         max_tokens=1024,
         messages=[{
             "role": "user",
