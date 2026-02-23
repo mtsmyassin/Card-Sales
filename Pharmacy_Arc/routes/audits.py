@@ -390,8 +390,13 @@ def list_audits():
         _db = extensions.supabase_admin or extensions.supabase
         logger.info(f"[list_audits] using_admin={extensions.supabase_admin is not None}")
 
-        # Push store filter to DB for non-admin users — avoids fetching all rows
-        query = _db.table("audits").select("*").order("date", desc=True).limit(2000)
+        # Push store filter to DB for non-admin users — avoids fetching all rows.
+        # Limit keeps response bounded; at ~5 audits/day this covers >1 year.
+        # Frontend receives all rows and filters client-side (SPA pattern).
+        page = max(1, request.args.get("page", 1, type=int))
+        per_page = min(request.args.get("per_page", 2000, type=int), 2000)
+        offset = (page - 1) * per_page
+        query = _db.table("audits").select("*").order("date", desc=True).range(offset, offset + per_page - 1)
         if user_role not in ('admin', 'super_admin'):
             query = query.eq("store", user_store)
         response = query.execute()
