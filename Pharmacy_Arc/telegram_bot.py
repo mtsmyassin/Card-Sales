@@ -19,6 +19,15 @@ from helpers.db import is_unique_violation
 
 logger = logging.getLogger(__name__)
 
+
+class TelegramAPIError(Exception):
+    """Raised when all retries to the Telegram Bot API are exhausted."""
+    def __init__(self, method: str, error: str, attempts: int):
+        self.method = method
+        self.error = error
+        self.attempts = attempts
+        super().__init__(f"Telegram API {method} failed after {attempts} attempt(s): {error}")
+
 # In-memory conversation state: { telegram_id: { state, username, store, ... } }
 # NOTE: This dict is per-process — not shared across Gunicorn workers.
 # On cache miss, state is loaded from the Supabase bot_sessions table (see load_session).
@@ -188,14 +197,28 @@ def _token() -> str:
     return _BOT_TOKEN
 
 
-def _tg(method: str, **kwargs) -> dict:
-    """Call a Telegram Bot API method."""
-    resp = http.post(
-        f"https://api.telegram.org/bot{_token()}/{method}",
-        json=kwargs,
-        timeout=15,
-    )
-    return resp.json()
+def _tg(method: str, *, retries: int = 2, **kwargs) -> dict:
+    """Call a Telegram Bot API method with retry and validation."""
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = http.post(
+                f"https://api.telegram.org/bot{_token()}/{method}",
+                json=kwargs,
+                timeout=15,
+            )
+            data = resp.json()
+            if not data.get("ok"):
+                raise TelegramAPIError(method, data.get("description", "unknown error"), attempt)
+            return data.get("result", data)
+        except TelegramAPIError:
+            raise  # don't retry Telegram-level errors (bad params, expired queries)
+        except Exception as e:
+            last_error = e
+            logger.warning(f"_tg({method}) attempt {attempt}/{retries} failed: {e}")
+            if attempt < retries:
+                time.sleep(1)
+    raise TelegramAPIError(method, str(last_error), retries)
 
 
 def send_message(chat_id: int, text: str, reply_markup: dict | None = None) -> None:
@@ -208,7 +231,7 @@ def send_message(chat_id: int, text: str, reply_markup: dict | None = None) -> N
 def download_photo(file_id: str) -> bytes:
     """Download a photo from Telegram by file_id, return raw bytes."""
     info = _tg("getFile", file_id=file_id)
-    file_path = info["result"]["file_path"]
+    file_path = info["file_path"]
     url = f"https://api.telegram.org/file/bot{_token()}/{file_path}"
     return http.get(url, timeout=30).content
 

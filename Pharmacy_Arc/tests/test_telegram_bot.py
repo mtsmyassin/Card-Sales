@@ -589,3 +589,61 @@ def test_broadcast_confirm_sends_to_users():
     broadcast_msgs = [(cid, txt) for cid, txt in sent_to if "\U0001f4e2" in txt]
     assert len(broadcast_msgs) == 2
     assert all(cid != 952 for cid, _ in broadcast_msgs)
+
+
+# ── _tg() resilience tests ──────────────────────────────────────────────────
+
+def test_tg_retries_on_network_error():
+    """_tg retries once on network error before raising TelegramAPIError."""
+    from telegram_bot import _tg, TelegramAPIError
+    import requests
+
+    with patch("telegram_bot._token", return_value="fake-token"):
+        with patch("telegram_bot.http.post", side_effect=requests.ConnectionError("timeout")):
+            with pytest.raises(TelegramAPIError) as exc_info:
+                _tg("getMe")
+            assert exc_info.value.attempts == 2
+
+
+def test_tg_returns_result_on_success():
+    """_tg returns the 'result' key from a successful Telegram response."""
+    from telegram_bot import _tg
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"ok": True, "result": {"id": 123, "is_bot": True}}
+
+    with patch("telegram_bot._token", return_value="fake-token"):
+        with patch("telegram_bot.http.post", return_value=mock_resp):
+            result = _tg("getMe")
+    assert result == {"id": 123, "is_bot": True}
+
+
+def test_tg_raises_on_telegram_error_response():
+    """_tg raises TelegramAPIError when Telegram returns ok=false."""
+    from telegram_bot import _tg, TelegramAPIError
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"ok": False, "description": "Bad Request: query is too old"}
+
+    with patch("telegram_bot._token", return_value="fake-token"):
+        with patch("telegram_bot.http.post", return_value=mock_resp):
+            with pytest.raises(TelegramAPIError) as exc_info:
+                _tg("answerCallbackQuery", callback_query_id="expired")
+            assert "Bad Request" in str(exc_info.value)
+
+
+def test_tg_succeeds_on_second_attempt():
+    """_tg retries and succeeds on the second attempt after a network error."""
+    from telegram_bot import _tg
+    import requests
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"ok": True, "result": {"message_id": 1}}
+
+    with patch("telegram_bot._token", return_value="fake-token"):
+        with patch("telegram_bot.http.post", side_effect=[
+            requests.ConnectionError("first attempt"),
+            mock_resp,
+        ]):
+            result = _tg("sendMessage", chat_id=123, text="hi")
+    assert result == {"message_id": 1}
