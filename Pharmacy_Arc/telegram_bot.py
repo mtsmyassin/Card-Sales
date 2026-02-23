@@ -529,23 +529,22 @@ def load_session(telegram_id: int) -> dict | None:
 
 
 def _set_state(telegram_id: int, state: dict) -> None:
-    """Update in-memory bot_state (under lock) and fire-and-forget persist to Supabase."""
+    """Update in-memory bot_state (under lock) and persist to Supabase synchronously."""
     with _bot_state_lock:
         bot_state[telegram_id] = state
-    # Persist asynchronously so the dispatch thread is never blocked by a slow DB write.
-    # Copy state to avoid race conditions — the caller may mutate the dict after this call.
-    t = threading.Thread(target=persist_session, args=(telegram_id, state.copy()), daemon=True)
-    t.start()
+    # Persist synchronously to prevent state loss during deploys/restarts.
+    persist_session(telegram_id, state.copy())
 
 
 # ── User helpers ───────────────────────────────────────────────────────────────
 
 def is_registered(telegram_id: int) -> bool:
     """Check if telegram_id exists in bot_users Supabase table."""
-    if extensions.supabase is None:
+    client = extensions.get_db()
+    if client is None:
         return False
     try:
-        result = extensions.supabase.table("bot_users").select("telegram_id").eq(
+        result = client.table("bot_users").select("telegram_id").eq(
             "telegram_id", telegram_id
         ).execute()
         return len(result.data) > 0
@@ -556,10 +555,11 @@ def is_registered(telegram_id: int) -> bool:
 
 def get_bot_user(telegram_id: int) -> dict | None:
     """Return bot_users row for telegram_id, or None."""
-    if extensions.supabase is None:
+    client = extensions.get_db()
+    if client is None:
         return None
     try:
-        result = extensions.supabase.table("bot_users").select("*").eq(
+        result = client.table("bot_users").select("*").eq(
             "telegram_id", telegram_id
         ).execute()
         return result.data[0] if result.data else None
@@ -614,9 +614,10 @@ def verify_web_credentials(username: str, password: str) -> dict | None:
 
 def save_bot_user(telegram_id: int, username: str, tg_username: str, store: str) -> None:
     """Upsert a row in bot_users."""
-    if extensions.supabase is None:
+    client = extensions.get_db()
+    if client is None:
         return
-    extensions.supabase.table("bot_users").upsert({
+    client.table("bot_users").upsert({
         "telegram_id": telegram_id,
         "username": username,
         "store": store,
