@@ -186,6 +186,7 @@ def test_ocr_failure_twice_tells_manual():
 # ── callback query helpers & tests ───────────────────────────────────────────
 
 def make_callback_update(telegram_id: int, data: str, message_id: int = 1) -> dict:
+    import time as _time
     return {
         "callback_query": {
             "id": "cb_123",
@@ -193,6 +194,7 @@ def make_callback_update(telegram_id: int, data: str, message_id: int = 1) -> di
             "message": {
                 "message_id": message_id,
                 "chat": {"id": telegram_id},
+                "date": int(_time.time()),
             },
             "data": data,
         }
