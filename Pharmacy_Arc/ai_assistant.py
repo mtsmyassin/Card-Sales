@@ -27,6 +27,26 @@ SYSTEM_PROMPT = (
     "- No inventes datos. Solo usa la información proporcionada.\n"
 )
 
+PHARMACY_CONTEXT = (
+    "\n\n--- Información Operativa de Farmacia Carimas ---\n"
+    "Tiendas:\n"
+    "  Carimas #1 — [DIRECCIÓN] — Tel: [TELÉFONO] — Horario: L-S 8AM-9PM, D 9AM-5PM\n"
+    "  Carimas #2 — [DIRECCIÓN] — Tel: [TELÉFONO] — Horario: L-S 8AM-9PM, D 9AM-5PM\n"
+    "  Carimas #3 — [DIRECCIÓN] — Tel: [TELÉFONO] — Horario: L-S 8AM-9PM, D 9AM-5PM\n"
+    "  Carimas #4 — [DIRECCIÓN] — Tel: [TELÉFONO] — Horario: L-S 8AM-9PM, D 9AM-5PM\n"
+    "  Carthage   — [DIRECCIÓN] — Tel: [TELÉFONO] — Horario: L-S 8AM-9PM, D 9AM-5PM\n\n"
+    "Procedimientos:\n"
+    "  - Reporte Z: Imprimir al cierre de cada caja, tomar foto y enviar por Telegram.\n"
+    "  - Payouts: Registrar todo desembolso de efectivo (cambio, pagos, etc.) antes del cierre.\n"
+    "  - Varianza: Diferencia entre efectivo esperado y contado. Negativa = faltante.\n"
+    "  - Si la varianza excede $5.00, reportar al supervisor inmediatamente.\n\n"
+    "Contactos:\n"
+    "  - Soporte técnico: [NOMBRE] — [TELÉFONO/EMAIL]\n"
+    "  - Gerencia general: [NOMBRE] — [TELÉFONO]\n\n"
+    "Usa esta información para responder preguntas operativas.\n"
+    "Si el usuario pregunta algo que no está aquí ni en los datos de ventas, dilo claramente.\n"
+)
+
 
 def _fetch_store_context(store: str, days: int = 7) -> dict:
     """Query recent audits for a store and return a summary dict.
@@ -98,7 +118,7 @@ def ask_ai(question: str, store: str, role: str, username: str) -> str:
         message = client.messages.create(
             model=Config.AI_MODEL,
             max_tokens=Config.AI_MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=SYSTEM_PROMPT + PHARMACY_CONTEXT,
             messages=[{
                 "role": "user",
                 "content": f"{context_block}\nPregunta: {question}",

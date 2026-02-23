@@ -95,6 +95,27 @@ def test_ask_ai_returns_response():
     mock_client.messages.create.assert_called_once()
 
 
+def test_ask_ai_includes_pharmacy_context():
+    """ask_ai includes PHARMACY_CONTEXT in the system prompt sent to Claude."""
+    mock_message = MagicMock()
+    mock_message.content = [MagicMock(text="Carimas #1 abre a las 8 AM.")]
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_message
+
+    with patch("ai_assistant.extensions") as mock_ext:
+        mock_ext.get_db.return_value = None
+        with patch("ai_assistant.anthropic.Anthropic", return_value=mock_client):
+            from ai_assistant import ask_ai
+            ask_ai("que hora abre carimas 1?", "Carimas #1", "staff", "maria")
+
+    call_kwargs = mock_client.messages.create.call_args.kwargs
+    system_text = call_kwargs["system"]
+    from ai_assistant import SYSTEM_PROMPT
+    assert len(system_text) > len(SYSTEM_PROMPT)
+    assert "Carimas #1" in system_text
+    assert "Horario" in system_text or "horario" in system_text
+
+
 def test_ask_ai_error_returns_friendly_message():
     """ask_ai returns error message on API failure."""
     with patch("ai_assistant.extensions") as mock_ext:
