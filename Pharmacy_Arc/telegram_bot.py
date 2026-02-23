@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 bot_state: dict = {}
 _bot_state_lock = threading.Lock()
 
+# AI conversation history: { telegram_id: [{"role": "user", "content": ...}, ...] }
+_ai_history: dict[int, list[dict]] = {}
+
 # Load bot token at import time so a missing token is caught at startup, not on the first message.
 _BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 if not _BOT_TOKEN:
@@ -102,7 +105,8 @@ MSG_HELP = (
     "Comandos disponibles:\n"
     "  /help   — Ver esta ayuda\n"
     "  /status — Ver tu estado actual\n"
-    "  /cancel — Cancelar la operación en curso\n\n"
+    "  /cancel — Cancelar la operación en curso\n"
+    "  /last   — Ver el último reporte enviado\n\n"
     "Cómo enviar un Reporte Z:\n"
     "  1. Regístrate con tu usuario y contraseña del sistema\n"
     "  2. Envía una foto clara y bien iluminada del Reporte Z\n"
@@ -605,11 +609,18 @@ def _handle_ai_message(telegram_id: int, chat_id: int, text: str, state: dict) -
     user_row = get_bot_user(telegram_id)
     role = user_row.get("role", "staff") if user_row else "staff"
 
+    history = _ai_history.get(telegram_id, [])
+
     try:
-        response = ask_ai(text, store, role, username)
+        response = ask_ai(text, store, role, username, history=history)
     except Exception as e:
         logger.error(f"AI chat error: {e}")
         response = "Lo siento, ocurrió un error. Intenta de nuevo."
+
+    # Append to history (cap at 10 messages = 5 pairs)
+    history.append({"role": "user", "content": text})
+    history.append({"role": "assistant", "content": response})
+    _ai_history[telegram_id] = history[-10:]
 
     send_message(chat_id, response, reply_markup=_kb_ai_chat())
 
@@ -763,6 +774,7 @@ def handle_update(update: dict) -> None:
 
     # ── "Cancelar" button press from AI_CHAT ─────────────────────────────────
     if text == BTN_CANCEL and current_state == "AI_CHAT":
+        _ai_history.pop(telegram_id, None)
         state["state"] = "REGISTERED"
         _set_state(telegram_id, state)
         send_message(chat_id, MSG_AI_EXIT, reply_markup=_kb_registered())
@@ -859,6 +871,7 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
         if not current or current in ("AWAITING_USERNAME", "AWAITING_PASSWORD"):
             send_message(chat_id, MSG_CANCEL_NOTHING)
         elif current == "AI_CHAT":
+            _ai_history.pop(telegram_id, None)
             new_state = {
                 "state": "REGISTERED",
                 "store": state.get("store"),
@@ -880,6 +893,35 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
                 new_state = {"state": "AWAITING_USERNAME", "retry_count": 0}
             _set_state(telegram_id, new_state)
             send_message(chat_id, MSG_CANCEL_OK)
+
+    elif cmd == "/last":
+        store = state.get("store")
+        if not store or store == "All":
+            send_message(chat_id, "Usa /last desde una tienda específica.")
+            return
+        try:
+            db = extensions.get_db()
+            if db is None:
+                send_message(chat_id, "❌ Base de datos no disponible.")
+                return
+            result = db.table("audits").select(
+                "date, reg, gross, variance, staff"
+            ).eq("store", store).order("date", desc=True).limit(1).execute()
+            if not result.data:
+                send_message(chat_id, f"No hay reportes recientes para {store}.")
+                return
+            e = result.data[0]
+            send_message(chat_id, (
+                f"📋 Último reporte — {store}\n"
+                f"Fecha: {e.get('date', '?')}\n"
+                f"Caja: {e.get('reg', '?')}\n"
+                f"Bruto: ${e.get('gross', 0):,.2f}\n"
+                f"Varianza: ${e.get('variance', 0):,.2f}\n"
+                f"Enviado por: {e.get('staff', '?')}"
+            ))
+        except Exception as ex:
+            logger.error(f"/last failed: {ex}")
+            send_message(chat_id, "❌ Error consultando el último reporte.")
 
     else:
         # Unknown command — show help

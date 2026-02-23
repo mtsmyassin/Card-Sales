@@ -297,3 +297,40 @@ def test_date_confirmation_shows_inline_keyboard():
 
     # Last message should have inline keyboard with OK/Corregir
     assert any(m and "inline_keyboard" in m for m in markups)
+
+
+# ── /last command tests ──────────────────────────────────────────────────────
+
+def test_slash_last_shows_recent_entry():
+    """The /last command shows the most recent audit entry."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[925] = {"state": "REGISTERED", "store": "Carimas #1", "username": "maria", "retry_count": 0}
+    replies = []
+
+    mock_row = {"date": "2026-02-22", "reg": "Reg 1", "gross": 1500.0, "variance": -2.5, "staff": "pedro"}
+    mock_result = MagicMock()
+    mock_result.data = [mock_row]
+    mock_db = MagicMock()
+    mock_db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_result
+
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        with patch("telegram_bot.extensions") as mock_ext:
+            mock_ext.get_db.return_value = mock_db
+            handle_update(make_text_update(925, "/last"))
+
+    assert any("1,500" in r or "1500" in r for r in replies)
+    assert any("2026-02-22" in r for r in replies)
+
+
+def test_slash_last_no_store():
+    """The /last command for 'All' store shows an appropriate message."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[926] = {"state": "REGISTERED", "store": "All", "username": "admin1", "retry_count": 0}
+    replies = []
+
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        handle_update(make_text_update(926, "/last"))
+
+    assert any("específica" in r.lower() for r in replies)
