@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify, session
 import extensions
 from helpers.auth_utils import require_auth, is_admin_role
+from helpers.exceptions import AuditNotFoundError, ReviewConflictError, StoreMismatchError
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,7 @@ def _zr_next_version(db, audit_id: int) -> int:
 
 @bp.route('/api/z-reports')
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_READ)
 def zr_list():
     """List audits with review status, optional ?status= filter."""
     db = extensions.get_db()
@@ -127,6 +129,9 @@ def zr_list():
         ).order('date', desc=True)
         if status_filter and status_filter in VALID_REVIEW_STATUSES:
             q = q.eq('review_status', status_filter)
+        # Store-scoping: managers only see their own store's audits
+        if session.get('role') == 'manager':
+            q = q.eq('store', session.get('store'))
         result = q.execute()
         return jsonify(result.data)
     except Exception as e:
@@ -136,6 +141,7 @@ def zr_list():
 
 @bp.route('/api/z-reports/<int:audit_id>')
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_READ)
 def zr_detail(audit_id: int):
     """Return audit row plus current review record."""
     db = extensions.get_db()
@@ -143,6 +149,9 @@ def zr_detail(audit_id: int):
         return jsonify(error="Z-report review service unavailable", code="SERVICE_UNAVAILABLE"), 503
     try:
         audit = db.table('audits').select('*').eq('id', audit_id).single().execute()
+        ok, err = _check_manager_store(audit.data)
+        if not ok:
+            return jsonify(error=err, code="STORE_MISMATCH"), 403
         review = db.table('z_report_reviews').select('*').eq(
             'audit_id', audit_id).eq('is_current', True).maybe_single().execute()
         return jsonify({'audit': audit.data, 'review': review.data if review else None})
@@ -546,12 +555,21 @@ def zr_amend(audit_id: int):
 
 @bp.route('/api/z-reports/<int:audit_id>/history')
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_READ)
 def zr_history(audit_id: int):
     """Return all review records for an audit, newest first."""
     db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable", code="SERVICE_UNAVAILABLE"), 503
     try:
+        # Store-scoping: managers can only view history for their own store's audits
+        audit = db.table('audits').select('id,store').eq('id', audit_id).maybe_single().execute()
+        if not audit.data:
+            return jsonify(error="Audit not found", code="NOT_FOUND"), 404
+        ok, err = _check_manager_store(audit.data)
+        if not ok:
+            return jsonify(error=err, code="STORE_MISMATCH"), 403
+
         result = db.table('z_report_reviews').select('*').eq(
             'audit_id', audit_id).order('version', desc=True).execute()
         return jsonify(result.data)
@@ -562,6 +580,7 @@ def zr_history(audit_id: int):
 
 @bp.route('/api/z-reports/<int:audit_id>/audit-log')
 @require_auth(allowed_roles=['admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_READ)
 def zr_audit_log(audit_id: int):
     """Return the audit trail for a Z Report (admin only)."""
     db = extensions.get_db()

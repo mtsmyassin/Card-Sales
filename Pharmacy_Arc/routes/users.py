@@ -14,6 +14,7 @@ bp = Blueprint('users', __name__)
 
 @bp.route('/api/users/list')
 @require_auth(['admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_READ)
 def list_users():
     """List all users (admin only)."""
     try:

@@ -18,6 +18,7 @@ _PORT = int(os.getenv('PORT', str(Config.PORT)))
 
 @bp.route('/api/diagnostics')
 @require_auth(['admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_READ)
 def diagnostics():
     """
     System diagnostics endpoint (admin only).

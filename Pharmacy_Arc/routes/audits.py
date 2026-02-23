@@ -10,6 +10,8 @@ from helpers.auth_utils import require_auth
 from helpers.validation import validate_audit_entry
 from helpers.offline_queue import save_to_queue, load_queue, clear_queue, get_queue_path
 from helpers.db import db_retry
+from helpers.exceptions import AuditNotFoundError, DuplicateEntryError, StoreMismatchError, ValidationError
+from services.audit_service import get_audit, check_store_access, check_duplicate
 from postgrest.exceptions import APIError
 
 logger = logging.getLogger(__name__)
@@ -292,24 +294,18 @@ def update():
             logger.warning(f"Invalid audit entry data from {username}: {error_msg}")
             return jsonify(error=error_msg, code="INVALID_INPUT"), 400
 
-        # Get current record for audit trail (soft-delete aware) + store-scoping check
+        # Get current record for audit trail + store-scoping check
         try:
-            old_record = extensions.get_db().table("audits").select("*").eq("id", uid).is_("deleted_at", "null").execute()
-            before_state = old_record.data[0] if old_record.data else None
-        except Exception as fetch_err:
-            logger.warning(f"[update] Failed to fetch entry {uid} for before-state: {fetch_err}")
-            before_state = None
-
-        if not before_state:
+            before_state = get_audit(uid)
+        except AuditNotFoundError:
             return jsonify(error="Entry not found", code="NOT_FOUND"), 404
 
-        # Store-scoping: non-admin users can only update entries from their own store
-        user_store = session.get('store')
-        entry_store = before_state.get('store')
-        if role not in ('admin', 'super_admin') and entry_store != user_store:
+        try:
+            check_store_access(before_state, role, session.get('store'))
+        except StoreMismatchError:
             logger.warning(
-                f"[update] IDOR attempt: user={username!r} (store={user_store!r}) "
-                f"tried to update entry {uid} (store={entry_store!r})"
+                f"[update] IDOR attempt: user={username!r} (store={session.get('store')!r}) "
+                f"tried to update entry {uid} (store={before_state.get('store')!r})"
             )
             audit_log(
                 action="UPDATE_DENIED",
@@ -319,7 +315,7 @@ def update():
                 entity_id=str(uid),
                 success=False,
                 error="Cross-store update denied",
-                context={"ip": request.remote_addr, "entry_store": entry_store}
+                context={"ip": request.remote_addr, "entry_store": before_state.get('store')}
             )
             return jsonify(error="Not authorized to modify entries from another store", code="STORE_MISMATCH"), 403
 
@@ -413,24 +409,18 @@ def delete():
 
         uid = request.json['id']
 
-        # Get current record for audit trail (soft-delete aware) + store-scoping check
+        # Get current record for audit trail + store-scoping check
         try:
-            old_record = extensions.get_db().table("audits").select("*").eq("id", uid).is_("deleted_at", "null").execute()
-            before_state = old_record.data[0] if old_record.data else None
-        except Exception as fetch_err:
-            logger.warning(f"[delete] Failed to fetch entry {uid} for before-state: {fetch_err}")
-            before_state = None
-
-        if not before_state:
+            before_state = get_audit(uid)
+        except AuditNotFoundError:
             return jsonify(error="Entry not found", code="NOT_FOUND"), 404
 
-        # Store-scoping: non-admin users can only delete entries from their own store
-        user_store = session.get('store')
-        entry_store = before_state.get('store')
-        if role not in ('admin', 'super_admin') and entry_store != user_store:
+        try:
+            check_store_access(before_state, role, session.get('store'))
+        except StoreMismatchError:
             logger.warning(
-                f"[delete] IDOR attempt: user={username!r} (store={user_store!r}) "
-                f"tried to delete entry {uid} (store={entry_store!r})"
+                f"[delete] IDOR attempt: user={username!r} (store={session.get('store')!r}) "
+                f"tried to delete entry {uid} (store={before_state.get('store')!r})"
             )
             audit_log(
                 action="DELETE_DENIED",
@@ -440,7 +430,7 @@ def delete():
                 entity_id=str(uid),
                 success=False,
                 error="Cross-store delete denied",
-                context={"ip": request.remote_addr, "entry_store": entry_store}
+                context={"ip": request.remote_addr, "entry_store": before_state.get('store')}
             )
             return jsonify(error="Not authorized to delete entries from another store", code="STORE_MISMATCH"), 403
 
@@ -484,6 +474,7 @@ def delete():
 
 @bp.route('/api/list')
 @require_auth()
+@extensions.limiter.limit(Config.RATELIMIT_READ)
 def list_audits():
     """List audit entries filtered by user's store access, with photo counts."""
     try:

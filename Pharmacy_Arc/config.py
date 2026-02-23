@@ -54,6 +54,7 @@ class Config:
 
     # Security Settings
     SESSION_TIMEOUT_MINUTES: int = int(os.getenv('SESSION_TIMEOUT_MINUTES', '30'))
+    SESSION_ABSOLUTE_TIMEOUT_MINUTES: int = int(os.getenv('SESSION_ABSOLUTE_TIMEOUT_MINUTES', '480'))
     MAX_LOGIN_ATTEMPTS: int = int(os.getenv('MAX_LOGIN_ATTEMPTS', '5'))
     LOCKOUT_DURATION_MINUTES: int = int(os.getenv('LOCKOUT_DURATION_MINUTES', '15'))
     REQUIRE_HTTPS: bool = os.getenv('REQUIRE_HTTPS', 'false').lower() == 'true'
@@ -82,6 +83,7 @@ class Config:
     # ── Rate Limiting ──────────────────────────────────────────────────────────
     RATELIMIT_LOGIN: str = '5 per minute'
     RATELIMIT_WRITE: str = '30 per minute'
+    RATELIMIT_READ: str = '60 per minute'
     RATELIMIT_STORAGE_URI: str = 'memory://'
 
     # ── Resilience / Retry ────────────────────────────────────────────────────

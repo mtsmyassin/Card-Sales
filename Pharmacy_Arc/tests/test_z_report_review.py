@@ -166,8 +166,9 @@ class TestZReportList:
     def test_manager_can_list(self, client, flask_app, manager_session):
         mock_result = MagicMock()
         mock_result.data = [{'id': 1, 'review_status': 'PENDING_REVIEW'}]
+        # Manager store-scoping adds .eq('store', ...) after .order()
         flask_app.supabase_admin.table.return_value.select.return_value \
-            .order.return_value.execute.return_value = mock_result
+            .order.return_value.eq.return_value.execute.return_value = mock_result
         r = client.get('/api/z-reports')
         assert r.status_code == 200
         data = json.loads(r.data)
@@ -176,18 +177,21 @@ class TestZReportList:
     def test_status_filter_applied(self, client, flask_app, manager_session):
         mock_result = MagicMock()
         mock_result.data = []
+        # Chain: .order().eq(status_filter).eq(store) for managers
         chain = flask_app.supabase_admin.table.return_value.select.return_value \
             .order.return_value
-        chain.eq.return_value.execute.return_value = mock_result
+        chain.eq.return_value.eq.return_value.execute.return_value = mock_result
         r = client.get('/api/z-reports?status=FINAL_APPROVED')
         assert r.status_code == 200
-        chain.eq.assert_called_once_with('review_status', 'FINAL_APPROVED')
+        # First .eq() call should be the status filter
+        chain.eq.assert_called_with('review_status', 'FINAL_APPROVED')
 
     def test_invalid_status_filter_ignored(self, client, flask_app, manager_session):
         mock_result = MagicMock()
         mock_result.data = []
+        # No status filter, but store-scoping .eq() still added for managers
         flask_app.supabase_admin.table.return_value.select.return_value \
-            .order.return_value.execute.return_value = mock_result
+            .order.return_value.eq.return_value.execute.return_value = mock_result
         r = client.get('/api/z-reports?status=BADSTATUS')
         assert r.status_code == 200
 

@@ -88,7 +88,8 @@ class TestUpdateDeleteUseAdminClient:
     def test_update_before_state_uses_admin(self):
         src = self._src()
         update_block = src[src.index("def update():"):src.index("def delete():")]
-        assert "extensions.get_db().table(\"audits\").select" in update_block
+        # After service-layer refactor, update() uses get_audit() (which calls get_db() internally)
+        assert "get_audit" in update_block or "extensions.get_db().table(\"audits\").select" in update_block
 
     def test_update_write_uses_admin(self):
         src = self._src()
@@ -101,7 +102,8 @@ class TestUpdateDeleteUseAdminClient:
         delete_start = src.index("def delete():")
         delete_end = src.index("@bp.route", delete_start)
         delete_block = src[delete_start:delete_end]
-        assert "extensions.get_db().table(\"audits\").select" in delete_block
+        # After service-layer refactor, delete() uses get_audit() (which calls get_db() internally)
+        assert "get_audit" in delete_block or "extensions.get_db().table(\"audits\").select" in delete_block
 
     def test_delete_write_uses_admin(self):
         """delete() soft-delete must use get_db() (admin) for UPDATE with deleted_at."""

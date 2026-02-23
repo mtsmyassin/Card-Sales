@@ -21,15 +21,35 @@ _SESSION_SKIP_ENDPOINTS = frozenset({
 
 @bp.before_app_request
 def enforce_session_timeout():
-    """Expire sessions that have been idle longer than SESSION_TIMEOUT_MINUTES."""
+    """Expire sessions that have been idle longer than SESSION_TIMEOUT_MINUTES
+    or older than SESSION_ABSOLUTE_TIMEOUT_MINUTES regardless of activity."""
     if not session.get('logged_in'):
         return  # unauthenticated — let route handlers deal with it
     if request.endpoint in _SESSION_SKIP_ENDPOINTS:
         return
 
+    now = datetime.now(timezone.utc)
+
+    # Absolute timeout — session expires after max lifetime regardless of activity
+    login_str = session.get('login_time')
+    if login_str:
+        try:
+            login_dt = datetime.fromisoformat(login_str)
+            if login_dt.tzinfo is None:
+                login_dt = login_dt.replace(tzinfo=timezone.utc)
+            if now - login_dt > timedelta(minutes=Config.SESSION_ABSOLUTE_TIMEOUT_MINUTES):
+                username = session.get('user', 'unknown')
+                logger.info("Absolute session timeout for user: %s (session >%dm)",
+                            username, Config.SESSION_ABSOLUTE_TIMEOUT_MINUTES)
+                session.clear()
+                return
+        except (ValueError, TypeError):
+            session.clear()
+            return
+
+    # Idle timeout — session expires after inactivity
     timeout = timedelta(minutes=Config.SESSION_TIMEOUT_MINUTES)
     last_str = session.get('last_active')
-    now = datetime.now(timezone.utc)
 
     if last_str:
         try:
@@ -40,7 +60,7 @@ def enforce_session_timeout():
                 username = session.get('user', 'unknown')
                 logger.info("Session timeout for user: %s (idle >%dm)", username, Config.SESSION_TIMEOUT_MINUTES)
                 session.clear()
-                return  # require_auth will return 401; frontend shows login screen
+                return
         except (ValueError, TypeError):
             session.clear()
             return

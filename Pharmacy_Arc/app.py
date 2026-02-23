@@ -222,6 +222,12 @@ def create_app() -> Flask:
         logger.error("Unhandled 500: %s", e, exc_info=True)
         return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
+    from helpers.exceptions import AppError
+
+    @app.errorhandler(AppError)
+    def handle_app_error(e):
+        return jsonify(error=str(e), code=e.code), e.status
+
     @app.errorhandler(Exception)
     def handle_exception(e):
         logger.error("Unhandled exception: %s", e, exc_info=True)

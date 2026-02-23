@@ -47,6 +47,7 @@ def telegram_webhook():
 
 @bp.route('/api/audit/<int:audit_id>/zreport_image')
 @require_auth()
+@extensions.limiter.limit(Config.RATELIMIT_READ)
 def get_zreport_image(audit_id: int):
     """Return a short-lived signed URL for the Z report image of an audit entry (legacy)."""
     try:
@@ -78,6 +79,7 @@ def get_zreport_image(audit_id: int):
 
 @bp.route('/api/zreport/photos')
 @require_auth()
+@extensions.limiter.limit(Config.RATELIMIT_READ)
 def get_entry_photos():
     """Return photo metadata (no URLs) for an audit entry. Store-scoped."""
     entry_id = request.args.get('entry_id', type=int)
@@ -122,6 +124,7 @@ def get_entry_photos():
 
 @bp.route('/api/zreport/signed_url')
 @require_auth()
+@extensions.limiter.limit(Config.RATELIMIT_READ)
 def get_photo_signed_url():
     """Return a 1-hour signed URL for a specific photo. Store-scoped IDOR check."""
     photo_id = request.args.get('photo_id', type=int)
