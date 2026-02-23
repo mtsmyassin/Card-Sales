@@ -1,16 +1,11 @@
 """Audit service — encapsulates DB operations for audit entries."""
 import logging
 import extensions
-from helpers.db import db_retry
+from helpers.auth_utils import is_admin_role
+from helpers.db import db_retry, is_unique_violation
 from helpers.exceptions import AuditNotFoundError, DuplicateEntryError, StoreMismatchError
-from postgrest.exceptions import APIError
 
 logger = logging.getLogger(__name__)
-
-
-def _is_unique_violation(exc: Exception) -> bool:
-    """Check if an exception is a PostgREST unique constraint violation (23505)."""
-    return isinstance(exc, APIError) and getattr(exc, 'code', None) == '23505'
 
 
 def get_audit(audit_id: int) -> dict:
@@ -30,7 +25,7 @@ def check_store_access(audit_data: dict, user_role: str, user_store: str) -> Non
 
     Raises StoreMismatchError if a non-admin user tries to access another store.
     """
-    if user_role in ('admin', 'super_admin'):
+    if is_admin_role(user_role):
         return
     entry_store = audit_data.get('store')
     if entry_store != user_store:
@@ -62,7 +57,7 @@ def insert_audit(record: dict) -> dict:
         )
         return result.data[0] if result.data else {}
     except Exception as e:
-        if _is_unique_violation(e):
+        if is_unique_violation(e):
             raise DuplicateEntryError(
                 date=record.get('date', ''),
                 store=record.get('store', ''),

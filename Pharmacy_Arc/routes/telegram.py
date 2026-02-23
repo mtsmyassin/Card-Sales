@@ -4,7 +4,7 @@ import logging
 from threading import Thread
 from flask import Blueprint, request, jsonify, session
 import extensions
-from helpers.auth_utils import require_auth, can_access_photo
+from helpers.auth_utils import require_auth, can_access_photo, is_admin_role
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ def get_entry_photos():
     try:
         # Use service-role client so RLS doesn't block server-side reads
         _db = extensions.get_db()
-        using_admin = extensions.supabase_admin is not None
+        using_admin = extensions.has_admin_client()
         logger.info(f"[get_entry_photos] entry_id={entry_id} using_admin={using_admin}")
 
         entry_resp = _db.table("audits").select("store").eq("id", entry_id).execute()
@@ -160,7 +160,7 @@ def get_photo_signed_url():
         logger.info(
             f"[signed_url] Generating URL: photo_id={photo_id} "
             f"bucket=z-reports path={storage_path!r} "
-            f"user={session.get('user')!r} using_admin={extensions.supabase_admin is not None}"
+            f"user={session.get('user')!r} using_admin={extensions.has_admin_client()}"
         )
         signed = storage_client.storage.from_(Config.STORAGE_BUCKET).create_signed_url(
             storage_path, Config.STORAGE_URL_EXPIRY_SECONDS
@@ -182,6 +182,7 @@ def get_photo_signed_url():
 
 @bp.route('/api/zreport/photo/<int:photo_id>', methods=['DELETE'])
 @require_auth(['manager', 'admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def delete_photo(photo_id):
     """Delete a Z-report photo from storage and DB (manager/admin only)."""
     try:
@@ -196,7 +197,7 @@ def delete_photo(photo_id):
         photo_store = photo_resp.data.get('store')
         user_store = session.get('store')
         user_role = session.get('role')
-        if user_role not in ('admin', 'super_admin') and photo_store != user_store:
+        if not is_admin_role(user_role) and photo_store != user_store:
             logger.warning(
                 f"[delete_photo] IDOR attempt: user={session.get('user')!r} "
                 f"(store={user_store!r}) tried photo_id={photo_id} (store={photo_store!r})"

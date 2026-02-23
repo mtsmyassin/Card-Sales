@@ -4,7 +4,6 @@ from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify, session
 import extensions
 from helpers.auth_utils import require_auth, is_admin_role
-from helpers.exceptions import AuditNotFoundError, ReviewConflictError, StoreMismatchError
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -162,6 +161,7 @@ def zr_detail(audit_id: int):
 
 @bp.route('/api/z-reports/<int:audit_id>/lock', methods=['POST'])
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def zr_lock(audit_id: int):
     """Lock an audit for review by the current user."""
     db = extensions.get_db()
@@ -219,6 +219,7 @@ def zr_lock(audit_id: int):
 
 @bp.route('/api/z-reports/<int:audit_id>/lock', methods=['DELETE'])
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def zr_unlock(audit_id: int):
     """Release the review lock on an audit."""
     db = extensions.get_db()
@@ -255,6 +256,7 @@ def zr_unlock(audit_id: int):
 
 @bp.route('/api/z-reports/<int:audit_id>/approve', methods=['POST'])
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def zr_approve(audit_id: int):
     """Approve a Z Report. Recalculates figures server-side."""
     db = extensions.get_db()
@@ -348,6 +350,7 @@ def zr_approve(audit_id: int):
 
 @bp.route('/api/z-reports/<int:audit_id>/reject', methods=['POST'])
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def zr_reject(audit_id: int):
     """Reject a Z Report with a mandatory reason."""
     db = extensions.get_db()
@@ -429,6 +432,7 @@ def zr_reject(audit_id: int):
 
 @bp.route('/api/z-reports/<int:audit_id>/reopen', methods=['POST'])
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def zr_reopen(audit_id: int):
     """Reopen a REJECTED audit back to PENDING_REVIEW so it can be re-reviewed."""
     db = extensions.get_db()
@@ -470,6 +474,7 @@ def zr_reopen(audit_id: int):
 
 @bp.route('/api/z-reports/<int:audit_id>/amend', methods=['POST'])
 @require_auth(allowed_roles=['admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def zr_amend(audit_id: int):
     """Reopen a FINAL_APPROVED audit for amendment (admin only)."""
     db = extensions.get_db()
@@ -597,6 +602,7 @@ def zr_audit_log(audit_id: int):
 
 @bp.route('/api/z-reports/unlock-timed-out', methods=['POST'])
 @require_auth(allowed_roles=['admin', 'super_admin'])
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def zr_unlock_timed_out():
     """Release all locks older than the configured timeout (admin cron / manual trigger)."""
     db = extensions.get_db()

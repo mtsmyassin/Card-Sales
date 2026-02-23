@@ -122,6 +122,6 @@ def has_null_fields(data: dict) -> bool:
     return any(data.get(f) is None for f in NUMERIC_FIELDS)
 
 
-def NULL_FIELD_NAMES(data: dict) -> list:
+def null_field_names(data: dict) -> list:
     """Return list of field names that are null."""
     return [f for f in NUMERIC_FIELDS if data.get(f) is None]

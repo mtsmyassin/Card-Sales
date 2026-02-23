@@ -1,26 +1,22 @@
 """Audits Blueprint — CRUD for pharmacy sales audit entries."""
 import json
 import logging
-from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, session
 from audit_log import audit_log
 import extensions
 from config import Config
-from helpers.auth_utils import require_auth
+from helpers.auth_utils import require_auth, is_admin_role
 from helpers.validation import validate_audit_entry
 from helpers.offline_queue import save_to_queue, load_queue, clear_queue, get_queue_path
-from helpers.db import db_retry
-from helpers.exceptions import AuditNotFoundError, DuplicateEntryError, StoreMismatchError, ValidationError
-from services.audit_service import get_audit, check_store_access, check_duplicate
-from postgrest.exceptions import APIError
+from helpers.db import db_retry, is_unique_violation
+from helpers.exceptions import AuditNotFoundError, DuplicateEntryError, StoreMismatchError
+from services.audit_service import (
+    get_audit, check_store_access, check_duplicate,
+    insert_audit, update_audit, soft_delete_audit,
+)
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('audits', __name__)
-
-
-def _is_unique_violation(exc: Exception) -> bool:
-    """Check if an exception is a PostgREST unique constraint violation (23505)."""
-    return isinstance(exc, APIError) and getattr(exc, 'code', None) == '23505'
 
 
 def _send_variance_alert(store: str, date: str, reg: str, variance: float, gross: float, submitted_by: str) -> None:
@@ -73,23 +69,17 @@ def save():
             return jsonify(error=error_msg, code="INVALID_INPUT"), 400
 
         # Duplicate check — use admin client so RLS doesn't hide existing entries
-        _dup_db = extensions.get_db()
         try:
-            dup = _dup_db.table("audits").select("id") \
-                .eq("date", d['date']) \
-                .eq("store", d.get('store', 'Main')) \
-                .eq("reg", d['reg']) \
-                .is_("deleted_at", "null") \
-                .execute()
-            if dup.data:
-                logger.warning(
-                    f"[save] Duplicate entry rejected: user={session.get('user')!r} "
-                    f"date={d['date']} store={d.get('store')} reg={d['reg']}"
-                )
-                return jsonify(
-                    error=f"Duplicate: a record for {d['date']} / {d.get('store')} / {d['reg']} already exists.",
-                    code="DUPLICATE"
-                ), 409
+            check_duplicate(d['date'], d.get('store', 'Main'), d['reg'])
+        except DuplicateEntryError:
+            logger.warning(
+                f"[save] Duplicate entry rejected: user={session.get('user')!r} "
+                f"date={d['date']} store={d.get('store')} reg={d['reg']}"
+            )
+            return jsonify(
+                error=f"Duplicate: a record for {d['date']} / {d.get('store')} / {d['reg']} already exists.",
+                code="DUPLICATE"
+            ), 409
         except Exception as e:
             logger.warning(f"[save] Duplicate check failed (proceeding): {e}")
 
@@ -108,26 +98,23 @@ def save():
         }
 
         # S1: Enforce store from session for non-admin users (prevent store IDOR)
-        if role not in ('admin', 'super_admin'):
+        if not is_admin_role(role):
             user_store = session.get('store')
             if user_store and user_store != 'All':
                 record['store'] = user_store
 
         try:
-            result = db_retry(
-                lambda: extensions.get_db().table("audits").insert(record).execute(),
-                label="save_audit",
+            inserted = insert_audit(record)
+        except DuplicateEntryError:
+            logger.warning(
+                f"[save] DB duplicate rejected: user={username!r} "
+                f"date={d['date']} store={d.get('store')} reg={d['reg']}"
             )
+            return jsonify(
+                error=f"Duplicate: a record for {d['date']} / {d.get('store')} / {d['reg']} already exists.",
+                code="DUPLICATE"
+            ), 409
         except Exception as e:
-            if _is_unique_violation(e):
-                logger.warning(
-                    f"[save] DB duplicate rejected: user={username!r} "
-                    f"date={d['date']} store={d.get('store')} reg={d['reg']}"
-                )
-                return jsonify(
-                    error=f"Duplicate: a record for {d['date']} / {d.get('store')} / {d['reg']} already exists.",
-                    code="DUPLICATE"
-                ), 409
             logger.warning(f"Failed to save to database, attempting offline queue: {e}")
             try:
                 if not save_to_queue(record):
@@ -160,7 +147,7 @@ def save():
             actor=username,
             role=role,
             entity_type="AUDIT_ENTRY",
-            entity_id=str(result.data[0]['id']) if result.data else None,
+            entity_id=str(inserted.get('id')) if inserted else None,
             after={"date": d['date'], "store": d.get('store'), "gross": d['gross']},
             success=True,
             context={"ip": request.remote_addr}
@@ -190,6 +177,7 @@ def save():
 
 @bp.route('/api/sync', methods=['POST'])
 @require_auth()
+@extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def sync():
     """Sync offline queue to database (authenticated users only)."""
     username = session.get('user')
@@ -203,7 +191,7 @@ def sync():
     for item in queue:
         try:
             # S1: Enforce store from session for non-admin users (prevent store IDOR)
-            if role not in ('admin', 'super_admin'):
+            if not is_admin_role(role):
                 user_store = session.get('store')
                 if user_store and user_store != 'All':
                     item['store'] = user_store
@@ -240,7 +228,7 @@ def sync():
                 context={"ip": request.remote_addr, "records": 1}
             )
         except Exception as exc:
-            if _is_unique_violation(exc):
+            if is_unique_violation(exc):
                 logger.warning(f"[sync] Skipping DB duplicate: date={item.get('date')} store={item.get('store')} reg={item.get('reg')}")
                 success_count += 1  # Remove from queue — don't retry duplicates
                 continue
@@ -340,13 +328,10 @@ def update():
         }
 
         # F3: Non-admins cannot reassign store — force original store value
-        if role not in ('admin', 'super_admin'):
+        if not is_admin_role(role):
             record['store'] = before_state.get('store', 'Main')
 
-        db_retry(
-            lambda: extensions.get_db().table("audits").update(record).eq("id", uid).execute(),
-            label="update_audit",
-        )
+        update_audit(uid, record)
 
         # Log successful update
         audit_log(
@@ -435,10 +420,7 @@ def delete():
             return jsonify(error="Not authorized to delete entries from another store", code="STORE_MISMATCH"), 403
 
         # Soft delete — set deleted_at timestamp instead of removing the row
-        db_retry(
-            lambda: extensions.get_db().table("audits").update({"deleted_at": datetime.now(timezone.utc).isoformat()}).eq("id", uid).execute(),
-            label="soft_delete_audit",
-        )
+        soft_delete_audit(uid)
 
         # Log successful soft deletion
         audit_log(
@@ -483,7 +465,7 @@ def list_audits():
         user = session.get('user')
 
         _db = extensions.get_db()
-        logger.info(f"[list_audits] using_admin={extensions.supabase_admin is not None}")
+        logger.info(f"[list_audits] using_admin={extensions.has_admin_client()}")
 
         # Push store filter to DB for non-admin users — avoids fetching all rows.
         # Limit keeps response bounded; at ~5 audits/day this covers >1 year.
@@ -495,14 +477,14 @@ def list_audits():
             .is_("deleted_at", "null") \
             .order("date", desc=True) \
             .range(offset, offset + per_page - 1)
-        if user_role not in ('admin', 'super_admin'):
+        if not is_admin_role(user_role):
             query = query.eq("store", user_store)
         response = db_retry(lambda: query.execute(), label="list_audits")
         allowed_rows = response.data
 
         logger.info(
             f"[list_audits] user={user!r} role={user_role!r} store={user_store!r} "
-            f"using_admin={extensions.supabase_admin is not None} "
+            f"using_admin={extensions.has_admin_client()} "
             f"rows_returned={len(allowed_rows)}"
         )
 

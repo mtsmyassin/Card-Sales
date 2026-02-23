@@ -38,18 +38,18 @@ def _load_app():
 
 class TestSaveUsesAdminClient:
     def test_save_insert_line_uses_admin_or_supabase(self):
-        """routes/audits.py must use get_db() (admin/supabase fallback) for audits INSERT in save()."""
+        """routes/audits.py must use insert_audit() or get_db() for audits INSERT in save()."""
         src = open(
             os.path.join(os.path.dirname(os.path.dirname(__file__)), "routes", "audits.py"),
             encoding="utf-8",
         ).read()
-        # find the save() function block and confirm the insert uses admin
+        # find the save() function block and confirm the insert uses service layer or admin
         save_block = src[src.index("def save():"):src.index("def sync():")]
-        assert "extensions.get_db()" in save_block, (
-            "save() must use extensions.get_db() for INSERT to bypass RLS"
+        assert "insert_audit" in save_block or "extensions.get_db()" in save_block, (
+            "save() must use insert_audit() or extensions.get_db() for INSERT to bypass RLS"
         )
-        assert ".table(\"audits\").insert" in save_block, (
-            "save() must INSERT into audits table"
+        assert "insert_audit" in save_block or ".table(\"audits\").insert" in save_block, (
+            "save() must use insert_audit() or inline INSERT into audits table"
         )
 
 
@@ -94,7 +94,8 @@ class TestUpdateDeleteUseAdminClient:
     def test_update_write_uses_admin(self):
         src = self._src()
         update_block = src[src.index("def update():"):src.index("def delete():")]
-        assert "extensions.get_db().table(\"audits\").update" in update_block
+        # After service-layer refactor, update() uses update_audit() (which calls get_db() internally)
+        assert "update_audit" in update_block or "extensions.get_db().table(\"audits\").update" in update_block
 
     def test_delete_before_state_uses_admin(self):
         src = self._src()
@@ -106,13 +107,13 @@ class TestUpdateDeleteUseAdminClient:
         assert "get_audit" in delete_block or "extensions.get_db().table(\"audits\").select" in delete_block
 
     def test_delete_write_uses_admin(self):
-        """delete() soft-delete must use get_db() (admin) for UPDATE with deleted_at."""
+        """delete() soft-delete must use soft_delete_audit() or get_db() with deleted_at."""
         src = self._src()
         delete_start = src.index("def delete():")
         delete_end = src.index("@bp.route", delete_start)
         delete_block = src[delete_start:delete_end]
-        assert "extensions.get_db().table(\"audits\")" in delete_block
-        assert "deleted_at" in delete_block, "delete() must use soft-delete (set deleted_at)"
+        # After service-layer refactor, delete() uses soft_delete_audit() (which calls get_db() internally)
+        assert "soft_delete_audit" in delete_block or "extensions.get_db().table(\"audits\")" in delete_block
 
 
 # ── BUG 3: offline queue UTF-8 roundtrip ─────────────────────────────────────

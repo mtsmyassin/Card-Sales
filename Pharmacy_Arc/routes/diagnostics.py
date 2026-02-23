@@ -1,7 +1,7 @@
 """Diagnostics Blueprint — /api/diagnostics health and status endpoint."""
 import os
 import logging
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, jsonify, session
 from audit_log import get_audit_logger
 import extensions
 from helpers.auth_utils import require_auth
@@ -56,7 +56,7 @@ def diagnostics():
             "database": {
                 "status": db_status,
                 "url": supabase_url[:30] + "..." if len(supabase_url) > 30 else supabase_url,
-                "admin_client": "configured" if extensions.supabase_admin is not None else "NOT SET — bot inserts will fail RLS",
+                "admin_client": "configured" if extensions.has_admin_client() else "NOT SET — bot inserts will fail RLS",
             },
             "audit_log": {
                 "integrity": "valid" if audit_valid else "FAILED",

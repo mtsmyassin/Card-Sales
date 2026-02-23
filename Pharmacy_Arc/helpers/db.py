@@ -1,7 +1,8 @@
-"""Database retry helper for transient Supabase failures."""
+"""Database helpers: retry logic and PostgREST error classification."""
 import time
 import logging
 from config import Config
+from postgrest.exceptions import APIError
 
 logger = logging.getLogger(__name__)
 
@@ -39,3 +40,8 @@ def db_retry(operation, label="db_call", max_attempts=None, backoff_factor=2):
             else:
                 logger.error("%s failed after %d attempts: %s", label, max_attempts, e)
     raise last_err
+
+
+def is_unique_violation(exc: Exception) -> bool:
+    """Check if an exception is a PostgREST unique constraint violation (23505)."""
+    return isinstance(exc, APIError) and getattr(exc, 'code', None) == '23505'

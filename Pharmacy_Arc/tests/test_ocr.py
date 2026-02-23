@@ -73,10 +73,10 @@ def test_extract_z_report_handles_markdown_code_block():
 
 
 def test_has_null_fields_detects_missing():
-    from ocr import has_null_fields, NULL_FIELD_NAMES
+    from ocr import has_null_fields, null_field_names
     assert has_null_fields(PARTIAL_OCR_RESULT) is True
-    assert "ath" in NULL_FIELD_NAMES(PARTIAL_OCR_RESULT)
-    assert "visa" in NULL_FIELD_NAMES(PARTIAL_OCR_RESULT)
+    assert "ath" in null_field_names(PARTIAL_OCR_RESULT)
+    assert "visa" in null_field_names(PARTIAL_OCR_RESULT)
 
 
 def test_has_null_fields_clean_record():
