@@ -1163,8 +1163,17 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
                 send_message(chat_id, MSG_PHOTO_WARN)
 
         # 2. Save audit entry → get entry_id (raises on DB failure — do NOT swallow)
+        payouts = state.get("pending_payouts", 0.0) or 0.0
+        actual_cash = state.get("pending_actual_cash", 0.0) or 0.0
+        calc_variance = state.get("pending_variance")
+
         try:
-            entry_id = save_audit_entry(ocr_data, store, username)
+            entry_id = save_audit_entry(
+                ocr_data, store, username,
+                payouts=payouts,
+                actual_cash=actual_cash,
+                variance=calc_variance,
+            )
         except ValueError as e:
             # Duplicate entry rejected by DB unique constraint
             logger.warning(f"[BOT sid={sid}] Duplicate rejected: {e}")

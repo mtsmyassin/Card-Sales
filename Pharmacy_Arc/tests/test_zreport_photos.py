@@ -144,8 +144,8 @@ class TestNewBotFlow:
 
         assert bot_state[103]["state"] == "AWAITING_DATE"
 
-    def test_register_ok_leads_to_awaiting_confirmation(self):
-        """Replying OK in AWAITING_REGISTER confirms OCR register and moves to AWAITING_CONFIRMATION."""
+    def test_register_ok_leads_to_awaiting_payouts(self):
+        """Replying OK in AWAITING_REGISTER confirms OCR register and moves to AWAITING_PAYOUTS."""
         from telegram_bot import handle_update, bot_state
         bot_state.clear()
         bot_state[104] = {
@@ -158,8 +158,8 @@ class TestNewBotFlow:
         with patch("telegram_bot.send_message", side_effect=lambda c, t, **kw: replies.append(t)):
             handle_update(make_text_update(104, "OK"))
 
-        assert bot_state[104]["state"] == "AWAITING_CONFIRMATION"
-        assert any("guardar" in r.lower() for r in replies)
+        assert bot_state[104]["state"] == "AWAITING_PAYOUTS"
+        assert any("payout" in r.lower() or "desembolso" in r.lower() for r in replies)
 
     def test_yes_confirmation_saves_entry_and_photo(self):
         """YES in AWAITING_CONFIRMATION calls save_audit_entry + save_photo_record."""

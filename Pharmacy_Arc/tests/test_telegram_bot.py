@@ -397,6 +397,97 @@ def test_slash_last_no_store():
     assert any("específica" in r.lower() for r in replies)
 
 
+# ── payout entry flow tests ──────────────────────────────────────────────────
+
+def test_register_ok_goes_to_payouts():
+    """After register confirmation, bot asks for payouts (not direct to confirmation)."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    good_ocr = {
+        "register": 2, "date": "2026-02-22",
+        "cash": 500.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
+        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
+        "sss": 0.0, "variance": -1.5,
+    }
+    bot_state[940] = {
+        "state": "AWAITING_REGISTER",
+        "store": "Carimas #1",
+        "username": "maria",
+        "pending_data": good_ocr,
+        "pending_image_bytes": b"fake",
+        "retry_count": 0,
+    }
+    replies = []
+
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        handle_update(make_text_update(940, "OK"))
+
+    assert bot_state[940]["state"] == "AWAITING_PAYOUTS"
+    assert any("payout" in r.lower() or "desembolso" in r.lower() for r in replies)
+
+
+def test_payout_then_cash_calculates_variance():
+    """Entering payouts and actual cash auto-calculates variance."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    good_ocr = {
+        "register": 2, "date": "2026-02-22",
+        "cash": 500.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
+        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
+        "sss": 0.0, "variance": 0,
+    }
+    bot_state[941] = {
+        "state": "AWAITING_PAYOUTS",
+        "store": "Carimas #1",
+        "username": "maria",
+        "pending_data": good_ocr,
+        "pending_image_bytes": b"fake",
+        "retry_count": 0,
+    }
+    replies = []
+
+    # Enter payouts = $50
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        handle_update(make_text_update(941, "50"))
+    assert bot_state[941]["state"] == "AWAITING_ACTUAL_CASH"
+    assert bot_state[941]["pending_payouts"] == 50.0
+
+    # Enter actual cash = $440 (expected: 500 - 50 = 450, variance = 440 - 450 = -10)
+    replies.clear()
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        handle_update(make_text_update(941, "440"))
+    assert bot_state[941]["state"] == "AWAITING_CONFIRMATION"
+    assert bot_state[941]["pending_actual_cash"] == 440.0
+    assert bot_state[941]["pending_variance"] == -10.0
+
+
+def test_payout_skip_actual_cash():
+    """User can skip actual cash entry to keep OCR variance."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    good_ocr = {
+        "register": 2, "date": "2026-02-22",
+        "cash": 500.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
+        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
+        "sss": 0.0, "variance": -3.0,
+    }
+    bot_state[942] = {
+        "state": "AWAITING_ACTUAL_CASH",
+        "store": "Carimas #1",
+        "username": "maria",
+        "pending_data": good_ocr,
+        "pending_payouts": 0.0,
+        "pending_image_bytes": b"fake",
+        "retry_count": 0,
+    }
+    replies = []
+
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        handle_update(make_text_update(942, "omitir"))
+    assert bot_state[942]["state"] == "AWAITING_CONFIRMATION"
+    assert bot_state[942]["pending_variance"] is None  # OCR variance kept
+
+
 def test_ocr_null_fields_gives_specific_guidance():
     """When OCR can't read specific fields, error gives specific tips."""
     from telegram_bot import handle_update, bot_state
