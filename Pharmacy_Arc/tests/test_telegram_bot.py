@@ -270,3 +270,30 @@ def test_callback_save_yes():
 
     assert bot_state[902]["state"] == "REGISTERED"
     assert any("guardado" in r.lower() for r in replies)
+
+
+def test_date_confirmation_shows_inline_keyboard():
+    """After OCR, date confirmation includes inline keyboard."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[910] = {"state": "REGISTERED", "store": "Carimas #1", "username": "pedro", "retry_count": 0}
+    markups = []
+
+    def capture_msg(cid, txt, reply_markup=None, **kw):
+        markups.append(reply_markup)
+
+    good_ocr = {
+        "register": 2, "date": "2026-02-22",
+        "cash": 100.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
+        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
+        "sss": 0.0, "variance": -1.5,
+    }
+
+    with patch("telegram_bot.send_message", side_effect=capture_msg):
+        with patch("telegram_bot.download_photo", return_value=b"fake"):
+            with patch("telegram_bot.extract_z_report", return_value=good_ocr):
+                with patch("ocr.has_null_fields", return_value=False):
+                    handle_update(make_photo_update(910))
+
+    # Last message should have inline keyboard with OK/Corregir
+    assert any(m and "inline_keyboard" in m for m in markups)

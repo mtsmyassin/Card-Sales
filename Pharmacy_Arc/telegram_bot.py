@@ -918,7 +918,7 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
         state["pending_photo_msg"] = msg
         state["state"] = "AWAITING_STORE"
         _set_state(telegram_id, state)
-        send_message(chat_id, STORE_MENU)
+        send_message(chat_id, STORE_MENU, reply_markup=INLINE_STORES)
         return
 
     send_message(chat_id, MSG_PROCESSING)
@@ -965,7 +965,7 @@ def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
     state["retry_count"] = 0
     _set_state(telegram_id, state)
     ocr_date = ocr_data.get("date") or "desconocida"
-    send_message(chat_id, MSG_OCR_DATE.format(date=ocr_date))
+    send_message(chat_id, MSG_OCR_DATE.format(date=ocr_date), reply_markup=INLINE_CONFIRM_DATE)
 
 
 def _handle_ocr_failure(telegram_id, chat_id, state, retry_count):
@@ -1012,7 +1012,7 @@ def _handle_date(telegram_id: int, chat_id: int, text: str, state: dict) -> None
     ocr_reg = state["pending_data"].get("register") or "desconocido"
     state["state"] = "AWAITING_REGISTER"
     _set_state(telegram_id, state)
-    send_message(chat_id, MSG_OCR_REG.format(reg=ocr_reg))
+    send_message(chat_id, MSG_OCR_REG.format(reg=ocr_reg), reply_markup=INLINE_CONFIRM_REG)
 
 
 def _handle_register(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
@@ -1028,7 +1028,7 @@ def _handle_register(telegram_id: int, chat_id: int, text: str, state: dict) -> 
 
     state["state"] = "AWAITING_CONFIRMATION"
     _set_state(telegram_id, state)
-    send_message(chat_id, _format_preview(state["pending_data"]))
+    send_message(chat_id, _format_preview(state["pending_data"]), reply_markup=INLINE_SAVE)
 
 
 def _ascii_upper(text: str) -> str:
