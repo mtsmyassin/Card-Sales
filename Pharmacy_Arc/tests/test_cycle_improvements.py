@@ -15,18 +15,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _load_main_ui():
-    """Load MAIN_UI string from app module without starting Flask."""
-    with patch.dict(os.environ, {
-        "FLASK_SECRET_KEY": "test-key-minimum-32-chars-long-ok!!",
-        "SUPABASE_URL": "https://test.supabase.co",
-        "SUPABASE_KEY": "test-key",
-    }):
-        with patch("supabase.create_client", return_value=MagicMock()):
-            with patch("config.Config.startup_check"):
-                import importlib
-                import app as app_module
-                importlib.reload(app_module)
-                return app_module.MAIN_UI
+    """Load main.html template source for structural HTML checks."""
+    template_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "templates", "main.html",
+    )
+    with open(template_path, encoding="utf-8") as f:
+        return f.read()
 
 
 def _app_source():

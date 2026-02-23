@@ -229,17 +229,12 @@ class TestRegressionNoHtmlInScript:
 
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-        with mock.patch.dict(os.environ, {
-            'FLASK_SECRET_KEY': 'test-key-minimum-32-chars-long-ok!!',
-            'SUPABASE_URL': 'https://test.supabase.co',
-            'SUPABASE_KEY': 'test-key',
-        }):
-            with mock.patch('supabase.create_client', return_value=mock.MagicMock()):
-                with mock.patch('config.Config.startup_check'):
-                    import importlib
-                    import app as app_module
-                    importlib.reload(app_module)
-                    main_ui = app_module.MAIN_UI
+        template_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "templates", "main.html",
+        )
+        with open(template_path, encoding="utf-8") as f:
+            main_ui = f.read()
 
         script_close = main_ui.rfind('</script>')
         modal_pos = main_ui.find('id="zreportModal"')
