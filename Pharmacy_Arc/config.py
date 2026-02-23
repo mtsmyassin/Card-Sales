@@ -89,6 +89,10 @@ class Config:
     DB_RETRY_MAX_ATTEMPTS: int = 3        # db_retry() default max attempts
     SUPABASE_CONNECT_RETRIES: int = 3     # _init_supabase() startup retries
 
+    # ── AI Assistant ─────────────────────────────────────────────────────────
+    AI_MODEL: str = os.getenv('AI_MODEL', 'claude-sonnet-4-6')
+    AI_MAX_TOKENS: int = int(os.getenv('AI_MAX_TOKENS', '500'))
+
     # ── Crypto ────────────────────────────────────────────────────────────────
     BCRYPT_ROUNDS: int = int(os.getenv('BCRYPT_ROUNDS', '12'))
     

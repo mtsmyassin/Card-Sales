@@ -87,7 +87,7 @@ class TestNewBotFlow:
                           "username": "manager", "retry_count": 0}
         replies = []
 
-        with patch("telegram_bot.send_message", side_effect=lambda c, t: replies.append(t)):
+        with patch("telegram_bot.send_message", side_effect=lambda c, t, **kw: replies.append(t)):
             with patch("telegram_bot.download_photo", return_value=b"bytes"):
                 with patch("telegram_bot.extract_z_report", return_value=GOOD_OCR):
                     with patch("ocr.has_null_fields", return_value=False):
@@ -107,7 +107,7 @@ class TestNewBotFlow:
             "retry_count": 0,
         }
         replies = []
-        with patch("telegram_bot.send_message", side_effect=lambda c, t: replies.append(t)):
+        with patch("telegram_bot.send_message", side_effect=lambda c, t, **kw: replies.append(t)):
             handle_update(make_text_update(101, "OK"))
 
         assert bot_state[101]["state"] == "AWAITING_REGISTER"
@@ -123,7 +123,7 @@ class TestNewBotFlow:
             "retry_count": 0,
         }
         replies = []
-        with patch("telegram_bot.send_message", side_effect=lambda c, t: replies.append(t)):
+        with patch("telegram_bot.send_message", side_effect=lambda c, t, **kw: replies.append(t)):
             handle_update(make_text_update(102, "02/25/2026"))
 
         assert bot_state[102]["state"] == "AWAITING_REGISTER"
@@ -155,7 +155,7 @@ class TestNewBotFlow:
             "retry_count": 0,
         }
         replies = []
-        with patch("telegram_bot.send_message", side_effect=lambda c, t: replies.append(t)):
+        with patch("telegram_bot.send_message", side_effect=lambda c, t, **kw: replies.append(t)):
             handle_update(make_text_update(104, "OK"))
 
         assert bot_state[104]["state"] == "AWAITING_CONFIRMATION"
@@ -173,7 +173,7 @@ class TestNewBotFlow:
         }
         replies = []
 
-        with patch("telegram_bot.send_message", side_effect=lambda c, t: replies.append(t)):
+        with patch("telegram_bot.send_message", side_effect=lambda c, t, **kw: replies.append(t)):
             with patch("telegram_bot.upload_image_to_storage", return_value="Carimas2/2026-02-20/reg2_123.jpg"):
                 with patch("telegram_bot.save_audit_entry", return_value=99):
                     with patch("telegram_bot.save_photo_record") as mock_photo:

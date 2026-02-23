@@ -12,6 +12,7 @@ import unicodedata
 import requests as http
 
 from ocr import extract_z_report, has_null_fields, NULL_FIELD_NAMES, OCRParseError
+from ai_assistant import ask_ai
 import extensions
 from config import Config
 
@@ -100,7 +101,9 @@ MSG_HELP = (
     "  1. Regístrate con tu usuario y contraseña del sistema\n"
     "  2. Envía una foto clara y bien iluminada del Reporte Z\n"
     "  3. Confirma la fecha y número de caja\n"
-    "  4. Responde SÍ para guardar el reporte"
+    "  4. Responde SÍ para guardar el reporte\n\n"
+    "🤖 Asistente AI:\n"
+    "  Toca 'Preguntar AI' para consultar datos de ventas y varianzas."
 )
 MSG_STATUS_REGISTERED = (
     "Estado: ✅ Registrado\n"
@@ -119,6 +122,17 @@ MSG_STATUS_MIDFLOW = (
 )
 MSG_CANCEL_OK = "Operación cancelada. Envía una foto del Reporte Z cuando estés listo."
 MSG_CANCEL_NOTHING = "No hay ninguna operación activa en este momento."
+MSG_AI_WELCOME = (
+    "🤖 Modo Asistente AI activado.\n\n"
+    "Puedes preguntarme sobre ventas, varianzas, o cualquier dato de tu tienda.\n"
+    "Ejemplos:\n"
+    "  • ¿Cuánto fue el bruto de ayer?\n"
+    "  • ¿Cuál caja tiene más varianza?\n"
+    "  • Resume las ventas de esta semana\n\n"
+    "Envía /cancel para salir del modo AI.\n"
+    "Enviar una foto sigue funcionando normalmente."
+)
+MSG_AI_EXIT = "Modo AI desactivado. Envía una foto del Reporte Z cuando estés listo."
 
 
 # ── Photo system helpers ───────────────────────────────────────────────────────
@@ -151,8 +165,11 @@ def _tg(method: str, **kwargs) -> dict:
     return resp.json()
 
 
-def send_message(chat_id: int, text: str) -> None:
-    _tg("sendMessage", chat_id=chat_id, text=text)
+def send_message(chat_id: int, text: str, reply_markup: dict | None = None) -> None:
+    kwargs = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        kwargs["reply_markup"] = reply_markup
+    _tg("sendMessage", **kwargs)
 
 
 def download_photo(file_id: str) -> bytes:
@@ -512,6 +529,49 @@ def _format_preview(data: dict) -> str:
     )
 
 
+# ── Keyboard helpers ──────────────────────────────────────────────────────
+
+BTN_AI = "🤖 Preguntar AI"
+BTN_CANCEL = "❌ Cancelar"
+
+def _kb_registered() -> dict:
+    """Reply keyboard for REGISTERED state — includes AI button."""
+    return {
+        "keyboard": [[BTN_AI]],
+        "resize_keyboard": True,
+        "one_time_keyboard": False,
+    }
+
+def _kb_ai_chat() -> dict:
+    """Reply keyboard for AI_CHAT state — shows cancel button."""
+    return {
+        "keyboard": [[BTN_CANCEL]],
+        "resize_keyboard": True,
+        "one_time_keyboard": False,
+    }
+
+def _kb_remove() -> dict:
+    """Remove the custom keyboard."""
+    return {"remove_keyboard": True}
+
+
+def _handle_ai_message(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
+    """Handle a text message while in AI_CHAT state."""
+    store = state.get("store", "")
+    username = state.get("username", "")
+    # Get role from bot_users if available
+    user_row = get_bot_user(telegram_id)
+    role = user_row.get("role", "staff") if user_row else "staff"
+
+    try:
+        response = ask_ai(text, store, role, username)
+    except Exception as e:
+        logger.error(f"AI chat error: {e}")
+        response = "Lo siento, ocurrió un error. Intenta de nuevo."
+
+    send_message(chat_id, response, reply_markup=_kb_ai_chat())
+
+
 # ── Main dispatcher ────────────────────────────────────────────────────────────
 
 def handle_update(update: dict) -> None:
@@ -539,7 +599,7 @@ def handle_update(update: dict) -> None:
 
     # ── photo received ────────────────────────────────────────────────────────
     if "photo" in msg:
-        if not current_state or current_state not in ("REGISTERED",):
+        if not current_state or current_state not in ("REGISTERED", "AI_CHAT"):
             # Not registered yet — nudge them to register first
             if not is_registered(telegram_id):
                 new_state = {"state": "AWAITING_USERNAME", "retry_count": 0}
@@ -568,6 +628,25 @@ def handle_update(update: dict) -> None:
     # Slash commands — handled regardless of current state
     if text.startswith("/"):
         _handle_slash(telegram_id, chat_id, text, state)
+        return
+
+    # ── "Preguntar AI" button press ──────────────────────────────────────────
+    if text == BTN_AI and current_state == "REGISTERED":
+        state["state"] = "AI_CHAT"
+        _set_state(telegram_id, state)
+        send_message(chat_id, MSG_AI_WELCOME, reply_markup=_kb_ai_chat())
+        return
+
+    # ── "Cancelar" button press from AI_CHAT ─────────────────────────────────
+    if text == BTN_CANCEL and current_state == "AI_CHAT":
+        state["state"] = "REGISTERED"
+        _set_state(telegram_id, state)
+        send_message(chat_id, MSG_AI_EXIT, reply_markup=_kb_registered())
+        return
+
+    # ── AI_CHAT state — route text to AI ─────────────────────────────────────
+    if current_state == "AI_CHAT":
+        _handle_ai_message(telegram_id, chat_id, text, state)
         return
 
     if current_state == "AWAITING_DATE":
@@ -619,7 +698,8 @@ def handle_update(update: dict) -> None:
             "retry_count": 0,
         }
         _set_state(telegram_id, new_state)
-        send_message(chat_id, MSG_WELCOME_BACK.format(store=user_row["store"]))
+        send_message(chat_id, MSG_WELCOME_BACK.format(store=user_row["store"]),
+                     reply_markup=_kb_registered())
     else:
         new_state = {"state": "AWAITING_USERNAME", "retry_count": 0}
         _set_state(telegram_id, new_state)
@@ -654,6 +734,15 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
         current = state.get("state")
         if not current or current in ("AWAITING_USERNAME", "AWAITING_PASSWORD"):
             send_message(chat_id, MSG_CANCEL_NOTHING)
+        elif current == "AI_CHAT":
+            new_state = {
+                "state": "REGISTERED",
+                "store": state.get("store"),
+                "username": state.get("username"),
+                "retry_count": 0,
+            }
+            _set_state(telegram_id, new_state)
+            send_message(chat_id, MSG_AI_EXIT, reply_markup=_kb_registered())
         else:
             # Reset to REGISTERED if we have a username/store, else fresh start
             if state.get("username") and state.get("store") and current != "AWAITING_USERNAME":
@@ -695,7 +784,8 @@ def _handle_password(telegram_id, chat_id, tg_username, password, state):
         "retry_count": 0,
     }
     _set_state(telegram_id, new_state)
-    send_message(chat_id, MSG_REGISTERED.format(store=user_row["store"]))
+    send_message(chat_id, MSG_REGISTERED.format(store=user_row["store"]),
+                 reply_markup=_kb_registered())
 
 
 def _handle_photo(telegram_id, chat_id, tg_username, msg, state):
@@ -898,14 +988,26 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
         }
         _set_state(telegram_id, new_state)
         photo_note = " (foto adjunta)" if storage_path and entry_id else ""
-        send_message(
-            chat_id,
-            MSG_SAVED.format(
-                photo_note=photo_note,
-                reg=ocr_data.get("register", "?"),
-                gross=gross,
-            )
+        saved_msg = MSG_SAVED.format(
+            photo_note=photo_note,
+            reg=ocr_data.get("register", "?"),
+            gross=gross,
         )
+
+        # 4. Optional AI insight on variance (non-blocking, swallow errors)
+        variance = ocr_data.get("variance") or 0
+        if variance != 0:
+            try:
+                insight = ask_ai(
+                    f"Varianza de ${variance:.2f} en Caja #{ocr_data.get('register', '?')}. "
+                    f"¿Es normal o preocupante? Una oración.",
+                    store, "system", username,
+                )
+                saved_msg += f"\n\n💡 {insight}"
+            except Exception as e:
+                logger.debug(f"[BOT sid={sid}] AI insight skipped: {e}")
+
+        send_message(chat_id, saved_msg, reply_markup=_kb_registered())
 
     elif _ascii_upper(text) == "NO":
         new_state = {

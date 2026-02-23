@@ -51,6 +51,57 @@ def _send_eod_reminders() -> None:
         logger.warning(f"_send_eod_reminders failed: {e}")
 
 
+def _daily_ai_insights() -> None:
+    """Run AI variance analysis for each store and alert admins/managers."""
+    try:
+        import extensions
+        from telegram_bot import send_message
+        from ai_assistant import analyze_variance_trend
+        from config import Config
+
+        _db = extensions.get_db()
+        if _db is None:
+            return
+
+        bot_users_resp = _db.table("bot_users").select("telegram_id, store").execute()
+        if not bot_users_resp.data:
+            return
+
+        # Build map: store → list of admin telegram IDs to notify
+        store_admins: dict[str, list[int]] = {}
+        for bu in bot_users_resp.data:
+            store = bu.get("store", "")
+            tid = bu["telegram_id"]
+            if store in ("", ):
+                continue
+            store_admins.setdefault(store, []).append(tid)
+
+        # "All" store users get insights for every store
+        all_store_users = [bu["telegram_id"] for bu in bot_users_resp.data
+                          if bu.get("store") == "All"]
+
+        notified = 0
+        for store in Config.STORES:
+            try:
+                insight = analyze_variance_trend(store, days=3)
+                if not insight:
+                    continue
+                # Notify store-specific users + "All" users
+                targets = set(store_admins.get(store, []) + all_store_users)
+                for tid in targets:
+                    try:
+                        send_message(tid, f"📊 Alerta AI — {store}:\n{insight}")
+                        notified += 1
+                    except Exception as exc:
+                        logger.error("AI insight send failed tid=%s: %s", tid, exc)
+            except Exception as exc:
+                logger.error("AI insight analysis failed store=%s: %s", store, exc)
+
+        logger.info("Daily AI insights: %d notifications sent", notified)
+    except Exception as e:
+        logger.warning(f"_daily_ai_insights failed: {e}")
+
+
 def init_scheduler(app) -> None:
     """Start APScheduler in the current process. Stores instance as app._scheduler."""
     try:
@@ -63,10 +114,16 @@ def init_scheduler(app) -> None:
             id="eod_reminder",
             replace_existing=True,
         )
+        scheduler.add_job(
+            _daily_ai_insights,
+            CronTrigger(hour=22, minute=0, timezone="America/Puerto_Rico"),
+            id="daily_ai_insights",
+            replace_existing=True,
+        )
         scheduler.start()
         atexit.register(lambda: scheduler.shutdown(wait=False))
         app._scheduler = scheduler  # referenced by gunicorn.conf.py post_fork
-        logger.info("APScheduler started: EOD reminder at 21:00 PR time")
+        logger.info("APScheduler started: EOD reminder at 21:00, AI insights at 22:00 PR time")
     except ImportError:
         logger.warning("APScheduler not installed — EOD reminders disabled")
     except Exception as exc:

@@ -35,7 +35,7 @@ def test_unregistered_user_gets_welcome():
     bot_state.clear()
     replies = []
 
-    with patch("telegram_bot.send_message", side_effect=lambda cid, txt: replies.append(txt)):
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
         with patch("telegram_bot.is_registered", return_value=False):
             with patch("telegram_bot.load_session", return_value=None):
                 handle_update(make_text_update(111, "hello"))
@@ -50,13 +50,13 @@ def test_registration_wrong_password():
     bot_state[111] = {"state": "AWAITING_USERNAME"}
     replies = []
 
-    with patch("telegram_bot.send_message", side_effect=lambda cid, txt: replies.append(txt)):
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
         handle_update(make_text_update(111, "maria"))
 
     assert bot_state[111]["state"] == "AWAITING_PASSWORD"
     assert bot_state[111]["username"] == "maria"
 
-    with patch("telegram_bot.send_message", side_effect=lambda cid, txt: replies.append(txt)):
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
         with patch("telegram_bot.verify_web_credentials", return_value=None):  # None = bad creds
             handle_update(make_text_update(111, "wrongpass"))
 
@@ -71,7 +71,7 @@ def test_registration_success():
     replies = []
     fake_user = {"username": "maria", "store": "Carimas #2"}
 
-    with patch("telegram_bot.send_message", side_effect=lambda cid, txt: replies.append(txt)):
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
         with patch("telegram_bot.verify_web_credentials", return_value=fake_user):
             with patch("telegram_bot.save_bot_user"):
                 handle_update(make_text_update(222, "correctpass"))
@@ -92,7 +92,7 @@ def test_already_registered_photo_triggers_ocr():
         "sss": 0.0, "variance": -1.5,
     }
 
-    with patch("telegram_bot.send_message", side_effect=lambda cid, txt: replies.append(txt)):
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
         with patch("telegram_bot.download_photo", return_value=b"fake_bytes"):
             with patch("telegram_bot.extract_z_report", return_value=good_ocr):
                 with patch("ocr.has_null_fields", return_value=False):
@@ -121,7 +121,7 @@ def test_confirmation_yes_saves_entry():
     }
     replies = []
 
-    with patch("telegram_bot.send_message", side_effect=lambda cid, txt: replies.append(txt)):
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
         with patch("telegram_bot.upload_image_to_storage", return_value="https://img.url/file.jpg"):
             with patch("telegram_bot.save_audit_entry", return_value=99):
                 with patch("telegram_bot.save_photo_record"):
@@ -144,7 +144,7 @@ def test_confirmation_no_cancels():
     }
     replies = []
 
-    with patch("telegram_bot.send_message", side_effect=lambda cid, txt: replies.append(txt)):
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
         handle_update(make_text_update(555, "NO"))
 
     assert bot_state[555]["state"] == "REGISTERED"
@@ -158,7 +158,7 @@ def test_ocr_failure_increments_retry():
     bot_state[666] = {"state": "REGISTERED", "store": "Carimas #1", "username": "ana", "retry_count": 0}
     replies = []
 
-    with patch("telegram_bot.send_message", side_effect=lambda cid, txt: replies.append(txt)):
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
         with patch("telegram_bot.download_photo", return_value=b"blurry"):
             with patch("telegram_bot.extract_z_report", side_effect=OCRParseError("bad")):
                 handle_update(make_photo_update(666))
@@ -174,7 +174,7 @@ def test_ocr_failure_twice_tells_manual():
     bot_state[777] = {"state": "REGISTERED", "store": "Carimas #1", "username": "ana", "retry_count": 1}
     replies = []
 
-    with patch("telegram_bot.send_message", side_effect=lambda cid, txt: replies.append(txt)):
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
         with patch("telegram_bot.download_photo", return_value=b"blurry"):
             with patch("telegram_bot.extract_z_report", side_effect=OCRParseError("bad")):
                 handle_update(make_photo_update(777))
