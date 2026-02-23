@@ -29,7 +29,12 @@ load_dotenv(dotenv_path=env_path)
 
 class Config:
     """Application configuration loaded from environment variables."""
-    
+
+    # ── Canonical Store List ──────────────────────────────────────────────────
+    # Single source of truth for all store names. Every validation, whitelist,
+    # and dropdown in the app MUST reference this list.
+    STORES = ['Carimas #1', 'Carimas #2', 'Carimas #3', 'Carimas #4', 'Carthage']
+
     # Flask Configuration
     SECRET_KEY: str = os.getenv('FLASK_SECRET_KEY', '')
     PORT: int = int(os.getenv('FLASK_PORT', '5013'))

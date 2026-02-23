@@ -30,17 +30,13 @@ _BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 if not _BOT_TOKEN:
     logger.critical("TELEGRAM_BOT_TOKEN is not set — Telegram bot will refuse all requests")
 
-KNOWN_STORES = ["Carimas #1", "Carimas #2", "Carimas #3", "Carimas #4", "Carthage"]
+KNOWN_STORES = Config.STORES
 STORE_MENU = (
     "¿Para cuál tienda es este reporte?\n"
-    "1 — Carimas #1\n"
-    "2 — Carimas #2\n"
-    "3 — Carimas #3\n"
-    "4 — Carimas #4\n"
-    "5 — Carthage\n"
-    "Responde con el número."
+    + "\n".join(f"{i} — {s}" for i, s in enumerate(KNOWN_STORES, 1))
+    + "\nResponde con el número."
 )
-_STORE_CHOICE = {"1": "Carimas #1", "2": "Carimas #2", "3": "Carimas #3", "4": "Carimas #4", "5": "Carthage"}
+_STORE_CHOICE = {str(i): s for i, s in enumerate(KNOWN_STORES, 1)}
 
 # ── Messages (Spanish) ─────────────────────────────────────────────────────────
 MSG_REGISTER_START = "Bienvenido a Carimas Bot. Ingresa tu usuario para registrarte:"
@@ -184,7 +180,7 @@ def persist_session(telegram_id: int, state: dict) -> None:
         );
     """
     try:
-        client = extensions.supabase_admin or extensions.supabase
+        client = extensions.get_db()
         if client is None:
             return
         # Exclude image bytes (binary, too large) and pending_photo_msg (Telegram dict)
@@ -205,7 +201,7 @@ def load_session(telegram_id: int) -> dict | None:
     Returns None if not found or DB unavailable.
     """
     try:
-        client = extensions.supabase_admin or extensions.supabase
+        client = extensions.get_db()
         if client is None:
             return None
         result = client.table("bot_sessions").select("*").eq("telegram_id", telegram_id).execute()
@@ -376,7 +372,7 @@ def save_audit_entry(
     No longer stores z_report_image_path — photos go in z_report_photos table.
     """
     # Use service-role client so RLS doesn't block bot inserts
-    client = extensions.supabase_admin or extensions.supabase
+    client = extensions.get_db()
     if client is None:
         return None
 
@@ -464,7 +460,7 @@ def save_photo_record(
 ) -> None:
     """Insert a photo record into z_report_photos, linked to an audit entry."""
     # Prefer service-role client so RLS doesn't block the insert
-    client = extensions.supabase_admin or extensions.supabase
+    client = extensions.get_db()
     if client is None:
         logger.warning("save_photo_record: no supabase client available")
         return
@@ -934,7 +930,10 @@ def register_webhook() -> None:
     domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "carimas.up.railway.app")
     webhook_url = f"https://{domain}/api/telegram/webhook"
 
-    secret = (Config.SECRET_KEY or "")[:32]
+    secret = Config.TELEGRAM_WEBHOOK_SECRET
+    if not secret:
+        logger.error("TELEGRAM_WEBHOOK_SECRET not set — cannot register webhook securely")
+        return
     resp = http.post(
         f"https://api.telegram.org/bot{token}/setWebhook",
         json={

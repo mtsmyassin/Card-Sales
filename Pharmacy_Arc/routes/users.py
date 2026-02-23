@@ -16,7 +16,7 @@ bp = Blueprint('users', __name__)
 def list_users():
     """List all users (admin only)."""
     try:
-        result = (extensions.supabase_admin or extensions.supabase).table("users").select("username, role, store").execute()
+        result = extensions.get_db().table("users").select("username, role, store").execute()
         logger.info(f"User list accessed by {session.get('user')}")
         return jsonify(result.data)
     except Exception as e:
@@ -42,11 +42,11 @@ def save_user():
             return jsonify(error="Username is required"), 400
 
         try:
-            existing = (extensions.supabase_admin or extensions.supabase).table("users").select("*").eq("username", user_to_save).execute()
+            existing = extensions.get_db().table("users").select("*").eq("username", user_to_save).execute()
             is_update = len(existing.data) > 0
             before_state = existing.data[0] if is_update else None
-        except Exception as e:
-            logger.warning(f"Failed to check existing user {user_to_save}: {e}")
+        except Exception as fetch_err:
+            logger.warning(f"[save_user] Failed to check existing user {user_to_save!r}: {fetch_err}")
             is_update = False
             before_state = None
 
@@ -81,7 +81,7 @@ def save_user():
         }
 
         db_retry(
-            lambda: (extensions.supabase_admin or extensions.supabase).table("users").upsert(user_data).execute(),
+            lambda: extensions.get_db().table("users").upsert(user_data).execute(),
             label="save_user",
         )
 
@@ -144,16 +144,16 @@ def delete_user():
 
         # Get user details before deletion
         try:
-            existing = (extensions.supabase_admin or extensions.supabase).table("users").select("*").eq("username", user_to_delete).execute()
+            existing = extensions.get_db().table("users").select("*").eq("username", user_to_delete).execute()
             before_state = existing.data[0] if existing.data else None
             if not before_state:
                 return jsonify(error="User not found"), 404
-        except Exception as e:
-            logger.error(f"Failed to fetch user {user_to_delete} for deletion: {e}")
+        except Exception as fetch_err:
+            logger.warning(f"[delete_user] Failed to fetch user {user_to_delete!r}: {fetch_err}")
             before_state = None
 
         db_retry(
-            lambda: (extensions.supabase_admin or extensions.supabase).table("users").delete().eq("username", user_to_delete).execute(),
+            lambda: extensions.get_db().table("users").delete().eq("username", user_to_delete).execute(),
             label="delete_user",
         )
 

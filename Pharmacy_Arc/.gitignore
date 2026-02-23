@@ -1,5 +1,7 @@
 # Secrets — never commit
 .env
+.env.test
+.env.*
 
 # Python
 __pycache__/
@@ -22,6 +24,8 @@ dist/
 # Logs and data
 *.log
 offline_queue.json
+lockout_state.json
+audit_log.jsonl
 
 # OS
 desktop.ini

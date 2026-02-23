@@ -6,7 +6,8 @@ in app.py. Routes must access these as module attributes (not destructured)
 so they see the updated values after the factory runs:
 
     import extensions
-    db = extensions.supabase_admin or extensions.supabase   # CORRECT
+    db = extensions.get_db()                                # CORRECT (preferred)
+    db = extensions.supabase_admin or extensions.supabase   # CORRECT (legacy)
     from extensions import supabase  # WRONG — gets None at import time
 """
 from flask_wtf.csrf import CSRFProtect
@@ -18,6 +19,16 @@ csrf = CSRFProtect()
 # Supabase clients — set by app factory after create_client() succeeds.
 supabase = None
 supabase_admin = None
+
+
+def get_db():
+    """Return the best available Supabase client (admin preferred, anon fallback).
+
+    This is the canonical way to get a DB client. It replaces the pattern
+    ``extensions.supabase_admin or extensions.supabase`` that was previously
+    repeated 30+ times across the codebase.
+    """
+    return supabase_admin or supabase
 
 # Emergency admin accounts — set by app factory from Config.
 EMERGENCY_ACCOUNTS: dict = {}

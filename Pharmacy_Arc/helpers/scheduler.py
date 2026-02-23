@@ -17,7 +17,7 @@ def _send_eod_reminders() -> None:
         import extensions  # deferred — extensions is populated by the factory at startup
         pr_tz = ZoneInfo("America/Puerto_Rico")
         today = datetime.now(pr_tz).strftime("%Y-%m-%d")
-        _db = extensions.supabase_admin or extensions.supabase
+        _db = extensions.get_db()
         if _db is None:
             return
         subs = _db.table("audits").select("store").eq("date", today).execute()

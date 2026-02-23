@@ -1,5 +1,6 @@
 """Input validation helpers for audit entries and user data."""
 import re
+from config import Config
 
 
 def validate_audit_entry(data: dict) -> tuple[bool, str]:
@@ -41,7 +42,7 @@ def validate_audit_entry(data: dict) -> tuple[bool, str]:
 
     # Validate store if provided
     if 'store' in data and data['store']:
-        valid_stores = ['Carimas #1', 'Carimas #2', 'Carimas #3', 'Carimas #4', 'Carthage', 'Main']
+        valid_stores = Config.STORES + ['Main']
         if data['store'] not in valid_stores:
             return False, f"Invalid store. Must be one of: {', '.join(valid_stores)}"
 
@@ -109,7 +110,7 @@ def validate_user_data(data: dict, is_update: bool = False) -> tuple[bool, str]:
 
     # Store validation
     if 'store' in data and data['store']:
-        valid_stores = ['All', 'Carimas #1', 'Carimas #2', 'Carimas #3', 'Carimas #4', 'Carthage']
+        valid_stores = ['All'] + Config.STORES
         if data['store'] not in valid_stores:
             return False, f"Invalid store. Must be one of: {', '.join(valid_stores)}"
 

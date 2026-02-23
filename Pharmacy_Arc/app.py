@@ -159,7 +159,7 @@ def create_app() -> Flask:
             logger.warning("Supabase admin client unavailable — photo uploads disabled")
 
     # Configure Supabase-backed persistence for lockout tracker and audit logger
-    _db = extensions.supabase_admin or extensions.supabase
+    _db = extensions.get_db()
     if _db:
         from audit_log import get_audit_logger
         extensions.login_tracker.configure_db(_db)
@@ -191,6 +191,10 @@ def create_app() -> Flask:
     app.register_blueprint(diagnostics_bp)
 
     # ── Error handlers ───────────────────────────────────────────────────────
+    @app.errorhandler(400)
+    def bad_request(e):
+        return jsonify(error="Bad request"), 400
+
     @app.errorhandler(404)
     def not_found(e):
         return jsonify(error="Not found"), 404

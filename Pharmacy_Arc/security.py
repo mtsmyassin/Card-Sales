@@ -5,9 +5,12 @@ import bcrypt
 import time
 import json
 import os
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 from threading import Lock
+
+logger = logging.getLogger(__name__)
 
 
 class PasswordHasher:
@@ -120,7 +123,7 @@ class LoginAttemptTracker:
                     if expiry > now:
                         self._lockouts[username] = expiry
         except Exception as e:
-            print(f"Warning: Could not load lockout state from DB: {e}")
+            logger.warning(f"Could not load lockout state from DB: {e}")
 
     def _save_to_db(self) -> None:
         """Persist lockout state to Supabase login_lockouts table."""
@@ -140,7 +143,7 @@ class LoginAttemptTracker:
                     'locked_until': locked_until,
                 }).execute()
         except Exception as e:
-            print(f"Warning: Could not save lockout state to DB: {e}")
+            logger.warning(f"Could not save lockout state to DB: {e}")
 
     def _load_from_file(self) -> None:
         """Load lockout state from local JSON file (dev / fallback)."""
@@ -157,7 +160,7 @@ class LoginAttemptTracker:
                     if expiry_time > datetime.now():
                         self._lockouts[username] = expiry_time
         except Exception as e:
-            print(f"Warning: Could not load lockout state from file: {e}")
+            logger.warning(f"Could not load lockout state from file: {e}")
             self._attempts = {}
             self._lockouts = {}
 
@@ -179,76 +182,102 @@ class LoginAttemptTracker:
                 json.dump(data, f, indent=2)
             os.replace(temp_file, self.state_file)
         except Exception as e:
-            print(f"Warning: Could not save lockout state to file: {e}")
+            logger.warning(f"Could not save lockout state to file: {e}")
     
+    def _db_get_user_state(self, username: str) -> tuple[list, Optional[datetime]]:
+        """Fetch lockout state for a single user from DB. Returns (attempts, locked_until)."""
+        if not self._supabase:
+            return self._attempts.get(username, []), self._lockouts.get(username)
+        try:
+            resp = self._supabase.table('login_lockouts').select('*').eq(
+                'username', username).maybe_single().execute()
+            if not resp.data:
+                return [], None
+            row = resp.data
+            attempts = []
+            if row.get('attempts'):
+                attempts = [datetime.fromisoformat(ts) for ts in row['attempts']]
+            locked_until = None
+            if row.get('locked_until'):
+                locked_until = datetime.fromisoformat(
+                    row['locked_until'].replace('Z', '+00:00')
+                ).replace(tzinfo=None)
+            return attempts, locked_until
+        except Exception as e:
+            logger.warning(f"[LoginAttemptTracker] DB read failed for {username!r}, using in-memory: {e}")
+            return self._attempts.get(username, []), self._lockouts.get(username)
+
     def is_locked_out(self, username: str) -> bool:
         """
         Check if a username is currently locked out.
-        
+        Reads from DB when configured to avoid split-brain across workers.
+
         Args:
             username: Username to check
-            
+
         Returns:
             True if locked out, False otherwise
         """
         with self._lock:
-            if username in self._lockouts:
-                if datetime.now() < self._lockouts[username]:
-                    return True
-                else:
-                    # Lockout expired, clear it
-                    del self._lockouts[username]
-                    if username in self._attempts:
-                        del self._attempts[username]
+            _, locked_until = self._db_get_user_state(username)
+            if locked_until and datetime.now() < locked_until:
+                return True
+            # Lockout expired or doesn't exist — clean up in-memory
+            self._lockouts.pop(username, None)
+            self._attempts.pop(username, None)
             return False
     
     def get_lockout_remaining(self, username: str) -> Optional[int]:
         """
         Get remaining lockout time in seconds.
-        
+        Reads from DB when configured to avoid split-brain across workers.
+
         Args:
             username: Username to check
-            
+
         Returns:
             Seconds remaining in lockout, or None if not locked out
         """
         with self._lock:
-            if username in self._lockouts:
-                remaining = (self._lockouts[username] - datetime.now()).total_seconds()
+            _, locked_until = self._db_get_user_state(username)
+            if locked_until:
+                remaining = (locked_until - datetime.now()).total_seconds()
                 return max(0, int(remaining))
             return None
     
     def record_failed_attempt(self, username: str) -> tuple[bool, Optional[int]]:
         """
         Record a failed login attempt.
-        
+        Loads current state from DB first to avoid split-brain across workers.
+
         Args:
             username: Username that failed to login
-            
+
         Returns:
             Tuple of (is_now_locked_out, remaining_attempts_before_lockout)
         """
         with self._lock:
             now = datetime.now()
-            
-            # Initialize attempt list if needed
-            if username not in self._attempts:
-                self._attempts[username] = []
-            
+
+            # Load current attempts from DB (not stale in-memory) so all workers
+            # see the same count. Falls back to in-memory if DB is unavailable.
+            db_attempts, _ = self._db_get_user_state(username)
+            self._attempts[username] = db_attempts if db_attempts else []
+
             # Add this attempt
             self._attempts[username].append(now)
-            
+
             # Clean up old attempts (older than lockout duration)
             cutoff = now - self.lockout_duration
             self._attempts[username] = [t for t in self._attempts[username] if t > cutoff]
-            
+
             # Check if we should lock out
             attempt_count = len(self._attempts[username])
             if attempt_count >= self.max_attempts:
                 self._lockouts[username] = now + self.lockout_duration
                 self._save_state()  # Persist lockout
                 return True, 0
-            
+
             self._save_state()  # Persist attempts
             remaining = self.max_attempts - attempt_count
             return False, remaining

@@ -18,7 +18,7 @@ def _send_variance_alert(store: str, date: str, reg: str, variance: float, gross
     """Send Telegram alert to admin/manager bot users when |variance| > $5."""
     try:
         from telegram_bot import send_message
-        _db = extensions.supabase_admin or extensions.supabase
+        _db = extensions.get_db()
         if _db is None:
             return
         bot_users_resp = _db.table("bot_users").select("telegram_id, username, store").execute()
@@ -41,8 +41,8 @@ def _send_variance_alert(store: str, date: str, reg: str, variance: float, gross
             if role in ("admin", "super_admin", "manager") or user_store == store:
                 try:
                     send_message(bu["telegram_id"], msg)
-                except Exception:
-                    pass
+                except Exception as send_err:
+                    logger.warning(f"[variance_alert] Failed to notify {bu.get('username')}: {send_err}")
     except Exception as e:
         logger.warning(f"_send_variance_alert failed: {e}")
 
@@ -63,7 +63,7 @@ def save():
             return jsonify(error=error_msg), 400
 
         # Duplicate check — use admin client so RLS doesn't hide existing entries
-        _dup_db = extensions.supabase_admin or extensions.supabase
+        _dup_db = extensions.get_db()
         try:
             dup = _dup_db.table("audits").select("id") \
                 .eq("date", d['date']) \
@@ -105,7 +105,7 @@ def save():
 
         try:
             result = db_retry(
-                lambda: (extensions.supabase_admin or extensions.supabase).table("audits").insert(record).execute(),
+                lambda: extensions.get_db().table("audits").insert(record).execute(),
                 label="save_audit",
             )
         except Exception as e:
@@ -120,10 +120,18 @@ def save():
                     error=f"Duplicate: a record for {d['date']} / {d.get('store')} / {d['reg']} already exists.",
                     code="DUPLICATE"
                 ), 409
-            logger.warning(f"Failed to save to database, queuing offline: {e}")
-            if not save_to_queue(record):
-                logger.error("Offline queue full — record dropped")
-                return jsonify(error="Database unavailable and offline queue is full", code="QUEUE_FULL"), 503
+            logger.warning(f"Failed to save to database, attempting offline queue: {e}")
+            try:
+                if not save_to_queue(record):
+                    logger.error("Offline queue full — record dropped")
+                    return jsonify(error="Database unavailable and offline queue is full", code="QUEUE_FULL"), 503
+            except RuntimeError as queue_err:
+                # Ephemeral filesystem (Railway) — cannot safely queue offline
+                logger.error(f"Offline queue unavailable: {queue_err}")
+                return jsonify(
+                    error="Database is currently unavailable and offline queuing is not supported on this server. Please try again shortly.",
+                    code="DB_UNAVAILABLE"
+                ), 503
 
             # Log offline save
             audit_log(
@@ -163,8 +171,8 @@ def save():
                     gross=float(d['gross']),
                     submitted_by=username,
                 )
-            except Exception:
-                pass
+            except Exception as alert_err:
+                logger.warning(f"[save] Variance alert failed (non-blocking): {alert_err}")
         return jsonify(status="success")
 
     except Exception as e:
@@ -200,7 +208,7 @@ def sync():
                 continue
 
             # Duplicate check — DB unique constraint on (date, store, reg)
-            _db = extensions.supabase_admin or extensions.supabase
+            _db = extensions.get_db()
             date_val = item.get('date')
             store_val = item.get('store')
             reg_val = item.get('reg')
@@ -278,22 +286,36 @@ def update():
             logger.warning(f"Invalid audit entry data from {username}: {error_msg}")
             return jsonify(error=error_msg), 400
 
-        # Get current record for audit trail (soft-delete aware)
+        # Get current record for audit trail (soft-delete aware) + store-scoping check
         try:
-            old_record = (extensions.supabase_admin or extensions.supabase).table("audits") \
-                .select("*").eq("id", uid).is_("deleted_at", "null").execute()
+            old_record = extensions.get_db().table("audits").select("*").eq("id", uid).is_("deleted_at", "null").execute()
             before_state = old_record.data[0] if old_record.data else None
-        except Exception:
+        except Exception as fetch_err:
+            logger.warning(f"[update] Failed to fetch entry {uid} for before-state: {fetch_err}")
             before_state = None
 
         if not before_state:
             return jsonify(error="Entry not found"), 404
 
-        # Store-based RBAC — non-admins can only edit entries from their own store
+        # Store-scoping: non-admin users can only update entries from their own store
         user_store = session.get('store')
-        if role not in ['admin', 'super_admin'] and before_state.get('store') != user_store:
-            logger.warning(f"User {username} (store={user_store}) attempted to update entry from store={before_state.get('store')}")
-            return jsonify(error="Permission Denied: Cannot edit entries from other stores"), 403
+        entry_store = before_state.get('store')
+        if role not in ('admin', 'super_admin') and entry_store != user_store:
+            logger.warning(
+                f"[update] IDOR attempt: user={username!r} (store={user_store!r}) "
+                f"tried to update entry {uid} (store={entry_store!r})"
+            )
+            audit_log(
+                action="UPDATE_DENIED",
+                actor=username,
+                role=role,
+                entity_type="AUDIT_ENTRY",
+                entity_id=str(uid),
+                success=False,
+                error="Cross-store update denied",
+                context={"ip": request.remote_addr, "entry_store": entry_store}
+            )
+            return jsonify(error="Not authorized to modify entries from another store"), 403
 
         # Optimistic locking — reject if another user modified the record
         client_version = d.get('version')
@@ -320,7 +342,7 @@ def update():
             record['store'] = before_state.get('store', 'Main')
 
         db_retry(
-            lambda: (extensions.supabase_admin or extensions.supabase).table("audits").update(record).eq("id", uid).execute(),
+            lambda: extensions.get_db().table("audits").update(record).eq("id", uid).execute(),
             label="update_audit",
         )
 
@@ -384,34 +406,40 @@ def delete():
 
         uid = request.json['id']
 
-        # Get current record for audit trail (soft-delete aware)
+        # Get current record for audit trail (soft-delete aware) + store-scoping check
         try:
-            old_record = (extensions.supabase_admin or extensions.supabase).table("audits") \
-                .select("*").eq("id", uid).is_("deleted_at", "null").execute()
+            old_record = extensions.get_db().table("audits").select("*").eq("id", uid).is_("deleted_at", "null").execute()
             before_state = old_record.data[0] if old_record.data else None
-        except Exception:
+        except Exception as fetch_err:
+            logger.warning(f"[delete] Failed to fetch entry {uid} for before-state: {fetch_err}")
             before_state = None
 
         if not before_state:
             return jsonify(error="Entry not found"), 404
 
-        # Store-based RBAC — non-admins can only delete entries from their own store
+        # Store-scoping: non-admin users can only delete entries from their own store
         user_store = session.get('store')
-        if role not in ['admin', 'super_admin'] and before_state.get('store') != user_store:
-            logger.warning(f"User {username} (store={user_store}) attempted to delete entry from store={before_state.get('store')}")
-            audit_log(
-                action="DELETE_DENIED", actor=username, role=role,
-                entity_type="AUDIT_ENTRY", entity_id=str(uid), success=False,
-                error="Cannot delete entries from other stores",
-                context={"ip": request.remote_addr, "entry_store": before_state.get('store'), "user_store": user_store}
+        entry_store = before_state.get('store')
+        if role not in ('admin', 'super_admin') and entry_store != user_store:
+            logger.warning(
+                f"[delete] IDOR attempt: user={username!r} (store={user_store!r}) "
+                f"tried to delete entry {uid} (store={entry_store!r})"
             )
-            return jsonify(error="Permission Denied: Cannot delete entries from other stores"), 403
+            audit_log(
+                action="DELETE_DENIED",
+                actor=username,
+                role=role,
+                entity_type="AUDIT_ENTRY",
+                entity_id=str(uid),
+                success=False,
+                error="Cross-store delete denied",
+                context={"ip": request.remote_addr, "entry_store": entry_store}
+            )
+            return jsonify(error="Not authorized to delete entries from another store"), 403
 
         # Soft delete — set deleted_at timestamp instead of removing the row
         db_retry(
-            lambda: (extensions.supabase_admin or extensions.supabase).table("audits")
-                .update({"deleted_at": datetime.now(timezone.utc).isoformat()})
-                .eq("id", uid).execute(),
+            lambda: extensions.get_db().table("audits").update({"deleted_at": datetime.now(timezone.utc).isoformat()}).eq("id", uid).execute(),
             label="soft_delete_audit",
         )
 
@@ -456,7 +484,7 @@ def list_audits():
         user_role = session.get('role')
         user = session.get('user')
 
-        _db = extensions.supabase_admin or extensions.supabase
+        _db = extensions.get_db()
         logger.info(f"[list_audits] using_admin={extensions.supabase_admin is not None}")
 
         # Push store filter to DB for non-admin users — avoids fetching all rows.

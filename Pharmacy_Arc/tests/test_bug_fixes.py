@@ -38,15 +38,15 @@ def _load_app():
 
 class TestSaveUsesAdminClient:
     def test_save_insert_line_uses_admin_or_supabase(self):
-        """routes/audits.py must use admin/supabase fallback for audits INSERT in save()."""
+        """routes/audits.py must use get_db() (admin/supabase fallback) for audits INSERT in save()."""
         src = open(
             os.path.join(os.path.dirname(os.path.dirname(__file__)), "routes", "audits.py"),
             encoding="utf-8",
         ).read()
         # find the save() function block and confirm the insert uses admin
         save_block = src[src.index("def save():"):src.index("def sync():")]
-        assert "extensions.supabase_admin or extensions.supabase" in save_block, (
-            "save() must use (supabase_admin or supabase) for INSERT to bypass RLS"
+        assert "extensions.get_db()" in save_block, (
+            "save() must use extensions.get_db() for INSERT to bypass RLS"
         )
         assert ".table(\"audits\").insert" in save_block, (
             "save() must INSERT into audits table"
@@ -65,8 +65,8 @@ class TestSyncUsesAdminClient:
 
     def test_sync_dup_check_uses_admin(self):
         block = self._get_sync_block()
-        assert "_db = extensions.supabase_admin or extensions.supabase" in block, (
-            "sync() must assign _db = supabase_admin or supabase before dup check"
+        assert "_db = extensions.get_db()" in block, (
+            "sync() must assign _db = extensions.get_db() before dup check"
         )
 
     def test_sync_insert_uses_db_variable(self):
@@ -88,12 +88,12 @@ class TestUpdateDeleteUseAdminClient:
     def test_update_before_state_uses_admin(self):
         src = self._src()
         update_block = src[src.index("def update():"):src.index("def delete():")]
-        assert "(extensions.supabase_admin or extensions.supabase).table(\"audits\").select" in update_block
+        assert "extensions.get_db().table(\"audits\").select" in update_block
 
     def test_update_write_uses_admin(self):
         src = self._src()
         update_block = src[src.index("def update():"):src.index("def delete():")]
-        assert "(extensions.supabase_admin or extensions.supabase).table(\"audits\").update" in update_block
+        assert "extensions.get_db().table(\"audits\").update" in update_block
 
     def test_delete_before_state_uses_admin(self):
         src = self._src()
@@ -101,14 +101,16 @@ class TestUpdateDeleteUseAdminClient:
         delete_start = src.index("def delete():")
         delete_end = src.index("@bp.route", delete_start)
         delete_block = src[delete_start:delete_end]
-        assert "(extensions.supabase_admin or extensions.supabase).table(\"audits\").select" in delete_block
+        assert "extensions.get_db().table(\"audits\").select" in delete_block
 
     def test_delete_write_uses_admin(self):
+        """delete() soft-delete must use get_db() (admin) for UPDATE with deleted_at."""
         src = self._src()
         delete_start = src.index("def delete():")
         delete_end = src.index("@bp.route", delete_start)
         delete_block = src[delete_start:delete_end]
-        assert "(extensions.supabase_admin or extensions.supabase).table(\"audits\").delete" in delete_block
+        assert "extensions.get_db().table(\"audits\")" in delete_block
+        assert "deleted_at" in delete_block, "delete() must use soft-delete (set deleted_at)"
 
 
 # ── BUG 3: offline queue UTF-8 roundtrip ─────────────────────────────────────
@@ -119,6 +121,7 @@ class TestOfflineQueueEncoding:
         import helpers.offline_queue as oq
         q_file = str(tmp_path / "offline_queue.json")
         monkeypatch.setattr(oq, "get_queue_path", lambda: q_file)
+        monkeypatch.setattr(oq, "_IS_EPHEMERAL_FS", False)
 
         payload = {"store": "Farmacía #1", "date": "01/01/2026", "gross": 100.0}
         oq.save_to_queue(payload)
@@ -133,6 +136,7 @@ class TestOfflineQueueEncoding:
         import helpers.offline_queue as oq
         q_file = str(tmp_path / "offline_queue.json")
         monkeypatch.setattr(oq, "get_queue_path", lambda: q_file)
+        monkeypatch.setattr(oq, "_IS_EPHEMERAL_FS", False)
 
         oq.save_to_queue({"store": "Carimas Ñoño"})
         raw = open(q_file, "rb").read()

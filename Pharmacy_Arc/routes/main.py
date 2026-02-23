@@ -5,6 +5,7 @@ import logging
 from flask import Blueprint, current_app, jsonify, render_template, session, send_file
 from helpers.offline_queue import get_logo, get_base_path, load_queue
 import extensions
+from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ def health():
     """Unauthenticated health check for load balancers and uptime monitors."""
     db_ok = False
     try:
-        _db = extensions.supabase_admin or extensions.supabase
+        _db = extensions.get_db()
         if _db:
             _db.table("users").select("username").limit(1).execute()
             db_ok = True
@@ -36,7 +37,7 @@ def index():
     has_pending = len(load_queue()) > 0
     template = 'main.html' if session.get('logged_in') else 'login.html'
     version = current_app.config.get('APP_VERSION', '')
-    return render_template(template, logo=logo_data, pending=has_pending, version=version)
+    return render_template(template, logo=logo_data, pending=has_pending, version=version, stores=Config.STORES)
 
 
 @bp.route('/favicon.ico')

@@ -191,7 +191,7 @@ table{width:100%;border-collapse:collapse;} th,td{padding:12px;text-align:left;b
         <input type="hidden" id="editId" value="">
         <div class="section" style="margin-top:0" id="modeLabel"><span><span class="section-badge">1</span>Store & Metadata</span></div>
         <div class="grid-form">
-            <div><label>Store Location</label><select id="storeLoc" onchange="app.checkStore()"><option>Carimas #1</option><option>Carimas #2</option><option>Carimas #3</option><option>Carimas #4</option><option>Carthage</option></select></div>
+            <div><label>Store Location</label><select id="storeLoc" onchange="app.checkStore()">{% for s in stores %}<option>{{ s }}</option>{% endfor %}</select></div>
             <div><label>Date</label><input type="date" id="date"></div>
             <div><label>Register</label><select id="reg"><option>Reg 1</option><option>Reg 2</option><option>Reg 3</option><option>Reg 4</option><option>Reg 5</option><option>Reg 6</option><option>Reg 7</option><option>Reg 8</option></select></div>
             <div><label>Staff Name</label><input type="text" id="staff" list="staffList" placeholder="Name"><datalist id="staffList"><option>Manager</option><option>Pharmacist</option><option>Clerk</option></datalist></div>

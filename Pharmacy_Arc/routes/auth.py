@@ -66,7 +66,7 @@ def api_get_logo():
         store = request.json.get('store', 'carimas')
 
         # Whitelist validation to prevent path traversal
-        valid_stores = ['Carimas', 'Carimas #1', 'Carimas #2', 'Carimas #3', 'Carimas #4', 'Carthage', None]
+        valid_stores = Config.STORES + ['Carimas', None]
         if store not in valid_stores:
             logger.warning(f"Invalid store name requested: {store}")
             store = None  # Default to Carimas logo
@@ -143,7 +143,7 @@ def login():
 
         # --- CHECK DATABASE ACCOUNTS ---
         try:
-            res = (extensions.supabase_admin or extensions.supabase).table("users").select("*").eq("username", u).execute()
+            res = extensions.get_db().table("users").select("*").eq("username", u).execute()
             if res.data:
                 user = res.data[0]
 

@@ -23,12 +23,13 @@ def diagnostics():
     """
     try:
         # Check database connectivity
-        _db = extensions.supabase_admin or extensions.supabase
+        _db = extensions.get_db()
         db_status = "connected"
         try:
             _db.table("users").select("username").limit(1).execute()
         except Exception as e:
-            db_status = f"error: {str(e)}"
+            logger.error(f"[diagnostics] DB connectivity check failed: {e}")
+            db_status = "error: connection failed"
 
         # Check audit log integrity
         audit_logger = get_audit_logger()
@@ -71,7 +72,7 @@ def diagnostics():
         }
 
         # Storage diagnostics — prefer admin client to bypass RLS on bucket listing
-        _storage_client = extensions.supabase_admin or extensions.supabase
+        _storage_client = extensions.get_db()
         storage_info = {
             "z_reports_bucket": "unknown",
             "photos_total": 0,
@@ -81,7 +82,8 @@ def diagnostics():
             _storage_client.storage.from_("z-reports").list("")
             storage_info["z_reports_bucket"] = "exists"
         except Exception as bucket_err:
-            storage_info["z_reports_bucket"] = f"error: {bucket_err}"
+            logger.error(f"[diagnostics] Storage bucket check failed: {bucket_err}")
+            storage_info["z_reports_bucket"] = "error: bucket check failed"
 
         try:
             count_resp = _db.table("z_report_photos").select("id", count="exact").execute()

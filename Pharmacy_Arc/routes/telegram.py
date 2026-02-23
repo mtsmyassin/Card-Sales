@@ -50,7 +50,7 @@ def telegram_webhook():
 def get_zreport_image(audit_id: int):
     """Return a short-lived signed URL for the Z report image of an audit entry (legacy)."""
     try:
-        result = extensions.supabase.table("audits").select("payload,store").eq("id", audit_id).execute()
+        result = extensions.get_db().table("audits").select("payload,store").eq("id", audit_id).execute()
         if not result.data:
             return jsonify(error="Not found"), 404
 
@@ -68,7 +68,7 @@ def get_zreport_image(audit_id: int):
         if not image_path:
             return jsonify(error="No image for this entry"), 404
 
-        signed = extensions.supabase.storage.from_("z-reports").create_signed_url(image_path, 3600)
+        signed = extensions.get_db().storage.from_("z-reports").create_signed_url(image_path, 3600)
         return jsonify(url=signed["signedURL"])
 
     except Exception as e:
@@ -86,7 +86,7 @@ def get_entry_photos():
 
     try:
         # Use service-role client so RLS doesn't block server-side reads
-        _db = extensions.supabase_admin or extensions.supabase
+        _db = extensions.get_db()
         using_admin = extensions.supabase_admin is not None
         logger.info(f"[get_entry_photos] entry_id={entry_id} using_admin={using_admin}")
 
@@ -130,7 +130,7 @@ def get_photo_signed_url():
 
     try:
         # Use service-role client so RLS doesn't block server-side reads
-        _db = extensions.supabase_admin or extensions.supabase
+        _db = extensions.get_db()
 
         photo_resp = _db.table("z_report_photos").select("*").eq("id", photo_id).execute()
         if not photo_resp.data:
@@ -153,7 +153,7 @@ def get_photo_signed_url():
             logger.error(f"[signed_url] photo_id={photo_id} has empty storage_path")
             return jsonify(error="Photo has no storage path", code="NO_PATH"), 500
 
-        storage_client = extensions.supabase_admin or extensions.supabase
+        storage_client = extensions.get_db()
         logger.info(
             f"[signed_url] Generating URL: photo_id={photo_id} "
             f"bucket=z-reports path={storage_path!r} "
@@ -182,7 +182,7 @@ def get_photo_signed_url():
 def delete_photo(photo_id):
     """Delete a Z-report photo from storage and DB (manager/admin only)."""
     try:
-        _db = extensions.supabase_admin or extensions.supabase
+        _db = extensions.get_db()
         photo_resp = _db.table("z_report_photos").select("*") \
             .eq("id", photo_id).maybe_single().execute()
 
@@ -204,7 +204,7 @@ def delete_photo(photo_id):
         storage_path = photo_resp.data.get('storage_path', '')
         if storage_path:
             try:
-                (extensions.supabase_admin or extensions.supabase).storage.from_("z-reports").remove([storage_path])
+                extensions.get_db().storage.from_("z-reports").remove([storage_path])
                 logger.info(f"[delete_photo] Removed storage file: {storage_path!r}")
             except Exception as e:
                 logger.warning(f"[delete_photo] Storage removal failed (continuing): {e}")
