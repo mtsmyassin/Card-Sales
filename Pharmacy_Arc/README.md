@@ -1,7 +1,7 @@
 # Pharmacy Management System - Enterprise Edition
 
-**Version:** v40-SECURE  
-**Status:** Production Ready  
+**Version:** v41-CYCLE20
+**Status:** Production Ready
 **Security Level:** Enterprise Grade
 
 ## 🛡️ Security Features
@@ -14,7 +14,47 @@
 - ✅ **Session Management** - Configurable timeouts, secure keys
 - ✅ **Structured Logging** - No secrets exposed in logs
 
-## 📋 Quick Start
+## Security & Resilience (Cycle 20 Audit)
+
+### CSRF Protection
+
+All state-changing endpoints are protected by Flask-WTF `CSRFProtect`. The frontend fetches a token from `/api/csrf-token` and attaches it as an `X-CSRFToken` header on every POST/PUT/DELETE. Two routes are explicitly exempt:
+
+- `/api/login` -- unauthenticated by definition
+- `/api/telegram/webhook` -- authenticated via HMAC secret instead
+
+### Security Headers
+
+Every response includes hardened headers set by `set_security_headers()` in the app factory:
+
+- `X-Frame-Options: DENY` -- clickjacking prevention
+- `X-Content-Type-Options: nosniff` -- MIME-sniffing prevention
+- `Content-Security-Policy` -- restricts script/style/font/image sources
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy` -- disables camera, mic, geolocation
+- `Strict-Transport-Security` -- HSTS when `REQUIRE_HTTPS=true`
+
+### DB Retry with Exponential Backoff
+
+`helpers/db.py` provides `db_retry(operation, label, max_attempts=3, backoff_factor=2)`. All Supabase writes (insert, update, upsert, delete) in audits, users, and sync endpoints are wrapped in `db_retry` to survive transient network failures. Wait pattern: 1s, 2s, 4s.
+
+### Soft-Delete Pattern
+
+Audit entries are never hard-deleted. `DELETE /api/delete` sets a `deleted_at` timestamp instead. All read queries filter with `.is_("deleted_at", "null")` so soft-deleted rows are invisible to the application. This preserves audit trails and allows recovery.
+
+### Optimistic Locking
+
+Each audit record carries a `version` integer. On update, the client sends its known version; the server rejects the write with HTTP 409 if the DB version has advanced, preventing silent overwrites from concurrent edits.
+
+### Store-Based RBAC
+
+Non-admin users can only update or delete audit entries belonging to their assigned store. Cross-store operations return HTTP 403.
+
+### Request Tracing
+
+Every request is tagged with a 12-character `X-Request-ID` header and logged with method, path, status code, and duration in milliseconds.
+
+## Quick Start
 
 ### Prerequisites
 
@@ -422,19 +462,31 @@ REINDEX TABLE audits;
 
 ```
 Pharmacy_Arc/
-├── app.py              # Main Flask application
-├── config.py           # Configuration management
-├── security.py         # Password hashing, brute-force protection
-├── audit_log.py        # Audit logging system
-├── setup.py            # Setup wizard
-├── migrate_passwords.py # Password migration utility
-├── test_security.py    # Security test suite
-├── requirements.txt    # Python dependencies
-├── .env.example        # Configuration template
-├── .env                # Actual configuration (ignored by git)
-├── MIGRATION_GUIDE.md  # Upgrade documentation
-├── logo.png            # Application logo
-└── carthage.png        # Store-specific logo
+├── app.py                # App factory (create_app)
+├── extensions.py         # Shared state: CSRF, Supabase clients, VERSION
+├── config.py             # Environment-based configuration
+├── security.py           # PasswordHasher, LoginAttemptTracker
+├── audit_log.py          # Tamper-evident hash-chained audit log
+├── helpers/
+│   ├── auth_utils.py     # require_auth decorator, RBAC
+│   ├── db.py             # db_retry with exponential backoff
+│   ├── offline_queue.py  # JSON-file offline queue, logo loader
+│   ├── validation.py     # Input validation (audits, users)
+│   └── scheduler.py      # APScheduler EOD reminders
+├── routes/
+│   ├── main.py           # SPA shell, health check, favicon
+│   ├── auth.py           # Login/logout, CSRF token, session timeout
+│   ├── audits.py         # CRUD with soft deletes & optimistic locking
+│   ├── users.py          # User management (admin only)
+│   ├── zreports.py       # Z-report review workflow
+│   ├── telegram.py       # Telegram bot webhook & photos
+│   └── diagnostics.py    # System diagnostics (admin only)
+├── templates/
+│   ├── main.html         # SPA UI (sidebar layout)
+│   └── login.html        # Login screen
+├── migrations/           # SQL migrations (soft deletes, locking, RLS)
+├── requirements.txt
+└── Procfile              # Gunicorn entrypoint
 ```
 
 ### Adding New Features
