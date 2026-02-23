@@ -113,10 +113,11 @@ MSG_SESSION_RESET = (
 MSG_HELP = (
     "📋 Carimas Bot — Ayuda\n\n"
     "Comandos disponibles:\n"
-    "  /help   — Ver esta ayuda\n"
-    "  /status — Ver tu estado actual\n"
-    "  /cancel — Cancelar la operación en curso\n"
-    "  /last   — Ver el último reporte enviado\n\n"
+    "  /help      — Ver esta ayuda\n"
+    "  /status    — Ver tu estado actual\n"
+    "  /cancel    — Cancelar la operación en curso\n"
+    "  /last      — Ver el último reporte enviado\n"
+    "  /broadcast — Enviar mensaje a todos (solo admin)\n\n"
     "Cómo enviar un Reporte Z:\n"
     "  1. Regístrate con tu usuario y contraseña del sistema\n"
     "  2. Envía una foto clara y bien iluminada del Reporte Z\n"
@@ -162,6 +163,14 @@ MSG_ACTUAL_CASH = (
     "Escribe el monto contado, o toca Omitir para usar la varianza del OCR."
 )
 MSG_BAD_AMOUNT = "Ingresa un monto válido (ej. 50.00 o 0)."
+MSG_BROADCAST_CONFIRM = (
+    "📢 Mensaje a enviar a {count} usuarios:\n\n"
+    "{message}\n\n"
+    "¿Confirmar envío?"
+)
+MSG_BROADCAST_SENT = "✅ Mensaje enviado a {sent} de {total} usuarios."
+MSG_BROADCAST_CANCELLED = "Envío cancelado."
+MSG_BROADCAST_NO_PERMISSION = "⛔ Solo administradores pueden usar /broadcast."
 
 
 # ── Photo system helpers ───────────────────────────────────────────────────────
@@ -619,6 +628,10 @@ INLINE_SKIP_CASH = _inline_kb([
     [_inline_btn("Omitir", "actual_cash:skip")],
 ])
 
+INLINE_BROADCAST_CONFIRM = _inline_kb([
+    [_inline_btn("✅ Enviar", "broadcast:yes"), _inline_btn("❌ Cancelar", "broadcast:no")],
+])
+
 
 def _handle_ai_message(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
     """Handle a text message while in AI_CHAT state."""
@@ -684,8 +697,43 @@ def _handle_actual_cash(telegram_id, chat_id, text, state):
     send_message(chat_id, _format_preview(state["pending_data"]), reply_markup=INLINE_SAVE)
 
 def _handle_broadcast_confirm(telegram_id, chat_id, text, state):
-    """Placeholder — implemented in Task 8."""
-    pass
+    """Handle BROADCAST_CONFIRM — send or cancel the broadcast."""
+    if _ascii_upper(str(text)) in ("YES", "SI", "SÍ"):
+        broadcast_msg = state.get("pending_broadcast", "")
+        sent, total = 0, 0
+        try:
+            db = extensions.get_db()
+            users_resp = db.table("bot_users").select("telegram_id").execute()
+            targets = users_resp.data or []
+            total = len(targets)
+            for u in targets:
+                tid = u["telegram_id"]
+                if tid == telegram_id:
+                    continue  # don't send to self
+                try:
+                    send_message(tid, f"📢 {broadcast_msg}")
+                    sent += 1
+                except Exception as exc:
+                    logger.error(f"Broadcast send failed tid={tid}: {exc}")
+        except Exception as e:
+            logger.error(f"Broadcast failed: {e}")
+        new_state = {
+            "state": "REGISTERED",
+            "store": state.get("store"),
+            "username": state.get("username"),
+            "retry_count": 0,
+        }
+        _set_state(telegram_id, new_state)
+        send_message(chat_id, MSG_BROADCAST_SENT.format(sent=sent, total=total))
+    else:
+        new_state = {
+            "state": "REGISTERED",
+            "store": state.get("store"),
+            "username": state.get("username"),
+            "retry_count": 0,
+        }
+        _set_state(telegram_id, new_state)
+        send_message(chat_id, MSG_BROADCAST_CANCELLED)
 
 
 # ── Callback query handler ────────────────────────────────────────────────────
@@ -853,6 +901,10 @@ def handle_update(update: dict) -> None:
         _handle_confirmation(telegram_id, chat_id, text, state)
         return
 
+    if current_state == "BROADCAST_CONFIRM":
+        _handle_broadcast_confirm(telegram_id, chat_id, text, state)
+        return
+
     if current_state == "AWAITING_STORE":
         chosen = _STORE_CHOICE.get(text)
         if not chosen:
@@ -978,6 +1030,31 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
         except Exception as ex:
             logger.error(f"/last failed: {ex}")
             send_message(chat_id, "❌ Error consultando el último reporte.")
+
+    elif cmd == "/broadcast":
+        user_row = get_bot_user(telegram_id)
+        role = user_row.get("role", "staff") if user_row else "staff"
+        if role not in ("admin", "super_admin"):
+            send_message(chat_id, MSG_BROADCAST_NO_PERMISSION)
+            return
+        parts = text.split(None, 1)
+        if len(parts) < 2 or not parts[1].strip():
+            send_message(chat_id, "Uso: /broadcast <mensaje>")
+            return
+        broadcast_msg = parts[1].strip()
+        try:
+            db = extensions.get_db()
+            users_resp = db.table("bot_users").select("telegram_id").execute()
+            count = len(users_resp.data) if users_resp.data else 0
+        except Exception:
+            count = "?"
+        state["state"] = "BROADCAST_CONFIRM"
+        state["pending_broadcast"] = broadcast_msg
+        _set_state(telegram_id, state)
+        send_message(chat_id,
+            MSG_BROADCAST_CONFIRM.format(count=count, message=broadcast_msg),
+            reply_markup=INLINE_BROADCAST_CONFIRM,
+        )
 
     else:
         # Unknown command — show help

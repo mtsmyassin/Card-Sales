@@ -509,3 +509,83 @@ def test_ocr_null_fields_gives_specific_guidance():
     # Should mention the fields and give specific guidance
     assert any("cash" in r.lower() or "visa" in r.lower() for r in replies)
     assert any("secciones" in r.lower() or "visibles" in r.lower() for r in replies)
+
+
+# ── broadcast command tests ──────────────────────────────────────────────────
+
+def test_broadcast_by_admin():
+    """Admin can /broadcast a message; enters BROADCAST_CONFIRM state."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[950] = {"state": "REGISTERED", "store": "All", "username": "admin1", "retry_count": 0}
+    replies = []
+
+    mock_users = MagicMock()
+    mock_users.data = [
+        {"telegram_id": 101, "store": "Carimas #1"},
+        {"telegram_id": 102, "store": "Carimas #2"},
+    ]
+    mock_db = MagicMock()
+    mock_db.table.return_value.select.return_value.execute.return_value = mock_users
+
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        with patch("telegram_bot.get_bot_user", return_value={"role": "admin"}):
+            with patch("telegram_bot.extensions") as mock_ext:
+                mock_ext.get_db.return_value = mock_db
+                handle_update(make_text_update(950, "/broadcast Cierre temprano hoy"))
+
+    assert bot_state[950]["state"] == "BROADCAST_CONFIRM"
+    assert bot_state[950]["pending_broadcast"] == "Cierre temprano hoy"
+    assert any("enviar" in r.lower() or "confirmar" in r.lower() for r in replies)
+
+
+def test_broadcast_denied_for_staff():
+    """Non-admin users cannot use /broadcast."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[951] = {"state": "REGISTERED", "store": "Carimas #1", "username": "staff1", "retry_count": 0}
+    replies = []
+
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        with patch("telegram_bot.get_bot_user", return_value={"role": "staff"}):
+            handle_update(make_text_update(951, "/broadcast test"))
+
+    assert any("administradores" in r.lower() or "admin" in r.lower() for r in replies)
+    assert bot_state[951]["state"] == "REGISTERED"
+
+
+def test_broadcast_confirm_sends_to_users():
+    """Confirming broadcast sends message to all bot users except self."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[952] = {
+        "state": "BROADCAST_CONFIRM",
+        "store": "All",
+        "username": "admin1",
+        "pending_broadcast": "Cierre a las 5pm",
+        "retry_count": 0,
+    }
+    sent_to = []
+
+    mock_users = MagicMock()
+    mock_users.data = [
+        {"telegram_id": 101},
+        {"telegram_id": 102},
+        {"telegram_id": 952},  # self — should be skipped
+    ]
+    mock_db = MagicMock()
+    mock_db.table.return_value.select.return_value.execute.return_value = mock_users
+
+    def capture(cid, txt, **kw):
+        sent_to.append((cid, txt))
+
+    with patch("telegram_bot.send_message", side_effect=capture):
+        with patch("telegram_bot.extensions") as mock_ext:
+            mock_ext.get_db.return_value = mock_db
+            handle_update(make_text_update(952, "YES"))
+
+    assert bot_state[952]["state"] == "REGISTERED"
+    # Should have sent to 101 and 102 (not 952/self), plus confirmation to admin
+    broadcast_msgs = [(cid, txt) for cid, txt in sent_to if "\U0001f4e2" in txt]
+    assert len(broadcast_msgs) == 2
+    assert all(cid != 952 for cid, _ in broadcast_msgs)
