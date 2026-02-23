@@ -229,7 +229,8 @@ def _set_state(telegram_id: int, state: dict) -> None:
     with _bot_state_lock:
         bot_state[telegram_id] = state
     # Persist asynchronously so the dispatch thread is never blocked by a slow DB write.
-    t = threading.Thread(target=persist_session, args=(telegram_id, state), daemon=True)
+    # Copy state to avoid race conditions — the caller may mutate the dict after this call.
+    t = threading.Thread(target=persist_session, args=(telegram_id, state.copy()), daemon=True)
     t.start()
 
 

@@ -117,7 +117,7 @@ def get_entry_photos():
 
     except Exception as e:
         logger.error(f"[get_entry_photos] entry_id={entry_id} EXCEPTION: {e}", exc_info=True)
-        return jsonify(error=str(e), code="FETCH_ERROR"), 500
+        return jsonify(error="Internal server error", code="FETCH_ERROR"), 500
 
 
 @bp.route('/api/zreport/signed_url')
@@ -174,7 +174,7 @@ def get_photo_signed_url():
             f"[signed_url] FAILED photo_id={photo_id}: {e}",
             exc_info=True
         )
-        return jsonify(error=str(e), code="STORAGE_ERROR"), 500
+        return jsonify(error="Internal server error", code="STORAGE_ERROR"), 500
 
 
 @bp.route('/api/zreport/photo/<int:photo_id>', methods=['DELETE'])
@@ -218,4 +218,4 @@ def delete_photo(photo_id):
 
     except Exception as e:
         logger.error(f"[delete_photo] Error: {e}", exc_info=True)
-        return jsonify(error=str(e), code="DELETE_ERROR"), 500
+        return jsonify(error="Internal server error", code="DELETE_ERROR"), 500

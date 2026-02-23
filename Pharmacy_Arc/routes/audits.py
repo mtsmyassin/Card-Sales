@@ -97,6 +97,12 @@ def save():
             "payload": d
         }
 
+        # S1: Enforce store from session for non-admin users (prevent store IDOR)
+        if role not in ('admin', 'super_admin'):
+            user_store = session.get('store')
+            if user_store and user_store != 'All':
+                record['store'] = user_store
+
         try:
             result = db_retry(
                 lambda: (extensions.supabase_admin or extensions.supabase).table("audits").insert(record).execute(),
@@ -115,7 +121,9 @@ def save():
                     code="DUPLICATE"
                 ), 409
             logger.warning(f"Failed to save to database, queuing offline: {e}")
-            save_to_queue(record)
+            if not save_to_queue(record):
+                logger.error("Offline queue full — record dropped")
+                return jsonify(error="Database unavailable and offline queue is full", code="QUEUE_FULL"), 503
 
             # Log offline save
             audit_log(
@@ -178,6 +186,12 @@ def sync():
     success_count = 0
     for item in queue:
         try:
+            # S1: Enforce store from session for non-admin users (prevent store IDOR)
+            if role not in ('admin', 'super_admin'):
+                user_store = session.get('store')
+                if user_store and user_store != 'All':
+                    item['store'] = user_store
+
             # Validate before inserting (offline entries skip the /api/save validation)
             ok, err = validate_audit_entry(item)
             if not ok:
@@ -300,6 +314,10 @@ def update():
             "payload": d,
             "version": (int(current_version) + 1) if current_version is not None else 1,
         }
+
+        # F3: Non-admins cannot reassign store — force original store value
+        if role not in ('admin', 'super_admin'):
+            record['store'] = before_state.get('store', 'Main')
 
         db_retry(
             lambda: (extensions.supabase_admin or extensions.supabase).table("audits").update(record).eq("id", uid).execute(),
@@ -490,4 +508,4 @@ def list_audits():
         return jsonify(clean_rows)
     except Exception as e:
         logger.error(f"[list_audits] Error: {e}", exc_info=True)
-        return jsonify(error=str(e), code="LIST_ERROR"), 500
+        return jsonify(error="Internal server error", code="LIST_ERROR"), 500

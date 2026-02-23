@@ -132,6 +132,20 @@ def create_app() -> Flask:
             response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
         return response
 
+    # ── Lazy Supabase reconnect (S3) ─────────────────────────────────────────
+    @app.before_request
+    def _lazy_reconnect_supabase():
+        """Attempt to reconnect Supabase if the anon client is None (throttled to 60s)."""
+        if extensions.supabase is not None:
+            return
+        last = getattr(app, '_last_supabase_reconnect', 0)
+        if time.time() - last < 60:
+            return
+        app._last_supabase_reconnect = time.time()
+        extensions.supabase = _init_supabase(Config.SUPABASE_URL, Config.SUPABASE_KEY, "anon", max_attempts=1)
+        if extensions.supabase:
+            logger.info("Supabase lazy reconnection succeeded")
+
     # Supabase clients
     extensions.supabase = _init_supabase(Config.SUPABASE_URL, Config.SUPABASE_KEY, "anon")
     if extensions.supabase is None:
@@ -208,13 +222,6 @@ def create_app() -> Flask:
 
 
 app = create_app()
-
-_main_tmpl = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates', 'main.html')
-try:
-    with open(_main_tmpl, encoding='utf-8') as _f:
-        MAIN_UI = _f.read()
-except FileNotFoundError:
-    MAIN_UI = ''
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT, debug=Config.DEBUG)

@@ -11,8 +11,6 @@ from config import Config
 logger = logging.getLogger(__name__)
 bp = Blueprint('diagnostics', __name__)
 
-# Match the version string defined in app.py (updated when app.py is rewritten)
-_VERSION = "v40-SECURE"
 _PORT = int(os.getenv('PORT', str(Config.PORT)))
 
 
@@ -25,9 +23,10 @@ def diagnostics():
     """
     try:
         # Check database connectivity
+        _db = extensions.supabase_admin or extensions.supabase
         db_status = "connected"
         try:
-            extensions.supabase.table("users").select("username").limit(1).execute()
+            _db.table("users").select("username").limit(1).execute()
         except Exception as e:
             db_status = f"error: {str(e)}"
 
@@ -48,7 +47,7 @@ def diagnostics():
 
         supabase_url = Config.SUPABASE_URL
         diagnostics_data = {
-            "version": _VERSION,
+            "version": extensions.VERSION,
             "port": _PORT,
             "database": {
                 "status": db_status,
@@ -85,10 +84,10 @@ def diagnostics():
             storage_info["z_reports_bucket"] = f"error: {bucket_err}"
 
         try:
-            count_resp = extensions.supabase.table("z_report_photos").select("id", count="exact").execute()
+            count_resp = _db.table("z_report_photos").select("id", count="exact").execute()
             storage_info["photos_total"] = count_resp.count or 0
 
-            no_path_resp = extensions.supabase.table("z_report_photos") \
+            no_path_resp = _db.table("z_report_photos") \
                 .select("id", count="exact") \
                 .eq("storage_path", "") \
                 .execute()

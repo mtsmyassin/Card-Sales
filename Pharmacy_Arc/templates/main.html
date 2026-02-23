@@ -417,7 +417,13 @@ async function _fetchCsrfToken() {
     try {
         const r = await window._origFetch('/api/csrf-token');
         _csrfToken = (await r.json()).token;
-    } catch(e) { console.warn('CSRF token fetch failed', e); }
+    } catch(e) {
+        console.warn('CSRF token fetch failed', e);
+        if (_csrfToken === null) {
+            document.body.insertAdjacentHTML('afterbegin',
+                '<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#fee2e2;color:#991b1b;padding:10px 20px;font-weight:700;font-size:13px;text-align:center;border-bottom:2px solid #ef4444">Session expired or server unreachable. Please refresh the page.</div>');
+        }
+    }
 }
 // ── End CSRF patch ──
 
@@ -474,7 +480,7 @@ const app = {
             const editId = document.getElementById('editId').value;
             const res = await fetch(editId ? '/api/update' : '/api/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(editId ? {...payload, id:editId} : payload)});
             const r = await res.json();
-            if(res.ok && (r.status === 'success' || r.status === 'offline')) { alert(r.status==='offline'?'Offline Mode: Saved to Queue':'Saved!'); app.resetForm(); app.fetch(); app.tab('logs'); if(r.status==='offline') document.getElementById('syncBtn').style.display='block'; } else alert('Error');
+            if(res.ok && (r.status === 'success' || r.status === 'offline')) { alert(r.status==='offline'?'Offline Mode: Saved to Queue':'Saved!'); app.resetForm(); app.fetch(); app.tab('logs'); if(r.status==='offline') document.getElementById('syncBtn').style.display='block'; } else alert(r.error || 'Error saving entry');
         } catch(e) {
             console.error('Failed to save:', e);
             alert('Failed to save. Please try again.');
@@ -482,7 +488,7 @@ const app = {
             app.hideLoading();
         }
     },
-    logout: () => fetch('/api/logout', {method:'POST'}).then(()=>location.reload()),
+    logout: () => fetch('/api/logout', {method:'POST'}).then(()=>location.reload()).catch(()=>location.reload()),
     tab: (id) => {
         if(app.role==='staff' && (id!=='dash' && id!=='logs')) return;
         if(app.role==='manager' && (id!=='dash' && id!=='logs' && id!=='calendar' && id!=='zreviews')) return;
@@ -500,7 +506,7 @@ const app = {
     applyCount: () => { document.getElementById('actual').value=document.getElementById('billTotal').innerText.replace('$',''); document.getElementById('modalCount').style.display='none'; },
     resetForm: () => { document.getElementById('editId').value=''; document.getElementById('saveBtn').innerText="Finalize & Upload"; document.getElementById('saveBtn').style.background="#0097b2"; document.getElementById('cancelBtn').style.display="none"; document.getElementById('dashPanel').classList.remove('edit-mode'); document.getElementById('modeLabel').innerText="1. Store & Metadata"; document.querySelectorAll('input[type="number"]').forEach(i=>i.value=''); document.getElementById('float').value='150.00'; document.getElementById('payoutList').innerHTML=''; app.checkStore(); },
     editAudit: (idx) => { const d=app.data[idx], b=d.breakdown; document.getElementById('editId').value=d.id; document.getElementById('date').value=d.date; document.getElementById('storeLoc').value=d.store; app.checkStore(); document.getElementById('reg').value=d.reg; document.getElementById('staff').value=d.staff; Object.keys(b).forEach(k=>{if(document.getElementById(k))document.getElementById(k).value=b[k]}); document.getElementById('payoutList').innerHTML=''; (b.payoutList||[]).forEach(p=>app.addPayout(p.r,p.a)); document.getElementById('saveBtn').innerText="Update Record"; document.getElementById('saveBtn').style.background="#f59e0b"; document.getElementById('cancelBtn').style.display="inline-block"; document.getElementById('dashPanel').classList.add('edit-mode'); document.getElementById('modeLabel').innerText="EDITING RECORD #"+d.id; app.tab('dash'); window.scrollTo({ top: 0, behavior: 'smooth' }); document.getElementById('dashPanel').style.boxShadow = '0 0 20px rgba(245, 158, 11, 0.5)'; setTimeout(() => { document.getElementById('dashPanel').style.boxShadow = ''; }, 2000); },
-    deleteAudit: async (id) => { if(confirm("Permanently Delete?")) { await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}); app.fetch(); } },
+    deleteAudit: async (id) => { if(confirm("Permanently Delete?")) { try { const res = await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}); const r = await res.json(); if(!res.ok) { alert(r.error || 'Delete failed'); return; } app.fetch(); } catch(e) { alert('Delete failed: connection error'); } } },
     fetch: async () => {
         app.showLoading();
         let ok = false;
@@ -781,7 +787,7 @@ const app = {
             app.hideLoading();
         }
     },
-    deleteUser: async (n) => { if(confirm('Delete?')) { await fetch('/api/users/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:n})}); app.fetchUsers(); } }
+    deleteUser: async (n) => { if(confirm('Delete?')) { try { const res = await fetch('/api/users/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:n})}); if(!res.ok) { const r = await res.json().catch(()=>({})); alert(r.error || 'Delete failed'); return; } app.fetchUsers(); } catch(e) { alert('Delete failed: connection error'); } } }
 };
 
 // HTML escape helper - use on all server-provided strings before inserting into innerHTML
@@ -908,6 +914,7 @@ app.zr = {
 };
 
 _fetchCsrfToken().then(() => app.init());
+setInterval(_fetchCsrfToken, 45 * 60 * 1000); // refresh CSRF token every 45 min
 </script>
 <!-- Z Report Image Modal -->
 <div id="zreportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
