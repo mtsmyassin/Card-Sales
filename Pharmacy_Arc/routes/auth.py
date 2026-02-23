@@ -118,7 +118,6 @@ def login():
                 role = 'super_admin' if u == 'super' else 'admin'
 
                 # Regenerate session to prevent fixation
-                old_session = dict(session)
                 session.clear()
                 session.permanent = True
                 session['logged_in'] = True
@@ -158,7 +157,6 @@ def login():
 
                 if password_valid:
                     # Regenerate session to prevent fixation
-                    old_session = dict(session)
                     session.clear()
                     session.permanent = True
                     session['logged_in'] = True

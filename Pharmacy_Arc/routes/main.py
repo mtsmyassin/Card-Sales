@@ -1,10 +1,32 @@
-"""Main UI Blueprint — serves the SPA shell and favicon."""
+"""Main UI Blueprint — serves the SPA shell, favicon, and health check."""
 import io
 import os
-from flask import Blueprint, current_app, render_template, session, send_file
+import logging
+from flask import Blueprint, current_app, jsonify, render_template, session, send_file
 from helpers.offline_queue import get_logo, get_base_path, load_queue
+import extensions
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('main', __name__)
+
+
+@bp.route('/health')
+def health():
+    """Unauthenticated health check for load balancers and uptime monitors."""
+    db_ok = False
+    try:
+        _db = extensions.supabase_admin or extensions.supabase
+        if _db:
+            _db.table("users").select("username").limit(1).execute()
+            db_ok = True
+    except Exception:
+        pass
+    status = "ok" if db_ok else "degraded"
+    return jsonify(
+        status=status, version=extensions.VERSION,
+        database="connected" if db_ok else "unreachable"
+    ), 200 if db_ok else 503
 
 
 @bp.route('/')

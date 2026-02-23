@@ -3,6 +3,8 @@ import os
 import sys
 import time
 import logging
+import uuid as _uuid
+from logging.handlers import RotatingFileHandler
 from datetime import timedelta
 from flask import Flask, jsonify, redirect, request
 from supabase import create_client
@@ -13,18 +15,35 @@ from helpers.offline_queue import (
     OFFLINE_QUEUE_MAX_SIZE, OFFLINE_FILE,
 )
 
+try:
+    from pythonjsonlogger import jsonlogger
+    _HAS_JSON_LOGGER = True
+except ImportError:
+    _HAS_JSON_LOGGER = False
+
 # ── Logging ──────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=getattr(logging, Config.LOG_LEVEL),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(Config.LOG_FILE, encoding='utf-8'),
-        logging.StreamHandler(sys.stdout),
-    ]
+_log_level = getattr(logging, Config.LOG_LEVEL)
+_file_handler = RotatingFileHandler(
+    Config.LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5, encoding='utf-8',
 )
+_stream_handler = logging.StreamHandler(sys.stdout)
+
+if _HAS_JSON_LOGGER:
+    _json_fmt = jsonlogger.JsonFormatter(
+        '%(asctime)s %(name)s %(levelname)s %(message)s',
+        rename_fields={"asctime": "timestamp", "levelname": "level"},
+    )
+    _file_handler.setFormatter(_json_fmt)
+    _stream_handler.setFormatter(_json_fmt)
+else:
+    _text_fmt = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    _file_handler.setFormatter(_text_fmt)
+    _stream_handler.setFormatter(_text_fmt)
+
+logging.basicConfig(level=_log_level, handlers=[_file_handler, _stream_handler])
 logger = logging.getLogger(__name__)
 
-VERSION = "v40-SECURE"
+VERSION = extensions.VERSION
 PORT = int(os.getenv('PORT', str(Config.PORT)))
 
 
@@ -78,6 +97,22 @@ def create_app() -> Flask:
     else:
         app.config['SESSION_COOKIE_SECURE'] = False
 
+    # ── Request ID middleware ────────────────────────────────────────────────
+    @app.before_request
+    def attach_request_id():
+        request._request_id = _uuid.uuid4().hex[:12]
+        request._start_time = time.time()
+
+    @app.after_request
+    def log_request_end(response):
+        duration_ms = (time.time() - getattr(request, '_start_time', time.time())) * 1000
+        rid = getattr(request, '_request_id', '')
+        response.headers['X-Request-ID'] = rid
+        if request.path != '/health':
+            logger.info("[%s] %s %s -> %s (%.0fms)", rid, request.method, request.path, response.status_code, duration_ms)
+        return response
+
+    # ── Security headers ─────────────────────────────────────────────────────
     @app.after_request
     def set_security_headers(response):
         response.headers['X-Frame-Options'] = 'DENY'
@@ -141,9 +176,28 @@ def create_app() -> Flask:
     app.register_blueprint(telegram_bp)
     app.register_blueprint(diagnostics_bp)
 
+    # ── Error handlers ───────────────────────────────────────────────────────
+    @app.errorhandler(404)
+    def not_found(e):
+        return jsonify(error="Not found"), 404
+
+    @app.errorhandler(405)
+    def method_not_allowed(e):
+        return jsonify(error="Method not allowed"), 405
+
     @app.errorhandler(413)
     def payload_too_large(e):
-        return jsonify(error="Payload too large (máximo 5 MB)"), 413
+        return jsonify(error="Payload too large (maximo 5 MB)"), 413
+
+    @app.errorhandler(500)
+    def internal_error(e):
+        logger.error("Unhandled 500: %s", e, exc_info=True)
+        return jsonify(error="Internal server error"), 500
+
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        logger.error("Unhandled exception: %s", e, exc_info=True)
+        return jsonify(error="Internal server error"), 500
 
     # APScheduler — EOD reminders (helpers/scheduler.py)
     from helpers.scheduler import init_scheduler

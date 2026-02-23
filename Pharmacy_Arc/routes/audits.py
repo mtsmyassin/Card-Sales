@@ -1,12 +1,14 @@
 """Audits Blueprint — CRUD for pharmacy sales audit entries."""
 import json
 import logging
+from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, session
 from audit_log import audit_log
 import extensions
 from helpers.auth_utils import require_auth
 from helpers.validation import validate_audit_entry
 from helpers.offline_queue import save_to_queue, load_queue, clear_queue, get_queue_path
+from helpers.db import db_retry
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('audits', __name__)
@@ -28,9 +30,9 @@ def _send_variance_alert(store: str, date: str, reg: str, variance: float, gross
         if unames:
             users_resp = _db.table("users").select("username, role, store").in_("username", unames).execute()
             role_map = {u["username"]: (u.get("role", "staff"), u.get("store", "")) for u in (users_resp.data or [])}
-        sign = "🔴 Corto" if variance < 0 else "🟡 Sobre"
+        sign = "Corto" if variance < 0 else "Sobre"
         msg = (
-            f"⚠️ Varianza {sign}: ${abs(variance):.2f}\n"
+            f"Varianza {sign}: ${abs(variance):.2f}\n"
             f"Tienda: {store} | Caja: {reg} | Fecha: {date}\n"
             f"Bruto: ${gross:.2f} | Enviado por: {submitted_by}"
         )
@@ -67,6 +69,7 @@ def save():
                 .eq("date", d['date']) \
                 .eq("store", d.get('store', 'Main')) \
                 .eq("reg", d['reg']) \
+                .is_("deleted_at", "null") \
                 .execute()
             if dup.data:
                 logger.warning(
@@ -95,7 +98,10 @@ def save():
         }
 
         try:
-            result = (extensions.supabase_admin or extensions.supabase).table("audits").insert(record).execute()
+            result = db_retry(
+                lambda: (extensions.supabase_admin or extensions.supabase).table("audits").insert(record).execute(),
+                label="save_audit",
+            )
         except Exception as e:
             err_str = str(e)
             # Unique constraint violation (PostgREST code 23505)
@@ -185,13 +191,13 @@ def sync():
             store_val = item.get('store')
             reg_val = item.get('reg')
             dup = _db.table("audits").select("id").eq("date", date_val).eq(
-                "store", store_val).eq("reg", reg_val).limit(1).execute()
+                "store", store_val).eq("reg", reg_val).is_("deleted_at", "null").limit(1).execute()
             if dup.data:
                 logger.warning(f"[sync] Skipping duplicate: date={date_val} store={store_val} reg={reg_val}")
                 success_count += 1  # Don't keep retrying a duplicate — remove from queue
                 continue
 
-            _db.table("audits").insert(item).execute()
+            db_retry(lambda: _db.table("audits").insert(item).execute(), label="sync_audit")
             success_count += 1
 
             # Log successful sync
@@ -241,6 +247,7 @@ def update():
         )
         return jsonify(error="Permission Denied: Staff cannot edit entries"), 403
 
+    uid = None
     try:
         d = request.json
         if not d:
@@ -257,12 +264,30 @@ def update():
             logger.warning(f"Invalid audit entry data from {username}: {error_msg}")
             return jsonify(error=error_msg), 400
 
-        # Get current record for audit trail
+        # Get current record for audit trail (soft-delete aware)
         try:
-            old_record = (extensions.supabase_admin or extensions.supabase).table("audits").select("*").eq("id", uid).execute()
+            old_record = (extensions.supabase_admin or extensions.supabase).table("audits") \
+                .select("*").eq("id", uid).is_("deleted_at", "null").execute()
             before_state = old_record.data[0] if old_record.data else None
         except Exception:
             before_state = None
+
+        if not before_state:
+            return jsonify(error="Entry not found"), 404
+
+        # Store-based RBAC — non-admins can only edit entries from their own store
+        user_store = session.get('store')
+        if role not in ['admin', 'super_admin'] and before_state.get('store') != user_store:
+            logger.warning(f"User {username} (store={user_store}) attempted to update entry from store={before_state.get('store')}")
+            return jsonify(error="Permission Denied: Cannot edit entries from other stores"), 403
+
+        # Optimistic locking — reject if another user modified the record
+        client_version = d.get('version')
+        current_version = before_state.get('version', 1)
+        if client_version is not None and current_version is not None:
+            if int(client_version) != int(current_version):
+                logger.warning(f"Optimistic lock conflict on audit {uid}: client_version={client_version}, db_version={current_version}")
+                return jsonify(error="Conflict: entry was modified by another user. Please reload and try again."), 409
 
         record = {
             "date": d['date'],
@@ -272,10 +297,14 @@ def update():
             "gross": float(d['gross']),
             "net": float(d['net']),
             "variance": float(d['variance']),
-            "payload": d
+            "payload": d,
+            "version": (int(current_version) + 1) if current_version is not None else 1,
         }
 
-        (extensions.supabase_admin or extensions.supabase).table("audits").update(record).eq("id", uid).execute()
+        db_retry(
+            lambda: (extensions.supabase_admin or extensions.supabase).table("audits").update(record).eq("id", uid).execute(),
+            label="update_audit",
+        )
 
         # Log successful update
         audit_log(
@@ -313,7 +342,7 @@ def update():
 @bp.route('/api/delete', methods=['POST'])
 @require_auth()
 def delete():
-    """Delete an audit entry with RBAC and audit logging."""
+    """Soft-delete an audit entry with RBAC and audit logging."""
     username = session.get('user')
     role = session.get('role')
 
@@ -337,18 +366,40 @@ def delete():
 
         uid = request.json['id']
 
-        # Get current record for audit trail
+        # Get current record for audit trail (soft-delete aware)
         try:
-            old_record = (extensions.supabase_admin or extensions.supabase).table("audits").select("*").eq("id", uid).execute()
+            old_record = (extensions.supabase_admin or extensions.supabase).table("audits") \
+                .select("*").eq("id", uid).is_("deleted_at", "null").execute()
             before_state = old_record.data[0] if old_record.data else None
         except Exception:
             before_state = None
 
-        (extensions.supabase_admin or extensions.supabase).table("audits").delete().eq("id", uid).execute()
+        if not before_state:
+            return jsonify(error="Entry not found"), 404
 
-        # Log successful deletion
+        # Store-based RBAC — non-admins can only delete entries from their own store
+        user_store = session.get('store')
+        if role not in ['admin', 'super_admin'] and before_state.get('store') != user_store:
+            logger.warning(f"User {username} (store={user_store}) attempted to delete entry from store={before_state.get('store')}")
+            audit_log(
+                action="DELETE_DENIED", actor=username, role=role,
+                entity_type="AUDIT_ENTRY", entity_id=str(uid), success=False,
+                error="Cannot delete entries from other stores",
+                context={"ip": request.remote_addr, "entry_store": before_state.get('store'), "user_store": user_store}
+            )
+            return jsonify(error="Permission Denied: Cannot delete entries from other stores"), 403
+
+        # Soft delete — set deleted_at timestamp instead of removing the row
+        db_retry(
+            lambda: (extensions.supabase_admin or extensions.supabase).table("audits")
+                .update({"deleted_at": datetime.now(timezone.utc).isoformat()})
+                .eq("id", uid).execute(),
+            label="soft_delete_audit",
+        )
+
+        # Log successful soft deletion
         audit_log(
-            action="DELETE",
+            action="SOFT_DELETE",
             actor=username,
             role=role,
             entity_type="AUDIT_ENTRY",
@@ -358,7 +409,7 @@ def delete():
             context={"ip": request.remote_addr}
         )
 
-        logger.info(f"Audit entry {uid} deleted by {username}")
+        logger.info(f"Audit entry {uid} soft-deleted by {username}")
         return jsonify(status="success")
 
     except Exception as e:
@@ -396,10 +447,13 @@ def list_audits():
         page = max(1, request.args.get("page", 1, type=int))
         per_page = min(request.args.get("per_page", 2000, type=int), 2000)
         offset = (page - 1) * per_page
-        query = _db.table("audits").select("*").order("date", desc=True).range(offset, offset + per_page - 1)
+        query = _db.table("audits").select("*") \
+            .is_("deleted_at", "null") \
+            .order("date", desc=True) \
+            .range(offset, offset + per_page - 1)
         if user_role not in ('admin', 'super_admin'):
             query = query.eq("store", user_store)
-        response = query.execute()
+        response = db_retry(lambda: query.execute(), label="list_audits")
         allowed_rows = response.data
 
         logger.info(
@@ -421,7 +475,7 @@ def list_audits():
                 photo_counts[eid] = photo_counts.get(eid, 0) + 1
             logger.info(
                 f"[list_audits] photo_counts fetched: {len(photo_resp.data)} photo rows "
-                f"for {len(entry_ids)} entries → {len(photo_counts)} entries have photos"
+                f"for {len(entry_ids)} entries -> {len(photo_counts)} entries have photos"
             )
 
         clean_rows = []
@@ -430,6 +484,7 @@ def list_audits():
             merged['id'] = r['id']
             merged['store'] = r.get('store', 'Main')
             merged['photo_count'] = photo_counts.get(r['id'], 0)
+            merged['version'] = r.get('version', 1)
             clean_rows.append(merged)
 
         return jsonify(clean_rows)

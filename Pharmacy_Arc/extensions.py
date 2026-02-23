@@ -28,3 +28,5 @@ login_tracker = LoginAttemptTracker(
     max_attempts=Config.MAX_LOGIN_ATTEMPTS,
     lockout_duration_minutes=Config.LOCKOUT_DURATION_MINUTES,
 )
+
+VERSION = "v40-SECURE"

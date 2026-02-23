@@ -289,6 +289,90 @@ class LoginAttemptTracker:
             return len(self._attempts[username])
 
 
+class SupabaseLoginTracker:
+    """Track login attempts via Supabase — process-safe across Gunicorn workers."""
+
+    def __init__(self, supabase_getter, max_attempts: int = 5, lockout_duration_minutes: int = 15):
+        """
+        Args:
+            supabase_getter: callable that returns a Supabase client (late-bound for patching)
+            max_attempts: max failed attempts before lockout
+            lockout_duration_minutes: lockout window in minutes
+        """
+        self._get_supabase = supabase_getter
+        self.max_attempts = max_attempts
+        self.lockout_duration_minutes = lockout_duration_minutes
+
+    def _db(self):
+        return self._get_supabase()
+
+    def is_locked_out(self, username: str) -> bool:
+        try:
+            result = self._db().table("login_lockouts").select("locked_until").eq("username", username).execute()
+            if result.data:
+                locked_until = datetime.fromisoformat(result.data[0]['locked_until'].replace('Z', '+00:00'))
+                if locked_until > datetime.now(locked_until.tzinfo):
+                    return True
+                # Expired — clean up
+                self._db().table("login_lockouts").delete().eq("username", username).execute()
+        except Exception:
+            pass
+        return False
+
+    def get_lockout_remaining(self, username: str) -> Optional[int]:
+        try:
+            result = self._db().table("login_lockouts").select("locked_until").eq("username", username).execute()
+            if result.data:
+                locked_until = datetime.fromisoformat(result.data[0]['locked_until'].replace('Z', '+00:00'))
+                remaining = (locked_until - datetime.now(locked_until.tzinfo)).total_seconds()
+                return max(0, int(remaining))
+        except Exception:
+            pass
+        return None
+
+    def record_failed_attempt(self, username: str) -> tuple:
+        try:
+            # Record the attempt
+            self._db().table("login_attempts").insert({
+                "username": username, "success": False
+            }).execute()
+
+            # Count recent failures within lockout window
+            cutoff = (datetime.utcnow() - timedelta(minutes=self.lockout_duration_minutes)).isoformat()
+            result = self._db().table("login_attempts").select("id").eq("username", username).eq("success", False).gte("attempted_at", cutoff).execute()
+            count = len(result.data)
+
+            if count >= self.max_attempts:
+                locked_until = (datetime.utcnow() + timedelta(minutes=self.lockout_duration_minutes)).isoformat()
+                self._db().table("login_lockouts").upsert({
+                    "username": username, "locked_until": locked_until
+                }).execute()
+                return True, 0
+
+            return False, self.max_attempts - count
+        except Exception:
+            return False, self.max_attempts
+
+    def record_successful_login(self, username: str) -> None:
+        try:
+            self._db().table("login_attempts").insert({
+                "username": username, "success": True
+            }).execute()
+            # Clear lockout and recent failures
+            self._db().table("login_lockouts").delete().eq("username", username).execute()
+            self._db().table("login_attempts").delete().eq("username", username).eq("success", False).execute()
+        except Exception:
+            pass
+
+    def get_attempt_count(self, username: str) -> int:
+        try:
+            cutoff = (datetime.utcnow() - timedelta(minutes=self.lockout_duration_minutes)).isoformat()
+            result = self._db().table("login_attempts").select("id").eq("username", username).eq("success", False).gte("attempted_at", cutoff).execute()
+            return len(result.data)
+        except Exception:
+            return 0
+
+
 def generate_secret_key() -> str:
     """
     Generate a cryptographically secure secret key.

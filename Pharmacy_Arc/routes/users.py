@@ -5,6 +5,7 @@ from audit_log import audit_log
 import extensions
 from helpers.auth_utils import require_auth
 from helpers.validation import validate_user_data
+from helpers.db import db_retry
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('users', __name__)
@@ -44,7 +45,8 @@ def save_user():
             existing = (extensions.supabase_admin or extensions.supabase).table("users").select("*").eq("username", user_to_save).execute()
             is_update = len(existing.data) > 0
             before_state = existing.data[0] if is_update else None
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to check existing user {user_to_save}: {e}")
             is_update = False
             before_state = None
 
@@ -78,7 +80,10 @@ def save_user():
             "store": new_store
         }
 
-        (extensions.supabase_admin or extensions.supabase).table("users").upsert(user_data).execute()
+        db_retry(
+            lambda: (extensions.supabase_admin or extensions.supabase).table("users").upsert(user_data).execute(),
+            label="save_user",
+        )
 
         # Log the action
         action = "USER_UPDATE" if is_update else "USER_CREATE"
@@ -143,10 +148,14 @@ def delete_user():
             before_state = existing.data[0] if existing.data else None
             if not before_state:
                 return jsonify(error="User not found"), 404
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to fetch user {user_to_delete} for deletion: {e}")
             before_state = None
 
-        (extensions.supabase_admin or extensions.supabase).table("users").delete().eq("username", user_to_delete).execute()
+        db_retry(
+            lambda: (extensions.supabase_admin or extensions.supabase).table("users").delete().eq("username", user_to_delete).execute(),
+            label="delete_user",
+        )
 
         # Log deletion
         audit_log(
