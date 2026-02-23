@@ -1,6 +1,7 @@
 """Telegram Blueprint — bot webhook and Z-report photo endpoints."""
 import hmac
 import logging
+import time
 from threading import Thread
 from flask import Blueprint, request, jsonify, session
 import extensions
@@ -223,3 +224,19 @@ def delete_photo(photo_id):
     except Exception as e:
         logger.error(f"[delete_photo] Error: {e}", exc_info=True)
         return jsonify(error="Internal server error", code="DELETE_ERROR"), 500
+
+
+@bp.route('/api/telegram/health')
+@require_auth(['admin', 'super_admin'])
+def bot_health():
+    """Check Telegram Bot API connectivity and return bot info."""
+    start = time.time()
+    try:
+        from telegram_bot import _tg
+        result = _tg("getMe")
+        latency = round((time.time() - start) * 1000)
+        return jsonify(ok=True, bot_username=result.get("username"), latency_ms=latency)
+    except Exception as e:
+        latency = round((time.time() - start) * 1000)
+        logger.error(f"bot_health check failed: {e}")
+        return jsonify(ok=False, error=str(e), latency_ms=latency), 503
