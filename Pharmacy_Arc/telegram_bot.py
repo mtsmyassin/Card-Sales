@@ -16,6 +16,8 @@ from ai_assistant import ask_ai
 import extensions
 from config import Config
 from helpers.db import is_unique_violation
+from audit_log import audit_log
+from helpers.validation import validate_audit_entry
 
 logger = logging.getLogger(__name__)
 
@@ -727,9 +729,24 @@ def save_audit_entry(
         "store": store,
         "gross": round(gross, 2),
         "net": round(net, 2),
-        "variance": variance,
+        "variance": round(variance, 2),
         "payload": payload,
     }
+
+    # Validate before DB insert (same checks as web /api/save)
+    is_valid, error_msg = validate_audit_entry(record)
+    if not is_valid:
+        logger.warning(f"[BOT] Validation failed for {store!r}/{record['date']!r}: {error_msg}")
+        audit_log(
+            action="CREATE",
+            actor=username,
+            role="bot_user",
+            entity_type="AUDIT",
+            success=False,
+            error=f"Validation failed: {error_msg}",
+            context={"source": "telegram_bot", "store": store, "date": record["date"]},
+        )
+        raise ValueError(f"Datos invalidos: {error_msg}")
 
     try:
         result = client.table("audits").insert(record).execute()
@@ -738,12 +755,30 @@ def save_audit_entry(
             f"[BOT] audit saved: entry_id={entry_id} store={store!r} "
             f"date={record['date']!r} staff={username!r}"
         )
+        audit_log(
+            action="CREATE",
+            actor=username,
+            role="bot_user",
+            entity_type="AUDIT",
+            entity_id=str(entry_id),
+            success=True,
+            context={"source": "telegram_bot", "store": store, "date": record["date"], "reg": reg_str},
+        )
         return entry_id
     except Exception as e:
         if is_unique_violation(e):
             logger.warning(
                 f"[BOT] Duplicate rejected by DB constraint — "
                 f"store={store!r} date={record['date']!r} reg={record['reg']!r}"
+            )
+            audit_log(
+                action="CREATE",
+                actor=username,
+                role="bot_user",
+                entity_type="AUDIT",
+                success=False,
+                error="Duplicate entry rejected by DB constraint",
+                context={"source": "telegram_bot", "store": store, "date": record["date"], "reg": reg_str},
             )
             raise ValueError(
                 f"Ya existe un reporte para {record['date']} / {store} / {record['reg']}"
@@ -753,6 +788,15 @@ def save_audit_entry(
         logger.error(
             f"[BOT] FATAL: DB insert failed — store={store!r} date={record['date']!r}: {e}",
             exc_info=True,
+        )
+        audit_log(
+            action="CREATE",
+            actor=username,
+            role="bot_user",
+            entity_type="AUDIT",
+            success=False,
+            error="DB insert failed",
+            context={"source": "telegram_bot", "store": store, "date": record["date"]},
         )
         raise
 
@@ -1410,14 +1454,33 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
 
 def _handle_password(telegram_id, chat_id, tg_username, password, state):
     username = state.get("username", "")
+
+    # Brute-force protection — shared with web login
+    if extensions.login_tracker.is_locked_out(username):
+        remaining = extensions.login_tracker.get_lockout_remaining(username)
+        logger.warning(f"[BOT] Login blocked for locked-out account: {username!r}")
+        state["state"] = "AWAITING_USERNAME"
+        state.pop("username", None)
+        _set_state(telegram_id, state)
+        send_message(chat_id, f"Cuenta bloqueada por demasiados intentos. Intenta en {remaining}s.")
+        return
+
     user_row = verify_web_credentials(username, password)
     if user_row is None:
+        is_locked, remaining_attempts = extensions.login_tracker.record_failed_attempt(username)
+        logger.warning(f"[BOT] Failed login for {username!r} (remaining: {remaining_attempts})")
         # Failed — reset to AWAITING_USERNAME (don't reveal which field was wrong)
         state["state"] = "AWAITING_USERNAME"
         state.pop("username", None)
         _set_state(telegram_id, state)
-        send_message(chat_id, msg(telegram_id, "bad_credentials"))
+        if is_locked:
+            lockout = extensions.login_tracker.get_lockout_remaining(username)
+            send_message(chat_id, f"Demasiados intentos. Cuenta bloqueada por {lockout}s.")
+        else:
+            send_message(chat_id, msg(telegram_id, "bad_credentials"))
         return
+
+    extensions.login_tracker.record_successful_login(username)
 
     # Success — register
     save_bot_user(telegram_id, user_row["username"], tg_username, user_row["store"])
