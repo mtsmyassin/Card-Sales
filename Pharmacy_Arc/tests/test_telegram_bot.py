@@ -395,3 +395,26 @@ def test_slash_last_no_store():
         handle_update(make_text_update(926, "/last"))
 
     assert any("específica" in r.lower() for r in replies)
+
+
+def test_ocr_null_fields_gives_specific_guidance():
+    """When OCR can't read specific fields, error gives specific tips."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[930] = {"state": "REGISTERED", "store": "Carimas #1", "username": "ana", "retry_count": 0}
+    replies = []
+    partial_ocr = {
+        "register": 2, "date": "2026-02-22",
+        "cash": None, "ath": 50.0, "athm": 0.0, "visa": None,
+        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
+        "sss": 0.0, "variance": -1.5,
+    }
+
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        with patch("telegram_bot.download_photo", return_value=b"fake"):
+            with patch("telegram_bot.extract_z_report", return_value=partial_ocr):
+                handle_update(make_photo_update(930))
+
+    # Should mention the fields and give specific guidance
+    assert any("cash" in r.lower() or "visa" in r.lower() for r in replies)
+    assert any("secciones" in r.lower() or "visibles" in r.lower() for r in replies)

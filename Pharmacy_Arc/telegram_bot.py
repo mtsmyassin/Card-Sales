@@ -77,20 +77,30 @@ MSG_CANCELLED = "Cancelado. Envía otra foto cuando estés listo."
 MSG_INVALID_STORE = "Responde con 1, 2, 3, 4 o 5."
 MSG_STORE_CONFIRM = "Tienda: {store}. Envía la foto del Reporte Z."
 MSG_OCR_FAIL_RETRY = (
-    "No se pudo leer el reporte. Toma la foto más cerca con mejor iluminación e inténtalo de nuevo. "
-    "(Intento {attempt} de 2)"
+    "⚠️ No se pudo leer el reporte.\n"
+    "Consejos: sostén la cámara directamente encima del recibo, "
+    "con buena iluminación y sin sombras. (Intento {attempt} de 2)"
 )
 MSG_OCR_FAIL_FINAL = (
-    "No se pudo procesar la foto después de 2 intentos.\n"
-    "Por favor ingresa este reporte manualmente en el sistema."
+    "⚠️ No se pudo procesar la foto después de 2 intentos.\n"
+    "Consejos:\n"
+    "  • Superficie plana, cámara directamente encima\n"
+    "  • Buena iluminación, sin flash directo\n"
+    "  • Todo el recibo visible en la foto\n"
+    "Ingresa este reporte manualmente en la app web."
 )
 MSG_NULL_RETRY = (
-    "No se pudo leer: {fields}.\n"
-    "Toma la foto más cerca con mejor iluminación. (Intento {attempt} de 2)"
+    "⚠️ No se pudo leer: {fields}.\n"
+    "Asegúrate de que esas secciones del recibo estén visibles.\n"
+    "Toma la foto más cerca, con buena iluminación y sin sombras. (Intento {attempt} de 2)"
 )
 MSG_NULL_FINAL = (
-    "No se pudo leer: {fields}.\n"
-    "Fallo tras 2 intentos. Ingresa este reporte manualmente."
+    "⚠️ No se pudo leer: {fields}.\n"
+    "Fallo tras 2 intentos. Consejos:\n"
+    "  • Coloca el recibo en una superficie plana\n"
+    "  • Sostén la cámara directamente encima\n"
+    "  • Usa buena iluminación, sin flash directo\n"
+    "Ingresa este reporte manualmente en la app web."
 )
 MSG_PHOTO_WARN = "⚠️ No se pudo subir la foto. El reporte se guardará sin ella."
 MSG_DB_ERROR = "❌ Error guardando el reporte. Por favor ingrésalo manualmente en la app web."
@@ -143,6 +153,15 @@ MSG_AI_WELCOME = (
     "Enviar una foto sigue funcionando normalmente."
 )
 MSG_AI_EXIT = "Modo AI desactivado. Envía una foto del Reporte Z cuando estés listo."
+MSG_PAYOUTS = (
+    "💵 ¿Cuánto fue el total de payouts/desembolsos?\n"
+    "Escribe el monto (ej. 50.00) o toca el botón si no hubo."
+)
+MSG_ACTUAL_CASH = (
+    "💰 ¿Cuánto efectivo hay en la caja?\n"
+    "Escribe el monto contado, o toca Omitir para usar la varianza del OCR."
+)
+MSG_BAD_AMOUNT = "Ingresa un monto válido (ej. 50.00 o 0)."
 
 
 # ── Photo system helpers ───────────────────────────────────────────────────────
@@ -628,12 +647,41 @@ def _handle_ai_message(telegram_id: int, chat_id: int, text: str, state: dict) -
 # ── Placeholder stubs (implemented in later tasks) ───────────────────────────
 
 def _handle_payouts(telegram_id, chat_id, text, state):
-    """Placeholder — implemented in Task 7."""
-    pass
+    """Handle AWAITING_PAYOUTS — parse payout amount."""
+    text = str(text).strip().replace("$", "").replace(",", "")
+    try:
+        payouts = float(text)
+    except ValueError:
+        send_message(chat_id, MSG_BAD_AMOUNT)
+        return
+    state["pending_payouts"] = round(payouts, 2)
+    state["state"] = "AWAITING_ACTUAL_CASH"
+    _set_state(telegram_id, state)
+    send_message(chat_id, MSG_ACTUAL_CASH, reply_markup=INLINE_SKIP_CASH)
 
 def _handle_actual_cash(telegram_id, chat_id, text, state):
-    """Placeholder — implemented in Task 7."""
-    pass
+    """Handle AWAITING_ACTUAL_CASH — parse cash amount or skip."""
+    text_clean = str(text).strip()
+    if text_clean.lower() in ("skip", "omitir"):
+        # Keep OCR variance as-is
+        state["pending_actual_cash"] = None
+        state["pending_variance"] = None
+    else:
+        text_clean = text_clean.replace("$", "").replace(",", "")
+        try:
+            actual_cash = float(text_clean)
+        except ValueError:
+            send_message(chat_id, MSG_BAD_AMOUNT)
+            return
+        state["pending_actual_cash"] = round(actual_cash, 2)
+        # variance = actual_cash - (ocr_cash - payouts)
+        ocr_cash = state.get("pending_data", {}).get("cash") or 0
+        payouts = state.get("pending_payouts", 0)
+        state["pending_variance"] = round(actual_cash - (ocr_cash - payouts), 2)
+
+    state["state"] = "AWAITING_CONFIRMATION"
+    _set_state(telegram_id, state)
+    send_message(chat_id, _format_preview(state["pending_data"]), reply_markup=INLINE_SAVE)
 
 def _handle_broadcast_confirm(telegram_id, chat_id, text, state):
     """Placeholder — implemented in Task 8."""
@@ -791,6 +839,14 @@ def handle_update(update: dict) -> None:
 
     if current_state == "AWAITING_REGISTER":
         _handle_register(telegram_id, chat_id, text, state)
+        return
+
+    if current_state == "AWAITING_PAYOUTS":
+        _handle_payouts(telegram_id, chat_id, text, state)
+        return
+
+    if current_state == "AWAITING_ACTUAL_CASH":
+        _handle_actual_cash(telegram_id, chat_id, text, state)
         return
 
     if current_state == "AWAITING_CONFIRMATION":
@@ -1068,9 +1124,9 @@ def _handle_register(telegram_id: int, chat_id: int, text: str, state: dict) -> 
             return
         state["pending_data"]["register"] = reg_num
 
-    state["state"] = "AWAITING_CONFIRMATION"
+    state["state"] = "AWAITING_PAYOUTS"
     _set_state(telegram_id, state)
-    send_message(chat_id, _format_preview(state["pending_data"]), reply_markup=INLINE_SAVE)
+    send_message(chat_id, MSG_PAYOUTS, reply_markup=INLINE_PAYOUTS_ZERO)
 
 
 def _ascii_upper(text: str) -> str:
