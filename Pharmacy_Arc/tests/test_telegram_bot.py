@@ -696,3 +696,91 @@ def test_msg_defaults_to_spanish_for_unknown_user():
     bot_state.clear()
     result = msg(0, "processing")
     assert "espera" in result.lower()
+
+
+# ── callback resilience tests ────────────────────────────────────────────────
+
+import time as time_module
+
+
+def test_callback_guarantees_answer_on_crash():
+    """answerCallbackQuery is called even when the handler crashes."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[901] = {"state": "AWAITING_DATE", "lang": "es"}
+    tg_calls = []
+
+    def mock_tg(method, **kwargs):
+        tg_calls.append(method)
+        if method == "answerCallbackQuery":
+            return True  # _tg now returns result directly
+        raise Exception("simulated crash")
+
+    update = {
+        "callback_query": {
+            "id": "cb_test",
+            "from": {"id": 901, "username": "testuser"},
+            "message": {"message_id": 1, "chat": {"id": 901}, "date": int(time_module.time())},
+            "data": "date:ok",
+        }
+    }
+
+    with patch("telegram_bot._tg", side_effect=mock_tg):
+        with patch("telegram_bot.send_message_safe"):
+            with patch("telegram_bot._notify_admin_if_needed"):
+                handle_update(update)
+
+    assert "answerCallbackQuery" in tg_calls
+
+
+def test_callback_expired_button_shows_alert():
+    """Expired buttons get answered with show_alert=True and no processing."""
+    from telegram_bot import handle_update, bot_state, BUTTON_TIMEOUT_SECONDS
+    bot_state.clear()
+    bot_state[901] = {"state": "AWAITING_DATE", "lang": "es"}
+    tg_calls = []
+
+    old_time = int(time_module.time()) - BUTTON_TIMEOUT_SECONDS - 60
+
+    update = {
+        "callback_query": {
+            "id": "cb_test",
+            "from": {"id": 901, "username": "testuser"},
+            "message": {"message_id": 1, "chat": {"id": 901}, "date": old_time},
+            "data": "date:ok",
+        }
+    }
+
+    def mock_tg(method, **kwargs):
+        tg_calls.append((method, kwargs))
+        return True
+
+    with patch("telegram_bot._tg", side_effect=mock_tg):
+        handle_update(update)
+
+    answer_calls = [(m, kw) for m, kw in tg_calls if m == "answerCallbackQuery"]
+    assert len(answer_calls) == 1
+    assert answer_calls[0][1].get("show_alert") is True
+
+
+def test_callback_state_mismatch_sends_expired_message():
+    """When state doesn't match any route, user gets an expiry message."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[901] = {"state": "REGISTERED", "lang": "en"}
+    messages = []
+
+    update = {
+        "callback_query": {
+            "id": "cb_test",
+            "from": {"id": 901, "username": "testuser"},
+            "message": {"message_id": 1, "chat": {"id": 901}, "date": int(time_module.time())},
+            "data": "date:ok",
+        }
+    }
+
+    with patch("telegram_bot._tg", return_value=True):
+        with patch("telegram_bot.send_message_safe", side_effect=lambda cid, txt, **kw: messages.append(txt)):
+            handle_update(update)
+
+    assert any("expired" in m.lower() or "expir" in m.lower() for m in messages)

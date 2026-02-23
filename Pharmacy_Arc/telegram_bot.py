@@ -47,6 +47,17 @@ if not _BOT_TOKEN:
 KNOWN_STORES = Config.STORES
 _STORE_CHOICE = {str(i): s for i, s in enumerate(KNOWN_STORES, 1)}
 
+BUTTON_TIMEOUT_SECONDS = 600  # 10 minutes — buttons older than this are rejected
+
+
+def _is_button_expired(cb: dict) -> bool:
+    """Check if the inline button's parent message is older than the timeout."""
+    msg_date = cb.get("message", {}).get("date", 0)
+    if msg_date == 0:
+        return False  # can't determine age, allow it
+    return (time.time() - msg_date) > BUTTON_TIMEOUT_SECONDS
+
+
 # ── Bilingual message system ──────────────────────────────────────────────────
 MESSAGES: dict[str, dict[str, str]] = {
     "es": {
@@ -424,6 +435,30 @@ def _log_dead_letter(telegram_id: int, callback_data: str, error: Exception) -> 
         f"DEAD_LETTER | telegram_id={telegram_id} | data={callback_data} | "
         f"error_type={type(error).__name__} | error={error}"
     )
+
+
+# ── Admin notification (stub — implemented in Task 6) ────────────────────────
+_ADMIN_CHAT_ID = int(os.getenv("TELEGRAM_ADMIN_CHAT_ID", "0"))
+_admin_last_notified: float = 0.0
+_ADMIN_NOTIFY_COOLDOWN = 300  # seconds — max 1 alert per 5 minutes
+
+
+def _notify_admin_if_needed(telegram_id: int, error_type: str, error_msg: str) -> None:
+    """Send an error alert to the admin chat, rate-limited to avoid spam."""
+    global _admin_last_notified
+    if not _ADMIN_CHAT_ID:
+        return
+    now = time.time()
+    if now - _admin_last_notified < _ADMIN_NOTIFY_COOLDOWN:
+        return
+    _admin_last_notified = now
+    text = (
+        f"Bot error alert\n"
+        f"User: {telegram_id}\n"
+        f"Error: {error_type}\n"
+        f"Detail: {error_msg[:200]}"
+    )
+    send_message_safe(_ADMIN_CHAT_ID, text)
 
 
 def download_photo(file_id: str) -> bytes:
@@ -972,62 +1007,100 @@ def _handle_broadcast_confirm(telegram_id, chat_id, text, state):
 # ── Callback query handler ────────────────────────────────────────────────────
 
 def _handle_callback(cb: dict) -> None:
-    """Handle an inline keyboard button press."""
+    """Handle an inline keyboard button press with guaranteed spinner dismissal."""
     cb_id = cb["id"]
     telegram_id = cb["from"]["id"]
     chat_id = cb["message"]["chat"]["id"]
     data = cb.get("data", "")
+    answered = False
 
-    # Acknowledge the callback to dismiss the loading spinner
-    _tg("answerCallbackQuery", callback_query_id=cb_id)
+    try:
+        # Check button expiry FIRST
+        if _is_button_expired(cb):
+            _tg("answerCallbackQuery", callback_query_id=cb_id,
+                text=msg(telegram_id, "error_button_expired"), show_alert=True)
+            answered = True
+            return
 
-    with _bot_state_lock:
-        state = bot_state.get(telegram_id)
-    if state is None:
-        state = load_session(telegram_id) or {}
-        if state:
-            with _bot_state_lock:
-                bot_state[telegram_id] = state
-    current_state = state.get("state")
+        # Acknowledge the callback to dismiss the loading spinner
+        _tg("answerCallbackQuery", callback_query_id=cb_id)
+        answered = True
 
-    # Route by callback data prefix
-    prefix, _, value = data.partition(":")
+        # Load state
+        with _bot_state_lock:
+            state = bot_state.get(telegram_id)
+        if state is None:
+            state = load_session(telegram_id) or {}
+            if state:
+                with _bot_state_lock:
+                    bot_state[telegram_id] = state
+        current_state = state.get("state")
 
-    if prefix == "store" and current_state == "AWAITING_STORE":
-        chosen = _STORE_CHOICE.get(value)
-        if chosen:
-            state["store"] = chosen
-            state["state"] = "REGISTERED"
-            _set_state(telegram_id, state)
-            saved_photo = state.pop("pending_photo_msg", None)
-            if saved_photo:
-                _handle_photo(telegram_id, chat_id, "", saved_photo, state)
+        # Route by callback data prefix
+        prefix, _, value = data.partition(":")
+
+        if prefix == "store" and current_state == "AWAITING_STORE":
+            chosen = _STORE_CHOICE.get(value)
+            if chosen:
+                state["store"] = chosen
+                state["state"] = "REGISTERED"
+                _set_state(telegram_id, state)
+                saved_msg = state.pop("pending_photo_msg", None)
+                if saved_msg:
+                    _handle_photo(telegram_id, chat_id, "", saved_msg, state)
+                else:
+                    send_message(chat_id, msg(telegram_id, "store_confirm", store=chosen))
+
+        elif prefix == "date" and current_state == "AWAITING_DATE":
+            if value == "ok":
+                _handle_date(telegram_id, chat_id, "OK", state)
             else:
-                send_message(chat_id, msg(telegram_id, "store_confirm", store=chosen))
+                send_message(chat_id, msg(telegram_id, "bad_date"))
 
-    elif prefix == "date" and current_state == "AWAITING_DATE":
-        if value == "ok":
-            _handle_date(telegram_id, chat_id, "OK", state)
+        elif prefix == "reg" and current_state == "AWAITING_REGISTER":
+            if value == "ok":
+                _handle_register(telegram_id, chat_id, "OK", state)
+            else:
+                send_message(chat_id, msg(telegram_id, "bad_reg"))
+
+        elif prefix == "save" and current_state == "AWAITING_CONFIRMATION":
+            _handle_confirmation(telegram_id, chat_id, "YES" if value == "yes" else "NO", state)
+
+        elif prefix == "payouts" and current_state == "AWAITING_PAYOUTS":
+            _handle_payouts(telegram_id, chat_id, value, state)
+
+        elif prefix == "actual_cash" and current_state == "AWAITING_ACTUAL_CASH":
+            _handle_actual_cash(telegram_id, chat_id, value, state)
+
+        elif prefix == "broadcast" and current_state == "BROADCAST_CONFIRM":
+            _handle_broadcast_confirm(telegram_id, chat_id, value, state)
+
+        elif prefix == "lang":
+            # Language selection callback
+            state["lang"] = value
+            _set_state(telegram_id, state)
+            send_message(chat_id, msg(telegram_id, "lang_set"))
+
         else:
-            send_message(chat_id, "Escribe la fecha (MM/DD/AAAA):")
+            # No matching route — state expired or stale button
+            send_message_safe(chat_id, msg(telegram_id, "error_state_expired"))
 
-    elif prefix == "reg" and current_state == "AWAITING_REGISTER":
-        if value == "ok":
-            _handle_register(telegram_id, chat_id, "OK", state)
-        else:
-            send_message(chat_id, "Escribe el n\u00famero de caja:")
-
-    elif prefix == "save" and current_state == "AWAITING_CONFIRMATION":
-        _handle_confirmation(telegram_id, chat_id, "YES" if value == "yes" else "NO", state)
-
-    elif prefix == "payouts" and current_state == "AWAITING_PAYOUTS":
-        _handle_payouts(telegram_id, chat_id, value, state)
-
-    elif prefix == "actual_cash" and current_state == "AWAITING_ACTUAL_CASH":
-        _handle_actual_cash(telegram_id, chat_id, value, state)
-
-    elif prefix == "broadcast" and current_state == "BROADCAST_CONFIRM":
-        _handle_broadcast_confirm(telegram_id, chat_id, value, state)
+    except TelegramAPIError as e:
+        logger.error(f"Callback TG API error: {e}", exc_info=True)
+        _notify_admin_if_needed(telegram_id, "TelegramAPIError", str(e))
+        send_message_safe(chat_id, msg(telegram_id, "error_connection"))
+        _log_dead_letter(telegram_id, data, e)
+    except Exception as e:
+        logger.error(f"Callback handler crash: {e}", exc_info=True)
+        _notify_admin_if_needed(telegram_id, type(e).__name__, str(e))
+        send_message_safe(chat_id, msg(telegram_id, "error_unknown"))
+        _log_dead_letter(telegram_id, data, e)
+    finally:
+        if not answered:
+            try:
+                _tg("answerCallbackQuery", callback_query_id=cb_id, retries=1)
+            except Exception:
+                pass  # best effort
 
 
 # ── Main dispatcher ────────────────────────────────────────────────────────────
