@@ -576,7 +576,7 @@ def verify_web_credentials(username: str, password: str) -> dict | None:
     Returns the user row dict if valid, None if invalid.
     """
     try:
-        supabase = extensions.supabase
+        supabase = extensions.get_db()
         EMERGENCY_ACCOUNTS = extensions.EMERGENCY_ACCOUNTS
         password_hasher = extensions.password_hasher
     except Exception as e:
