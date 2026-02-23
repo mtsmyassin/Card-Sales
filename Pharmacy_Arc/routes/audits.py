@@ -332,6 +332,9 @@ def delete():
         return jsonify(error="Permission Denied: Staff cannot delete entries"), 403
 
     try:
+        if not request.json or 'id' not in request.json:
+            return jsonify(error="Missing entry ID"), 400
+
         uid = request.json['id']
 
         # Get current record for audit trail
@@ -366,7 +369,7 @@ def delete():
             actor=username,
             role=role,
             entity_type="AUDIT_ENTRY",
-            entity_id=str(request.json.get('id')) if request.json.get('id') else None,
+            entity_id=str(request.json.get('id')) if request.json and request.json.get('id') else None,
             success=False,
             error=str(e),
             context={"ip": request.remote_addr}

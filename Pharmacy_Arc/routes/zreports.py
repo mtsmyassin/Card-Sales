@@ -8,6 +8,14 @@ from helpers.auth_utils import require_auth
 logger = logging.getLogger(__name__)
 bp = Blueprint('zreports', __name__)
 
+
+def _get_admin_db():
+    """Return supabase_admin client, or None if unavailable."""
+    db = extensions.supabase_admin
+    if db is None:
+        logger.error("[zreports] supabase_admin is not configured — Z-report review unavailable")
+    return db
+
 _ZR_PAYMENT_FIELDS = ['cash', 'ath', 'athm', 'visa', 'mc', 'amex', 'disc', 'wic', 'mcs', 'sss']
 
 VALID_REVIEW_STATUSES = (
@@ -66,9 +74,12 @@ def _zr_log(db_client, audit_id: int, action: str, actor: str,
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_list():
     """List audits with review status, optional ?status= filter."""
+    db = _get_admin_db()
+    if db is None:
+        return jsonify(error="Z-report review service unavailable"), 503
     status_filter = request.args.get('status')
     try:
-        q = extensions.supabase_admin.table('audits').select(
+        q = db.table('audits').select(
             'id,store,date,review_status,review_locked_by,review_locked_at'
         ).order('date', desc=True)
         if status_filter and status_filter in VALID_REVIEW_STATUSES:
@@ -84,9 +95,12 @@ def zr_list():
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_detail(audit_id: int):
     """Return audit row plus current review record."""
+    db = _get_admin_db()
+    if db is None:
+        return jsonify(error="Z-report review service unavailable"), 503
     try:
-        audit = extensions.supabase_admin.table('audits').select('*').eq('id', audit_id).single().execute()
-        review = extensions.supabase_admin.table('z_report_reviews').select('*').eq(
+        audit = db.table('audits').select('*').eq('id', audit_id).single().execute()
+        review = db.table('z_report_reviews').select('*').eq(
             'audit_id', audit_id).eq('is_current', True).maybe_single().execute()
         return jsonify({'audit': audit.data, 'review': review.data if review else None})
     except Exception as e:
@@ -98,10 +112,13 @@ def zr_detail(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_lock(audit_id: int):
     """Lock an audit for review by the current user."""
+    db = _get_admin_db()
+    if db is None:
+        return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
     ip = request.remote_addr
     try:
-        audit = extensions.supabase_admin.table('audits').select(
+        audit = db.table('audits').select(
             'id,store,review_status,review_locked_by,review_locked_at'
         ).eq('id', audit_id).single().execute().data
 
@@ -131,13 +148,13 @@ def zr_lock(audit_id: int):
             return jsonify(error=f"Cannot lock audit in status '{status}'"), 409
 
         old_status = audit['review_status']
-        extensions.supabase_admin.table('audits').update({
+        db.table('audits').update({
             'review_status': 'IN_REVIEW',
             'review_locked_by': actor,
-            'review_locked_at': datetime.utcnow().isoformat(),
+            'review_locked_at': datetime.now(timezone.utc).isoformat(),
         }).eq('id', audit_id).execute()
 
-        _zr_log(extensions.supabase_admin, audit_id, 'LOCK', actor, ip=ip,
+        _zr_log(db, audit_id, 'LOCK', actor, ip=ip,
                 old_val={'review_status': old_status},
                 new_val={'review_status': 'IN_REVIEW', 'locked_by': actor})
         return jsonify(ok=True)
@@ -150,11 +167,14 @@ def zr_lock(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_unlock(audit_id: int):
     """Release the review lock on an audit."""
+    db = _get_admin_db()
+    if db is None:
+        return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
     role = session.get('role')
     ip = request.remote_addr
     try:
-        audit = extensions.supabase_admin.table('audits').select(
+        audit = db.table('audits').select(
             'id,review_status,review_locked_by'
         ).eq('id', audit_id).single().execute().data
 
@@ -164,13 +184,13 @@ def zr_unlock(audit_id: int):
         if audit['review_locked_by'] != actor and role not in ('admin', 'super_admin'):
             return jsonify(error="You do not hold the lock on this audit"), 403
 
-        extensions.supabase_admin.table('audits').update({
+        db.table('audits').update({
             'review_status': 'PENDING_REVIEW',
             'review_locked_by': None,
             'review_locked_at': None,
         }).eq('id', audit_id).execute()
 
-        _zr_log(extensions.supabase_admin, audit_id, 'UNLOCK', actor, ip=ip,
+        _zr_log(db, audit_id, 'UNLOCK', actor, ip=ip,
                 old_val={'locked_by': audit['review_locked_by']},
                 new_val={'review_status': 'PENDING_REVIEW'})
         return jsonify(ok=True)
@@ -183,6 +203,9 @@ def zr_unlock(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_approve(audit_id: int):
     """Approve a Z Report. Recalculates figures server-side."""
+    db = _get_admin_db()
+    if db is None:
+        return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
     ip = request.remote_addr
     body = request.get_json(force=True) or {}
@@ -198,7 +221,7 @@ def zr_approve(audit_id: int):
         return jsonify(error=str(e)), 400
 
     try:
-        audit = extensions.supabase_admin.table('audits').select('*').eq('id', audit_id).single().execute().data
+        audit = db.table('audits').select('*').eq('id', audit_id).single().execute().data
 
         if audit['review_status'] != 'IN_REVIEW':
             return jsonify(error=f"Audit is not IN_REVIEW (status: {audit['review_status']})"), 409
@@ -214,15 +237,15 @@ def zr_approve(audit_id: int):
             return jsonify(error=str(e)), 400
 
         # Mark previous review as not current
-        extensions.supabase_admin.table('z_report_reviews').update({'is_current': False}).eq(
+        db.table('z_report_reviews').update({'is_current': False}).eq(
             'audit_id', audit_id).eq('is_current', True).execute()
 
         # Get next version number
-        existing = extensions.supabase_admin.table('z_report_reviews').select('version').eq(
+        existing = db.table('z_report_reviews').select('version').eq(
             'audit_id', audit_id).order('version', desc=True).limit(1).execute()
         next_version = (existing.data[0]['version'] + 1) if existing.data else 1
 
-        extensions.supabase_admin.table('z_report_reviews').insert({
+        db.table('z_report_reviews').insert({
             'audit_id': audit_id,
             'payouts_total': payouts_total,
             'cash_in_register_actual': cash_actual,
@@ -240,13 +263,13 @@ def zr_approve(audit_id: int):
         }).execute()
 
         old_status = audit['review_status']
-        extensions.supabase_admin.table('audits').update({
+        db.table('audits').update({
             'review_status': 'FINAL_APPROVED',
             'review_locked_by': None,
             'review_locked_at': None,
         }).eq('id', audit_id).execute()
 
-        _zr_log(extensions.supabase_admin, audit_id, 'APPROVE', actor, ip=ip,
+        _zr_log(db, audit_id, 'APPROVE', actor, ip=ip,
                 old_val={'review_status': old_status},
                 new_val={'review_status': 'FINAL_APPROVED', 'gross': calc['gross'],
                          'net': calc['net'], 'variance': calc['variance']})
@@ -260,6 +283,9 @@ def zr_approve(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_reject(audit_id: int):
     """Reject a Z Report with a mandatory reason."""
+    db = _get_admin_db()
+    if db is None:
+        return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
     ip = request.remote_addr
     body = request.get_json(force=True) or {}
@@ -268,7 +294,7 @@ def zr_reject(audit_id: int):
         return jsonify(error="rejection_reason is required"), 400
 
     try:
-        audit = extensions.supabase_admin.table('audits').select(
+        audit = db.table('audits').select(
             'id,store,review_status,review_locked_by'
         ).eq('id', audit_id).single().execute().data
 
@@ -279,14 +305,14 @@ def zr_reject(audit_id: int):
         if session.get('role') == 'manager' and audit.get('store') != session.get('store'):
             return jsonify(error="You can only review entries for your store"), 403
 
-        existing = extensions.supabase_admin.table('z_report_reviews').select('version').eq(
+        existing = db.table('z_report_reviews').select('version').eq(
             'audit_id', audit_id).order('version', desc=True).limit(1).execute()
         next_version = (existing.data[0]['version'] + 1) if existing.data else 1
 
-        extensions.supabase_admin.table('z_report_reviews').update({'is_current': False}).eq(
+        db.table('z_report_reviews').update({'is_current': False}).eq(
             'audit_id', audit_id).eq('is_current', True).execute()
 
-        extensions.supabase_admin.table('z_report_reviews').insert({
+        db.table('z_report_reviews').insert({
             'audit_id': audit_id,
             'payouts_total': 0,
             'cash_in_register_actual': 0,
@@ -303,13 +329,13 @@ def zr_reject(audit_id: int):
         }).execute()
 
         old_status = audit['review_status']
-        extensions.supabase_admin.table('audits').update({
+        db.table('audits').update({
             'review_status': 'REJECTED',
             'review_locked_by': None,
             'review_locked_at': None,
         }).eq('id', audit_id).execute()
 
-        _zr_log(extensions.supabase_admin, audit_id, 'REJECT', actor, ip=ip,
+        _zr_log(db, audit_id, 'REJECT', actor, ip=ip,
                 old_val={'review_status': old_status},
                 new_val={'review_status': 'REJECTED'},
                 reason=reason)
@@ -323,6 +349,9 @@ def zr_reject(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_reopen(audit_id: int):
     """Reopen a REJECTED audit back to PENDING_REVIEW so it can be re-reviewed."""
+    db = _get_admin_db()
+    if db is None:
+        return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
     ip = request.remote_addr
     body = request.get_json(force=True) or {}
@@ -331,7 +360,7 @@ def zr_reopen(audit_id: int):
         return jsonify(error="reason is required"), 400
 
     try:
-        audit = extensions.supabase_admin.table('audits').select(
+        audit = db.table('audits').select(
             'id,store,review_status'
         ).eq('id', audit_id).single().execute().data
 
@@ -340,13 +369,13 @@ def zr_reopen(audit_id: int):
         if session.get('role') == 'manager' and audit.get('store') != session.get('store'):
             return jsonify(error="You can only reopen entries for your store"), 403
 
-        extensions.supabase_admin.table('audits').update({
+        db.table('audits').update({
             'review_status': 'PENDING_REVIEW',
             'review_locked_by': None,
             'review_locked_at': None,
         }).eq('id', audit_id).execute()
 
-        _zr_log(extensions.supabase_admin, audit_id, 'REOPEN', actor, ip=ip,
+        _zr_log(db, audit_id, 'REOPEN', actor, ip=ip,
                 old_val={'review_status': 'REJECTED'},
                 new_val={'review_status': 'PENDING_REVIEW'},
                 reason=reason)
@@ -360,6 +389,9 @@ def zr_reopen(audit_id: int):
 @require_auth(allowed_roles=['admin', 'super_admin'])
 def zr_amend(audit_id: int):
     """Reopen a FINAL_APPROVED audit for amendment (admin only)."""
+    db = _get_admin_db()
+    if db is None:
+        return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
     ip = request.remote_addr
     body = request.get_json(force=True) or {}
@@ -368,7 +400,7 @@ def zr_amend(audit_id: int):
         return jsonify(error="amendment_reason is required"), 400
 
     try:
-        audit = extensions.supabase_admin.table('audits').select(
+        audit = db.table('audits').select(
             'id,review_status'
         ).eq('id', audit_id).single().execute().data
 
@@ -378,16 +410,16 @@ def zr_amend(audit_id: int):
             ), 409
 
         # Get current review row to link amendment chain
-        current = extensions.supabase_admin.table('z_report_reviews').select('id,version').eq(
+        current = db.table('z_report_reviews').select('id,version').eq(
             'audit_id', audit_id).eq('is_current', True).maybe_single().execute()
         current_data = current.data if current else None
         amendment_of_id = current_data['id'] if current_data else None
         next_version = (current_data['version'] + 1) if current_data else 1
 
-        extensions.supabase_admin.table('z_report_reviews').update({'is_current': False}).eq(
+        db.table('z_report_reviews').update({'is_current': False}).eq(
             'audit_id', audit_id).eq('is_current', True).execute()
 
-        extensions.supabase_admin.table('z_report_reviews').insert({
+        db.table('z_report_reviews').insert({
             'audit_id': audit_id,
             'payouts_total': 0,
             'cash_in_register_actual': 0,
@@ -404,13 +436,13 @@ def zr_amend(audit_id: int):
             'is_current': True,
         }).execute()
 
-        extensions.supabase_admin.table('audits').update({
+        db.table('audits').update({
             'review_status': 'PENDING_REVIEW',
             'review_locked_by': None,
             'review_locked_at': None,
         }).eq('id', audit_id).execute()
 
-        _zr_log(extensions.supabase_admin, audit_id, 'AMEND', actor, ip=ip,
+        _zr_log(db, audit_id, 'AMEND', actor, ip=ip,
                 old_val={'review_status': 'FINAL_APPROVED'},
                 new_val={'review_status': 'PENDING_REVIEW'},
                 reason=reason)
@@ -424,8 +456,11 @@ def zr_amend(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_history(audit_id: int):
     """Return all review records for an audit, newest first."""
+    db = _get_admin_db()
+    if db is None:
+        return jsonify(error="Z-report review service unavailable"), 503
     try:
-        result = extensions.supabase_admin.table('z_report_reviews').select('*').eq(
+        result = db.table('z_report_reviews').select('*').eq(
             'audit_id', audit_id).order('version', desc=True).execute()
         return jsonify(result.data)
     except Exception as e:
@@ -437,8 +472,11 @@ def zr_history(audit_id: int):
 @require_auth(allowed_roles=['admin', 'super_admin'])
 def zr_audit_log(audit_id: int):
     """Return the audit trail for a Z Report (admin only)."""
+    db = _get_admin_db()
+    if db is None:
+        return jsonify(error="Z-report review service unavailable"), 503
     try:
-        result = extensions.supabase_admin.table('z_report_audit_log').select('*').eq(
+        result = db.table('z_report_audit_log').select('*').eq(
             'audit_id', audit_id).order('ts', desc=True).execute()
         return jsonify(result.data)
     except Exception as e:
@@ -450,20 +488,23 @@ def zr_audit_log(audit_id: int):
 @require_auth(allowed_roles=['admin', 'super_admin'])
 def zr_unlock_timed_out():
     """Release all locks older than 30 minutes (admin cron / manual trigger)."""
+    db = _get_admin_db()
+    if db is None:
+        return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
     ip = request.remote_addr
-    cutoff = (datetime.utcnow() - timedelta(minutes=30)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
     try:
-        stale = extensions.supabase_admin.table('audits').select('id,review_locked_by').eq(
+        stale = db.table('audits').select('id,review_locked_by').eq(
             'review_status', 'IN_REVIEW').lt('review_locked_at', cutoff).execute()
         count = 0
         for row in stale.data:
-            extensions.supabase_admin.table('audits').update({
+            db.table('audits').update({
                 'review_status': 'PENDING_REVIEW',
                 'review_locked_by': None,
                 'review_locked_at': None,
             }).eq('id', row['id']).execute()
-            _zr_log(extensions.supabase_admin, row['id'], 'UNLOCK', actor, ip=ip,
+            _zr_log(db, row['id'], 'UNLOCK', actor, ip=ip,
                     old_val={'locked_by': row['review_locked_by']},
                     new_val={'review_status': 'PENDING_REVIEW'},
                     reason='lock_timeout')

@@ -4,7 +4,7 @@ Provides tamper-evident logging with hash chaining.
 """
 import json
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from threading import Lock
@@ -139,7 +139,7 @@ class AuditLogger:
             previous_hash = self._get_last_hash()
             
             entry = {
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'action': action,
                 'actor': actor,
                 'role': role,

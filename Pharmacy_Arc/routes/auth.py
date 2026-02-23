@@ -125,7 +125,7 @@ def login():
                 session['user'] = u
                 session['role'] = role
                 session['store'] = 'All'
-                session['login_time'] = datetime.utcnow().isoformat()
+                session['login_time'] = datetime.now(timezone.utc).isoformat()
                 session['last_active'] = datetime.now(timezone.utc).isoformat()
 
                 extensions.login_tracker.record_successful_login(u)
@@ -148,22 +148,13 @@ def login():
             if res.data:
                 user = res.data[0]
 
-                # Check if password is hashed (starts with $2b$ for bcrypt)
+                # Only accept bcrypt-hashed passwords — plaintext is rejected
                 if user['password'].startswith('$2b$'):
-                    # Hashed password - verify properly
                     password_valid = extensions.password_hasher.verify_password(p, user['password'])
                 else:
-                    # Legacy plaintext password - still support but auto-upgrade
-                    logger.warning(f"User {u} still using plaintext password!")
-                    password_valid = (user['password'] == p)
-                    if password_valid:
-                        try:
-                            hashed = extensions.password_hasher.hash_password(p)
-                            _db = extensions.supabase_admin or extensions.supabase
-                            _db.table("users").update({"password": hashed}).eq("username", u).execute()
-                            logger.info(f"[login] Auto-hashed password for {u!r}")
-                        except Exception as _he:
-                            logger.warning(f"[login] Could not auto-hash password for {u!r}: {_he}")
+                    logger.error(f"[login] User {u!r} has unhashed password in DB — rejecting login. "
+                                 "Admin must reset this password.")
+                    password_valid = False
 
                 if password_valid:
                     # Regenerate session to prevent fixation
@@ -174,7 +165,7 @@ def login():
                     session['user'] = u
                     session['role'] = user['role']
                     session['store'] = user['store']
-                    session['login_time'] = datetime.utcnow().isoformat()
+                    session['login_time'] = datetime.now(timezone.utc).isoformat()
                     session['last_active'] = datetime.now(timezone.utc).isoformat()
 
                     extensions.login_tracker.record_successful_login(u)
