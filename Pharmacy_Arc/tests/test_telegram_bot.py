@@ -181,3 +181,92 @@ def test_ocr_failure_twice_tells_manual():
 
     assert bot_state[777]["retry_count"] == 0  # reset after max
     assert any("manualmente" in r.lower() for r in replies)
+
+
+# ── callback query helpers & tests ───────────────────────────────────────────
+
+def make_callback_update(telegram_id: int, data: str, message_id: int = 1) -> dict:
+    return {
+        "callback_query": {
+            "id": "cb_123",
+            "from": {"id": telegram_id, "username": "testuser"},
+            "message": {
+                "message_id": message_id,
+                "chat": {"id": telegram_id},
+            },
+            "data": data,
+        }
+    }
+
+
+def test_callback_query_store_selection():
+    """Inline button callback for store selection sets the store."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[900] = {
+        "state": "AWAITING_STORE",
+        "username": "admin1",
+        "retry_count": 0,
+    }
+    replies = []
+
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        with patch("telegram_bot._tg") as mock_tg:
+            mock_tg.return_value = {"ok": True}
+            handle_update(make_callback_update(900, "store:2"))
+
+    assert bot_state[900]["store"] == "Carimas #2"
+
+
+def test_callback_date_ok():
+    """Inline date OK button progresses to register confirmation."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    bot_state[901] = {
+        "state": "AWAITING_DATE",
+        "store": "Carimas #1",
+        "username": "maria",
+        "pending_data": {"date": "2026-02-22", "register": 2},
+        "pending_image_bytes": b"fake",
+        "retry_count": 0,
+    }
+    replies = []
+
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        with patch("telegram_bot._tg") as mock_tg:
+            mock_tg.return_value = {"ok": True}
+            handle_update(make_callback_update(901, "date:ok"))
+
+    assert bot_state[901]["state"] == "AWAITING_REGISTER"
+
+
+def test_callback_save_yes():
+    """Inline save:yes button saves the entry."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    good_ocr = {
+        "register": 2, "date": "2026-02-22",
+        "cash": 100.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
+        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
+        "sss": 0.0, "variance": -1.5,
+    }
+    bot_state[902] = {
+        "state": "AWAITING_CONFIRMATION",
+        "store": "Carimas #2",
+        "username": "maria",
+        "pending_data": good_ocr,
+        "pending_image_bytes": b"fake",
+        "retry_count": 0,
+    }
+    replies = []
+
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        with patch("telegram_bot._tg") as mock_tg:
+            mock_tg.return_value = {"ok": True}
+            with patch("telegram_bot.upload_image_to_storage", return_value="path/file.jpg"):
+                with patch("telegram_bot.save_audit_entry", return_value=99):
+                    with patch("telegram_bot.save_photo_record"):
+                        handle_update(make_callback_update(902, "save:yes"))
+
+    assert bot_state[902]["state"] == "REGISTERED"
+    assert any("guardado" in r.lower() for r in replies)

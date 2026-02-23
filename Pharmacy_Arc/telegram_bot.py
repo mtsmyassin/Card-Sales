@@ -560,6 +560,43 @@ def _kb_remove() -> dict:
     return {"remove_keyboard": True}
 
 
+def _inline_kb(buttons: list[list[dict]]) -> dict:
+    """Build an inline keyboard markup."""
+    return {"inline_keyboard": buttons}
+
+
+def _inline_btn(text: str, callback_data: str) -> dict:
+    return {"text": text, "callback_data": callback_data}
+
+
+INLINE_STORES = _inline_kb([
+    [_inline_btn(s, f"store:{i}") for i, s in enumerate(KNOWN_STORES, 1)
+     if i <= 3],
+    [_inline_btn(s, f"store:{i}") for i, s in enumerate(KNOWN_STORES, 1)
+     if i > 3],
+])
+
+INLINE_CONFIRM_DATE = _inline_kb([
+    [_inline_btn("\u2705 OK", "date:ok"), _inline_btn("\u270f\ufe0f Corregir", "date:edit")],
+])
+
+INLINE_CONFIRM_REG = _inline_kb([
+    [_inline_btn("\u2705 OK", "reg:ok"), _inline_btn("\u270f\ufe0f Corregir", "reg:edit")],
+])
+
+INLINE_SAVE = _inline_kb([
+    [_inline_btn("\u2705 S\u00cd Guardar", "save:yes"), _inline_btn("\u274c NO Cancelar", "save:no")],
+])
+
+INLINE_PAYOUTS_ZERO = _inline_kb([
+    [_inline_btn("Sin payouts ($0)", "payouts:0")],
+])
+
+INLINE_SKIP_CASH = _inline_kb([
+    [_inline_btn("Omitir", "actual_cash:skip")],
+])
+
+
 def _handle_ai_message(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
     """Handle a text message while in AI_CHAT state."""
     store = state.get("store", "")
@@ -577,6 +614,82 @@ def _handle_ai_message(telegram_id: int, chat_id: int, text: str, state: dict) -
     send_message(chat_id, response, reply_markup=_kb_ai_chat())
 
 
+# ── Placeholder stubs (implemented in later tasks) ───────────────────────────
+
+def _handle_payouts(telegram_id, chat_id, text, state):
+    """Placeholder — implemented in Task 7."""
+    pass
+
+def _handle_actual_cash(telegram_id, chat_id, text, state):
+    """Placeholder — implemented in Task 7."""
+    pass
+
+def _handle_broadcast_confirm(telegram_id, chat_id, text, state):
+    """Placeholder — implemented in Task 8."""
+    pass
+
+
+# ── Callback query handler ────────────────────────────────────────────────────
+
+def _handle_callback(cb: dict) -> None:
+    """Handle an inline keyboard button press."""
+    cb_id = cb["id"]
+    telegram_id = cb["from"]["id"]
+    chat_id = cb["message"]["chat"]["id"]
+    data = cb.get("data", "")
+
+    # Acknowledge the callback to dismiss the loading spinner
+    _tg("answerCallbackQuery", callback_query_id=cb_id)
+
+    with _bot_state_lock:
+        state = bot_state.get(telegram_id)
+    if state is None:
+        state = load_session(telegram_id) or {}
+        if state:
+            with _bot_state_lock:
+                bot_state[telegram_id] = state
+    current_state = state.get("state")
+
+    # Route by callback data prefix
+    prefix, _, value = data.partition(":")
+
+    if prefix == "store" and current_state == "AWAITING_STORE":
+        chosen = _STORE_CHOICE.get(value)
+        if chosen:
+            state["store"] = chosen
+            state["state"] = "REGISTERED"
+            _set_state(telegram_id, state)
+            saved_msg = state.pop("pending_photo_msg", None)
+            if saved_msg:
+                _handle_photo(telegram_id, chat_id, "", saved_msg, state)
+            else:
+                send_message(chat_id, MSG_STORE_CONFIRM.format(store=chosen))
+
+    elif prefix == "date" and current_state == "AWAITING_DATE":
+        if value == "ok":
+            _handle_date(telegram_id, chat_id, "OK", state)
+        else:
+            send_message(chat_id, "Escribe la fecha (MM/DD/AAAA):")
+
+    elif prefix == "reg" and current_state == "AWAITING_REGISTER":
+        if value == "ok":
+            _handle_register(telegram_id, chat_id, "OK", state)
+        else:
+            send_message(chat_id, "Escribe el n\u00famero de caja:")
+
+    elif prefix == "save" and current_state == "AWAITING_CONFIRMATION":
+        _handle_confirmation(telegram_id, chat_id, "YES" if value == "yes" else "NO", state)
+
+    elif prefix == "payouts" and current_state == "AWAITING_PAYOUTS":
+        _handle_payouts(telegram_id, chat_id, value, state)
+
+    elif prefix == "actual_cash" and current_state == "AWAITING_ACTUAL_CASH":
+        _handle_actual_cash(telegram_id, chat_id, value, state)
+
+    elif prefix == "broadcast" and current_state == "BROADCAST_CONFIRM":
+        _handle_broadcast_confirm(telegram_id, chat_id, value, state)
+
+
 # ── Main dispatcher ────────────────────────────────────────────────────────────
 
 def handle_update(update: dict) -> None:
@@ -584,6 +697,12 @@ def handle_update(update: dict) -> None:
     Main entry point: dispatch an incoming Telegram update to the correct handler.
     Called from the Flask webhook route.
     """
+    # Handle callback_query (inline button presses)
+    cb = update.get("callback_query")
+    if cb:
+        _handle_callback(cb)
+        return
+
     msg = update.get("message")
     if not msg:
         return  # ignore non-message updates (e.g., edited_message)
@@ -1048,7 +1167,7 @@ def register_webhook() -> None:
         f"https://api.telegram.org/bot{token}/setWebhook",
         json={
             "url": webhook_url,
-            "allowed_updates": ["message"],
+            "allowed_updates": ["message", "callback_query"],
             "secret_token": secret,
         },
         timeout=10,
