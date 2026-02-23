@@ -647,3 +647,19 @@ def test_tg_succeeds_on_second_attempt():
         ]):
             result = _tg("sendMessage", chat_id=123, text="hi")
     assert result == {"message_id": 1}
+
+
+# ── send_message_safe tests ──────────────────────────────────────────────────
+
+def test_send_message_safe_returns_true_on_success():
+    from telegram_bot import send_message_safe
+
+    with patch("telegram_bot.send_message"):
+        assert send_message_safe(123, "hello") is True
+
+
+def test_send_message_safe_returns_false_on_error():
+    from telegram_bot import send_message_safe
+
+    with patch("telegram_bot.send_message", side_effect=Exception("network")):
+        assert send_message_safe(123, "hello") is False

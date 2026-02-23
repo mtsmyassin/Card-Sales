@@ -228,6 +228,24 @@ def send_message(chat_id: int, text: str, reply_markup: dict | None = None) -> N
     _tg("sendMessage", **kwargs)
 
 
+def send_message_safe(chat_id: int, text: str, reply_markup: dict | None = None) -> bool:
+    """Send a message, swallowing any exception. Returns True on success."""
+    try:
+        send_message(chat_id, text, reply_markup)
+        return True
+    except Exception as e:
+        logger.error(f"send_message_safe({chat_id}) failed: {e}")
+        return False
+
+
+def _log_dead_letter(telegram_id: int, callback_data: str, error: Exception) -> None:
+    """Log a structured dead-letter entry for failed callback processing."""
+    logger.error(
+        f"DEAD_LETTER | telegram_id={telegram_id} | data={callback_data} | "
+        f"error_type={type(error).__name__} | error={error}"
+    )
+
+
 def download_photo(file_id: str) -> bytes:
     """Download a photo from Telegram by file_id, return raw bytes."""
     info = _tg("getFile", file_id=file_id)
