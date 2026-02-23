@@ -10,9 +10,15 @@ from helpers.auth_utils import require_auth
 from helpers.validation import validate_audit_entry
 from helpers.offline_queue import save_to_queue, load_queue, clear_queue, get_queue_path
 from helpers.db import db_retry
+from postgrest.exceptions import APIError
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('audits', __name__)
+
+
+def _is_unique_violation(exc: Exception) -> bool:
+    """Check if an exception is a PostgREST unique constraint violation (23505)."""
+    return isinstance(exc, APIError) and getattr(exc, 'code', None) == '23505'
 
 
 def _send_variance_alert(store: str, date: str, reg: str, variance: float, gross: float, submitted_by: str) -> None:
@@ -111,9 +117,7 @@ def save():
                 label="save_audit",
             )
         except Exception as e:
-            err_str = str(e)
-            # Unique constraint violation (PostgREST code 23505)
-            if '23505' in err_str or 'unique' in err_str.lower() or 'duplicate' in err_str.lower():
+            if _is_unique_violation(e):
                 logger.warning(
                     f"[save] DB duplicate rejected: user={username!r} "
                     f"date={d['date']} store={d.get('store')} reg={d['reg']}"
@@ -234,8 +238,7 @@ def sync():
                 context={"ip": request.remote_addr, "records": 1}
             )
         except Exception as exc:
-            exc_str = str(exc)
-            if '23505' in exc_str or 'unique' in exc_str.lower() or 'duplicate' in exc_str.lower():
+            if _is_unique_violation(exc):
                 logger.warning(f"[sync] Skipping DB duplicate: date={item.get('date')} store={item.get('store')} reg={item.get('reg')}")
                 success_count += 1  # Remove from queue — don't retry duplicates
                 continue
