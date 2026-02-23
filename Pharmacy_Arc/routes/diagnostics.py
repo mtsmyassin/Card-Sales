@@ -8,6 +8,8 @@ from helpers.auth_utils import require_auth
 from helpers.offline_queue import load_queue
 from config import Config
 
+_BUCKET = Config.STORAGE_BUCKET
+
 logger = logging.getLogger(__name__)
 bp = Blueprint('diagnostics', __name__)
 
@@ -79,7 +81,7 @@ def diagnostics():
             "photos_missing_path": 0,
         }
         try:
-            _storage_client.storage.from_("z-reports").list("")
+            _storage_client.storage.from_(_BUCKET).list("")
             storage_info["z_reports_bucket"] = "exists"
         except Exception as bucket_err:
             logger.error(f"[diagnostics] Storage bucket check failed: {bucket_err}")

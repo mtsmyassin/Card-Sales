@@ -3,18 +3,11 @@ import logging
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify, session
 import extensions
-from helpers.auth_utils import require_auth
+from helpers.auth_utils import require_auth, is_admin_role
+from config import Config
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('zreports', __name__)
-
-
-def _get_admin_db():
-    """Return supabase_admin client, or None if unavailable."""
-    db = extensions.supabase_admin
-    if db is None:
-        logger.error("[zreports] supabase_admin is not configured — Z-report review unavailable")
-    return db
 
 _ZR_PAYMENT_FIELDS = ['cash', 'ath', 'athm', 'visa', 'mc', 'amex', 'disc', 'wic', 'mcs', 'sss']
 
@@ -26,7 +19,7 @@ VALID_REVIEW_STATUSES = (
 
 def _zr_recalculate(breakdown: dict, payouts_total: float, cash_actual: float) -> dict:
     """Recalculate gross, net, variance from raw breakdown. Raises ValueError on bad data."""
-    opening_float = float(breakdown.get('float', 100.0))
+    opening_float = float(breakdown.get('float', Config.DEFAULT_OPENING_FLOAT))
     cash = float(breakdown.get('cash', 0))
     gross = sum(float(breakdown.get(f, 0)) for f in _ZR_PAYMENT_FIELDS)
     net = gross - payouts_total
@@ -70,11 +63,28 @@ def _zr_log(db_client, audit_id: int, action: str, actor: str,
         logger.error(f"[zr_log] Failed to write audit log for audit_id={audit_id}: {e}")
 
 
+def _check_manager_store(audit_data: dict) -> tuple[bool, str]:
+    """Check if a manager user is allowed to access this audit's store.
+
+    Returns (ok, error_message). ok=True means access is allowed.
+    """
+    if session.get('role') == 'manager' and audit_data.get('store') != session.get('store'):
+        return False, "You can only review entries for your store"
+    return True, ""
+
+
+def _zr_next_version(db, audit_id: int) -> int:
+    """Return the next review version number for an audit."""
+    existing = db.table('z_report_reviews').select('version').eq(
+        'audit_id', audit_id).order('version', desc=True).limit(1).execute()
+    return (existing.data[0]['version'] + 1) if existing.data else 1
+
+
 @bp.route('/api/z-reports')
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_list():
     """List audits with review status, optional ?status= filter."""
-    db = _get_admin_db()
+    db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable"), 503
     status_filter = request.args.get('status')
@@ -95,7 +105,7 @@ def zr_list():
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_detail(audit_id: int):
     """Return audit row plus current review record."""
-    db = _get_admin_db()
+    db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable"), 503
     try:
@@ -112,7 +122,7 @@ def zr_detail(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_lock(audit_id: int):
     """Lock an audit for review by the current user."""
-    db = _get_admin_db()
+    db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
@@ -122,8 +132,9 @@ def zr_lock(audit_id: int):
             'id,store,review_status,review_locked_by,review_locked_at'
         ).eq('id', audit_id).single().execute().data
 
-        if session.get('role') == 'manager' and audit.get('store') != session.get('store'):
-            return jsonify(error="You can only review entries for your store"), 403
+        ok, err = _check_manager_store(audit)
+        if not ok:
+            return jsonify(error=err), 403
 
         status = audit['review_status']
         locked_by = audit.get('review_locked_by')
@@ -139,7 +150,7 @@ def zr_lock(audit_id: int):
                 lock_time = datetime.fromisoformat(
                     locked_at.replace('Z', '+00:00')
                 ) if locked_at else None
-                if lock_time and datetime.now(timezone.utc) - lock_time < timedelta(minutes=30):
+                if lock_time and datetime.now(timezone.utc) - lock_time < timedelta(minutes=Config.ZREPORT_LOCK_TIMEOUT_MINUTES):
                     return jsonify(
                         error=f"Audit is locked by {locked_by}"
                     ), 409
@@ -167,7 +178,7 @@ def zr_lock(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_unlock(audit_id: int):
     """Release the review lock on an audit."""
-    db = _get_admin_db()
+    db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
@@ -181,7 +192,7 @@ def zr_unlock(audit_id: int):
         if audit['review_status'] != 'IN_REVIEW':
             return jsonify(error="Audit is not IN_REVIEW"), 409
 
-        if audit['review_locked_by'] != actor and role not in ('admin', 'super_admin'):
+        if audit['review_locked_by'] != actor and not is_admin_role(role):
             return jsonify(error="You do not hold the lock on this audit"), 403
 
         db.table('audits').update({
@@ -203,7 +214,7 @@ def zr_unlock(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_approve(audit_id: int):
     """Approve a Z Report. Recalculates figures server-side."""
-    db = _get_admin_db()
+    db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
@@ -227,8 +238,9 @@ def zr_approve(audit_id: int):
             return jsonify(error=f"Audit is not IN_REVIEW (status: {audit['review_status']})"), 409
         if audit.get('review_locked_by') != actor:
             return jsonify(error="You do not hold the lock on this audit"), 403
-        if session.get('role') == 'manager' and audit.get('store') != session.get('store'):
-            return jsonify(error="You can only review entries for your store"), 403
+        ok, err = _check_manager_store(audit)
+        if not ok:
+            return jsonify(error=err), 403
 
         breakdown = (audit.get('payload') or {}).get('breakdown', {})
         try:
@@ -240,10 +252,7 @@ def zr_approve(audit_id: int):
         db.table('z_report_reviews').update({'is_current': False}).eq(
             'audit_id', audit_id).eq('is_current', True).execute()
 
-        # Get next version number
-        existing = db.table('z_report_reviews').select('version').eq(
-            'audit_id', audit_id).order('version', desc=True).limit(1).execute()
-        next_version = (existing.data[0]['version'] + 1) if existing.data else 1
+        next_version = _zr_next_version(db, audit_id)
 
         db.table('z_report_reviews').insert({
             'audit_id': audit_id,
@@ -283,7 +292,7 @@ def zr_approve(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_reject(audit_id: int):
     """Reject a Z Report with a mandatory reason."""
-    db = _get_admin_db()
+    db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
@@ -302,12 +311,11 @@ def zr_reject(audit_id: int):
             return jsonify(error=f"Audit is not IN_REVIEW (status: {audit['review_status']})"), 409
         if audit.get('review_locked_by') != actor:
             return jsonify(error="You do not hold the lock on this audit"), 403
-        if session.get('role') == 'manager' and audit.get('store') != session.get('store'):
-            return jsonify(error="You can only review entries for your store"), 403
+        ok, err = _check_manager_store(audit)
+        if not ok:
+            return jsonify(error=err), 403
 
-        existing = db.table('z_report_reviews').select('version').eq(
-            'audit_id', audit_id).order('version', desc=True).limit(1).execute()
-        next_version = (existing.data[0]['version'] + 1) if existing.data else 1
+        next_version = _zr_next_version(db, audit_id)
 
         db.table('z_report_reviews').update({'is_current': False}).eq(
             'audit_id', audit_id).eq('is_current', True).execute()
@@ -319,7 +327,7 @@ def zr_reject(audit_id: int):
             'calculated_gross': 0,
             'calculated_net': 0,
             'calculated_variance': 0,
-            'opening_float_used': 100,
+            'opening_float_used': Config.DEFAULT_OPENING_FLOAT,
             'reviewed_by': actor,
             'approved_ip': ip,
             'action': 'REJECTED',
@@ -349,7 +357,7 @@ def zr_reject(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_reopen(audit_id: int):
     """Reopen a REJECTED audit back to PENDING_REVIEW so it can be re-reviewed."""
-    db = _get_admin_db()
+    db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
@@ -366,8 +374,9 @@ def zr_reopen(audit_id: int):
 
         if audit['review_status'] != 'REJECTED':
             return jsonify(error=f"Audit is not REJECTED (status: {audit['review_status']})"), 409
-        if session.get('role') == 'manager' and audit.get('store') != session.get('store'):
-            return jsonify(error="You can only reopen entries for your store"), 403
+        ok, err = _check_manager_store(audit)
+        if not ok:
+            return jsonify(error=err), 403
 
         db.table('audits').update({
             'review_status': 'PENDING_REVIEW',
@@ -389,7 +398,7 @@ def zr_reopen(audit_id: int):
 @require_auth(allowed_roles=['admin', 'super_admin'])
 def zr_amend(audit_id: int):
     """Reopen a FINAL_APPROVED audit for amendment (admin only)."""
-    db = _get_admin_db()
+    db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
@@ -426,7 +435,7 @@ def zr_amend(audit_id: int):
             'calculated_gross': 0,
             'calculated_net': 0,
             'calculated_variance': 0,
-            'opening_float_used': 100,
+            'opening_float_used': Config.DEFAULT_OPENING_FLOAT,
             'reviewed_by': actor,
             'approved_ip': ip,
             'action': 'AMENDED',
@@ -456,7 +465,7 @@ def zr_amend(audit_id: int):
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 def zr_history(audit_id: int):
     """Return all review records for an audit, newest first."""
-    db = _get_admin_db()
+    db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable"), 503
     try:
@@ -472,7 +481,7 @@ def zr_history(audit_id: int):
 @require_auth(allowed_roles=['admin', 'super_admin'])
 def zr_audit_log(audit_id: int):
     """Return the audit trail for a Z Report (admin only)."""
-    db = _get_admin_db()
+    db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable"), 503
     try:
@@ -487,13 +496,13 @@ def zr_audit_log(audit_id: int):
 @bp.route('/api/z-reports/unlock-timed-out', methods=['POST'])
 @require_auth(allowed_roles=['admin', 'super_admin'])
 def zr_unlock_timed_out():
-    """Release all locks older than 30 minutes (admin cron / manual trigger)."""
-    db = _get_admin_db()
+    """Release all locks older than the configured timeout (admin cron / manual trigger)."""
+    db = extensions.get_db()
     if db is None:
         return jsonify(error="Z-report review service unavailable"), 503
     actor = session['user']
     ip = request.remote_addr
-    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=Config.ZREPORT_LOCK_TIMEOUT_MINUTES)).isoformat()
     try:
         stale = db.table('audits').select('id,review_locked_by').eq(
             'review_status', 'IN_REVIEW').lt('review_locked_at', cutoff).execute()

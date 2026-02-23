@@ -30,6 +30,11 @@ def get_db():
     """
     return supabase_admin or supabase
 
+
+def has_admin_client() -> bool:
+    """Return True if the service-role admin client is configured."""
+    return supabase_admin is not None
+
 # Emergency admin accounts — set by app factory from Config.
 EMERGENCY_ACCOUNTS: dict = {}
 

@@ -72,7 +72,7 @@ def create_app() -> Flask:
     app.secret_key = Config.SECRET_KEY
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=Config.SESSION_TIMEOUT_MINUTES)
     app.config['WTF_CSRF_HEADERS'] = ['X-CSRFToken']
-    app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5 MB — prevents stalled workers on huge uploads
+    app.config['MAX_CONTENT_LENGTH'] = Config.MAX_UPLOAD_SIZE
     app.config['APP_VERSION'] = VERSION
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
@@ -205,7 +205,8 @@ def create_app() -> Flask:
 
     @app.errorhandler(413)
     def payload_too_large(e):
-        return jsonify(error="Payload too large (maximo 5 MB)"), 413
+        max_mb = Config.MAX_UPLOAD_SIZE // (1024 * 1024)
+        return jsonify(error=f"Payload too large (maximo {max_mb} MB)"), 413
 
     @app.errorhandler(500)
     def internal_error(e):

@@ -68,7 +68,7 @@ def get_zreport_image(audit_id: int):
         if not image_path:
             return jsonify(error="No image for this entry"), 404
 
-        signed = extensions.get_db().storage.from_("z-reports").create_signed_url(image_path, 3600)
+        signed = extensions.get_db().storage.from_(Config.STORAGE_BUCKET).create_signed_url(image_path, Config.STORAGE_URL_EXPIRY_SECONDS)
         return jsonify(url=signed["signedURL"])
 
     except Exception as e:
@@ -159,8 +159,8 @@ def get_photo_signed_url():
             f"bucket=z-reports path={storage_path!r} "
             f"user={session.get('user')!r} using_admin={extensions.supabase_admin is not None}"
         )
-        signed = storage_client.storage.from_("z-reports").create_signed_url(
-            storage_path, 3600
+        signed = storage_client.storage.from_(Config.STORAGE_BUCKET).create_signed_url(
+            storage_path, Config.STORAGE_URL_EXPIRY_SECONDS
         )
         # storage3 v2.x returns a SignedURLResponse object; older versions returned a dict
         url = signed.signed_url if hasattr(signed, 'signed_url') else signed["signedURL"]
@@ -204,7 +204,7 @@ def delete_photo(photo_id):
         storage_path = photo_resp.data.get('storage_path', '')
         if storage_path:
             try:
-                extensions.get_db().storage.from_("z-reports").remove([storage_path])
+                extensions.get_db().storage.from_(Config.STORAGE_BUCKET).remove([storage_path])
                 logger.info(f"[delete_photo] Removed storage file: {storage_path!r}")
             except Exception as e:
                 logger.warning(f"[delete_photo] Storage removal failed (continuing): {e}")

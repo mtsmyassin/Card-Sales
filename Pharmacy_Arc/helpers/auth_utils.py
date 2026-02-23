@@ -49,6 +49,11 @@ def require_auth(allowed_roles=None):
     return decorator
 
 
+def is_admin_role(role: str) -> bool:
+    """Return True if the role has admin-level privileges."""
+    return role in ('admin', 'super_admin')
+
+
 def can_access_photo(photo_store, user_role: str, user_store: str) -> bool:
     """Return True if the user is authorized to access a photo from photo_store."""
     if user_role in ("admin", "super_admin"):

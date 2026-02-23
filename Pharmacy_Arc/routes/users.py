@@ -186,4 +186,4 @@ def delete_user():
             context={"ip": request.remote_addr}
         )
 
-        return jsonify(status="error"), 500
+        return jsonify(error="Internal server error"), 500

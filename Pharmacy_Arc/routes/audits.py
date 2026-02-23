@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, session
 from audit_log import audit_log
 import extensions
+from config import Config
 from helpers.auth_utils import require_auth
 from helpers.validation import validate_audit_entry
 from helpers.offline_queue import save_to_queue, load_queue, clear_queue, get_queue_path
@@ -161,7 +162,7 @@ def save():
         logger.info(f"Audit entry created by {username}: date={d['date']}, store={d.get('store')}")
         # Variance alert — fire-and-forget, never block the response
         variance_val = float(d.get('variance', 0))
-        if abs(variance_val) > 5:
+        if abs(variance_val) > Config.VARIANCE_ALERT_THRESHOLD:
             try:
                 _send_variance_alert(
                     store=d.get('store', 'Main'),

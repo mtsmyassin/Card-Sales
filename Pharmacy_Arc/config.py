@@ -68,6 +68,19 @@ class Config:
     
     # Offline queue file
     OFFLINE_FILE: str = 'offline_queue.json'
+
+    # ── Business / Operational Constants ───────────────────────────────────────
+    VARIANCE_ALERT_THRESHOLD: float = float(os.getenv('VARIANCE_ALERT_THRESHOLD', '5.0'))
+    DEFAULT_OPENING_FLOAT: float = float(os.getenv('DEFAULT_OPENING_FLOAT', '100.0'))
+    ZREPORT_LOCK_TIMEOUT_MINUTES: int = int(os.getenv('ZREPORT_LOCK_TIMEOUT_MINUTES', '30'))
+
+    # ── Storage ───────────────────────────────────────────────────────────────
+    STORAGE_BUCKET: str = os.getenv('STORAGE_BUCKET', 'z-reports')
+    STORAGE_URL_EXPIRY_SECONDS: int = int(os.getenv('STORAGE_URL_EXPIRY_SECONDS', '3600'))
+    MAX_UPLOAD_SIZE: int = int(os.getenv('MAX_UPLOAD_SIZE', str(5 * 1024 * 1024)))
+
+    # ── Crypto ────────────────────────────────────────────────────────────────
+    BCRYPT_ROUNDS: int = int(os.getenv('BCRYPT_ROUNDS', '12'))
     
     @classmethod
     def validate(cls) -> list[str]:
