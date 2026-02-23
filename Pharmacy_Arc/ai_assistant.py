@@ -4,7 +4,7 @@ Provides natural-language querying of sales data and variance analysis.
 """
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import anthropic
 
@@ -44,7 +44,7 @@ def _fetch_store_context(store: str, days: int = 7) -> dict:
         pr_tz = ZoneInfo("America/Puerto_Rico")
         today = datetime.now(pr_tz).date()
     except Exception:
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
 
     since = (today - timedelta(days=days)).isoformat()
 

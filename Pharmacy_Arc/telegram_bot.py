@@ -11,10 +11,16 @@ import threading
 import unicodedata
 import requests as http
 
+from postgrest.exceptions import APIError
 from ocr import extract_z_report, has_null_fields, NULL_FIELD_NAMES, OCRParseError
 from ai_assistant import ask_ai
 import extensions
 from config import Config
+
+
+def _is_unique_violation(exc: Exception) -> bool:
+    """Check if an exception is a PostgREST unique constraint violation (23505)."""
+    return isinstance(exc, APIError) and getattr(exc, 'code', None) == '23505'
 
 logger = logging.getLogger(__name__)
 
@@ -448,8 +454,7 @@ def save_audit_entry(
         )
         return entry_id
     except Exception as e:
-        err_str = str(e)
-        if '23505' in err_str or 'unique' in err_str.lower() or 'duplicate' in err_str.lower():
+        if _is_unique_violation(e):
             logger.warning(
                 f"[BOT] Duplicate rejected by DB constraint — "
                 f"store={store!r} date={record['date']!r} reg={record['reg']!r}"
@@ -1029,7 +1034,10 @@ def register_webhook() -> None:
         logger.info("TELEGRAM_BOT_TOKEN not set — Telegram bot disabled")
         return
 
-    domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "carimas.up.railway.app")
+    domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("WEBHOOK_DOMAIN")
+    if not domain:
+        logger.error("Neither RAILWAY_PUBLIC_DOMAIN nor WEBHOOK_DOMAIN is set — cannot register webhook")
+        return
     webhook_url = f"https://{domain}/api/telegram/webhook"
 
     secret = Config.TELEGRAM_WEBHOOK_SECRET

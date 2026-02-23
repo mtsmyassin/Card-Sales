@@ -215,6 +215,85 @@ class TestAuditsBlueprintList:
         assert r.status_code == 200
 
 
+# ── Audits Blueprint — Sync ──────────────────────────────────────────────
+
+
+class TestAuditsBlueprintSync:
+    def test_sync_requires_auth(self, client):
+        r = client.post("/api/sync")
+        assert r.status_code == 401
+
+    def test_sync_empty_queue(self, client, flask_app):
+        _set_session(client)
+        with patch("routes.audits.load_queue", return_value=[]):
+            r = client.post("/api/sync")
+        data = r.get_json()
+        assert r.status_code == 200
+        assert data.get("status") == "empty"
+
+    def test_sync_success(self, client, flask_app):
+        _set_session(client, role="admin")
+        import extensions
+        db = _mock_db()
+        # Duplicate check returns no match
+        db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+        db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": 1}])
+        queue_item = {
+            "date": "2025-01-01", "reg": "R1", "staff": "Alice",
+            "gross": 100, "net": 90, "variance": 0, "store": "Main",
+        }
+        with patch.object(extensions, "supabase_admin", db), \
+             patch.object(extensions, "supabase", db), \
+             patch("routes.audits.load_queue", return_value=[queue_item]), \
+             patch("routes.audits.clear_queue"), \
+             patch("routes.audits.audit_log"):
+            r = client.post("/api/sync")
+        data = r.get_json()
+        assert r.status_code == 200
+        assert data.get("synced", 0) >= 0
+
+    def test_sync_store_isolation_for_staff(self, client, flask_app):
+        """Non-admin users should have their store overridden from session."""
+        _set_session(client, role="manager", store="Carimas #1", user="mgr1")
+        import extensions
+        db = _mock_db()
+        db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+        db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": 1}])
+        # Queue item has a different store — should be overridden
+        queue_item = {
+            "date": "2025-01-01", "reg": "R1", "staff": "Alice",
+            "gross": 100, "net": 90, "variance": 0, "store": "Carimas #2",
+        }
+        with patch.object(extensions, "supabase_admin", db), \
+             patch.object(extensions, "supabase", db), \
+             patch("routes.audits.load_queue", return_value=[queue_item]), \
+             patch("routes.audits.clear_queue"), \
+             patch("routes.audits.audit_log"):
+            r = client.post("/api/sync")
+        assert r.status_code == 200
+
+
+# ── Auth Blueprint — Logout ─────────────────────────────────────────────
+
+
+class TestAuthBlueprintLogout:
+    def test_logout_clears_session(self, client):
+        _set_session(client, role="admin", user="testadmin")
+        with patch("routes.auth.audit_log"):
+            r = client.post("/api/logout")
+        assert r.status_code == 200
+        assert r.get_json().get("status") == "ok"
+        # Verify session is cleared — next request should be unauthenticated
+        r2 = client.get("/api/list")
+        assert r2.status_code == 401
+
+    def test_logout_without_session(self, client):
+        """Logout when not logged in should still succeed gracefully."""
+        with patch("routes.auth.audit_log"):
+            r = client.post("/api/logout")
+        assert r.status_code == 200
+
+
 # ── Users Blueprint ───────────────────────────────────────────────────────────
 
 

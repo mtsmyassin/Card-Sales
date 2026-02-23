@@ -29,10 +29,13 @@ def get_base_path() -> str:
 
 
 def get_queue_path() -> str:
-    """Return the path to the offline queue JSON file."""
-    onedrive = os.environ.get('OneDrive') or os.environ.get('OneDriveConsumer')
-    target = onedrive if onedrive and os.path.exists(onedrive) else os.path.dirname(os.path.abspath(sys.argv[0]))
-    return os.path.join(target, OFFLINE_FILE)
+    """Return the path to the offline queue JSON file.
+
+    Uses the project root (same directory as app.py) — platform-independent.
+    On Railway (ephemeral FS), save_to_queue() rejects writes before this path
+    is ever used, so the path value is irrelevant in production.
+    """
+    return os.path.join(get_base_path(), OFFLINE_FILE)
 
 
 def get_logo(store_name=None) -> str:
