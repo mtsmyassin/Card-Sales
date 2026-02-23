@@ -299,6 +299,67 @@ def test_date_confirmation_shows_inline_keyboard():
     assert any(m and "inline_keyboard" in m for m in markups)
 
 
+# ── AI conversation memory tests ────────────────────────────────────────────
+
+def test_ai_chat_builds_history():
+    """AI chat accumulates conversation history."""
+    from telegram_bot import handle_update, bot_state, _ai_history
+    bot_state.clear()
+    _ai_history.clear()
+    bot_state[920] = {"state": "AI_CHAT", "store": "Carimas #1", "username": "maria", "retry_count": 0}
+
+    with patch("telegram_bot.send_message"):
+        with patch("telegram_bot.ask_ai", return_value="Respuesta 1"):
+            with patch("telegram_bot.get_bot_user", return_value={"role": "staff"}):
+                handle_update(make_text_update(920, "pregunta 1"))
+
+    assert 920 in _ai_history
+    assert len(_ai_history[920]) == 2  # user + assistant
+
+    with patch("telegram_bot.send_message"):
+        with patch("telegram_bot.ask_ai", return_value="Respuesta 2"):
+            with patch("telegram_bot.get_bot_user", return_value={"role": "staff"}):
+                handle_update(make_text_update(920, "pregunta 2"))
+
+    assert len(_ai_history[920]) == 4  # 2 pairs
+
+
+def test_ai_history_cleared_on_cancel_button():
+    """AI history is cleared when user taps Cancel button."""
+    from telegram_bot import handle_update, bot_state, _ai_history, BTN_CANCEL
+    bot_state.clear()
+    _ai_history.clear()
+    _ai_history[921] = [
+        {"role": "user", "content": "test"},
+        {"role": "assistant", "content": "response"},
+    ]
+    bot_state[921] = {"state": "AI_CHAT", "store": "Carimas #1", "username": "maria", "retry_count": 0}
+
+    with patch("telegram_bot.send_message"):
+        handle_update(make_text_update(921, BTN_CANCEL))
+
+    assert 921 not in _ai_history
+    assert bot_state[921]["state"] == "REGISTERED"
+
+
+def test_ai_history_cleared_on_slash_cancel():
+    """AI history is cleared when user sends /cancel."""
+    from telegram_bot import handle_update, bot_state, _ai_history
+    bot_state.clear()
+    _ai_history.clear()
+    _ai_history[922] = [
+        {"role": "user", "content": "test"},
+        {"role": "assistant", "content": "response"},
+    ]
+    bot_state[922] = {"state": "AI_CHAT", "store": "Carimas #1", "username": "maria", "retry_count": 0}
+
+    with patch("telegram_bot.send_message"):
+        handle_update(make_text_update(922, "/cancel"))
+
+    assert 922 not in _ai_history
+    assert bot_state[922]["state"] == "REGISTERED"
+
+
 # ── /last command tests ──────────────────────────────────────────────────────
 
 def test_slash_last_shows_recent_entry():

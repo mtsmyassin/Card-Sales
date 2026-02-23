@@ -93,8 +93,18 @@ def _fetch_store_context(store: str, days: int = 7) -> dict:
     }
 
 
-def ask_ai(question: str, store: str, role: str, username: str) -> str:
-    """Send a question to Claude with store context and return the response."""
+def ask_ai(question: str, store: str, role: str, username: str,
+           history: list[dict] | None = None) -> str:
+    """Send a question to Claude with store context and return the response.
+
+    Args:
+        question: The user's question text.
+        store: Store name (e.g. "Carimas #1").
+        role: User role (e.g. "staff", "admin").
+        username: The user's username.
+        history: Optional list of previous {"role": ..., "content": ...} messages
+                 for multi-turn conversation. Capped at last 10 messages (5 pairs).
+    """
     context = _fetch_store_context(store)
 
     context_block = (
@@ -113,16 +123,22 @@ def ask_ai(question: str, store: str, role: str, username: str) -> str:
             f"Varianza: ${entry.get('variance', 0):.2f}\n"
         )
 
+    # Build message list: context as first user message, then history, then new question
+    messages = [
+        {"role": "user", "content": context_block + "\n(Contexto de datos — no es una pregunta.)"},
+        {"role": "assistant", "content": "Entendido. Tengo el contexto de datos listo."},
+    ]
+    if history:
+        messages.extend(history[-10:])  # cap at last 10 messages (5 pairs)
+    messages.append({"role": "user", "content": question})
+
     try:
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         message = client.messages.create(
             model=Config.AI_MODEL,
             max_tokens=Config.AI_MAX_TOKENS,
             system=SYSTEM_PROMPT + PHARMACY_CONTEXT,
-            messages=[{
-                "role": "user",
-                "content": f"{context_block}\nPregunta: {question}",
-            }],
+            messages=messages,
         )
         return message.content[0].text.strip()
     except Exception as e:

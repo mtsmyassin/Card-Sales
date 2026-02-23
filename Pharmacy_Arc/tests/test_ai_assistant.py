@@ -284,3 +284,29 @@ def test_photo_in_ai_chat_still_triggers_ocr():
 
     assert bot_state[804]["state"] == "AWAITING_DATE"
     assert any("fecha" in r.lower() for r in replies)
+
+
+# ── ask_ai with history test ─────────────────────────────────────────────────
+
+def test_ask_ai_with_history():
+    """ask_ai sends conversation history as multi-turn messages."""
+    mock_message = MagicMock()
+    mock_message.content = [MagicMock(text="El martes fue $900.")]
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_message
+
+    history = [
+        {"role": "user", "content": "cuanto fue el bruto ayer?"},
+        {"role": "assistant", "content": "El bruto de ayer fue $1,200."},
+    ]
+
+    with patch("ai_assistant.extensions") as mock_ext:
+        mock_ext.get_db.return_value = None
+        with patch("ai_assistant.anthropic.Anthropic", return_value=mock_client):
+            from ai_assistant import ask_ai
+            ask_ai("y el martes?", "Carimas #1", "staff", "maria", history=history)
+
+    call_kwargs = mock_client.messages.create.call_args.kwargs
+    messages = call_kwargs["messages"]
+    # Should have: context msg + ack + 2 history + new question = 5 messages
+    assert len(messages) >= 5
