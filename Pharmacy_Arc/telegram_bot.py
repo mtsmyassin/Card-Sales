@@ -1267,7 +1267,21 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
     """Handle /help, /status, /cancel commands."""
     cmd = text.split()[0].lower().split("@")[0]  # strip bot name suffix if present
 
-    if cmd == "/help":
+    if cmd in ("/start", "/help"):
+        # Reset state: if user is registered, restore REGISTERED state
+        if is_registered(telegram_id):
+            user_row = get_bot_user(telegram_id)
+            new_state = {
+                "state": "REGISTERED",
+                "store": user_row["store"],
+                "username": user_row["username"],
+                "retry_count": 0,
+            }
+            _set_state(telegram_id, new_state)
+            if cmd == "/start":
+                send_message(chat_id, msg(telegram_id, "welcome_back", store=user_row["store"]),
+                             reply_markup=_kb_registered(telegram_id))
+                return
         send_message(chat_id, msg(telegram_id, "help"))
 
     elif cmd == "/status":
@@ -1288,7 +1302,20 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
     elif cmd == "/cancel":
         current = state.get("state")
         if not current or current in ("AWAITING_USERNAME", "AWAITING_PASSWORD"):
-            send_message(chat_id, msg(telegram_id, "cancel_nothing"))
+            # Check if already registered — restore REGISTERED state
+            if is_registered(telegram_id):
+                user_row = get_bot_user(telegram_id)
+                new_state = {
+                    "state": "REGISTERED",
+                    "store": user_row["store"],
+                    "username": user_row["username"],
+                    "retry_count": 0,
+                }
+                _set_state(telegram_id, new_state)
+                send_message(chat_id, msg(telegram_id, "welcome_back", store=user_row["store"]),
+                             reply_markup=_kb_registered(telegram_id))
+            else:
+                send_message(chat_id, msg(telegram_id, "cancel_nothing"))
         elif current == "AI_CHAT":
             _ai_history.pop(telegram_id, None)
             new_state = {
