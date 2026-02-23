@@ -7,7 +7,7 @@ it down in every worker to prevent N duplicate reminder sends per tick.
 """
 import logging
 
-workers = 2
+workers = 1
 worker_class = "sync"
 timeout = 120
 preload_app = True
