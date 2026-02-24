@@ -72,7 +72,7 @@ def _fetch_store_context(store: str, days: int = 7) -> dict:
     try:
         result = db.table("audits").select(
             "date, reg, gross, variance, store"
-        ).eq("store", store).gte("date", since).order(
+        ).eq("store", store).is_("deleted_at", "null").gte("date", since).order(
             "date", desc=True
         ).execute()
         from helpers.supabase_types import rows as _rows

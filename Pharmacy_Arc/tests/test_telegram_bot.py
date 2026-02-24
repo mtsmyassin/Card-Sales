@@ -375,7 +375,7 @@ def test_slash_last_shows_recent_entry():
     mock_result = MagicMock()
     mock_result.data = [mock_row]
     mock_db = MagicMock()
-    mock_db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_result
+    mock_db.table.return_value.select.return_value.eq.return_value.is_.return_value.order.return_value.limit.return_value.execute.return_value = mock_result
 
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
         with patch("telegram_bot.extensions") as mock_ext:

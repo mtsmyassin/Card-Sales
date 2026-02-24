@@ -53,7 +53,7 @@ def telegram_webhook():
 def get_zreport_image(audit_id: int):
     """Return a short-lived signed URL for the Z report image of an audit entry (legacy)."""
     try:
-        result_rows = rows(extensions.get_db().table("audits").select("payload,store").eq("id", audit_id).execute())
+        result_rows = rows(extensions.get_db().table("audits").select("payload,store").eq("id", audit_id).is_("deleted_at", "null").execute())
         if not result_rows:
             return jsonify(error="Not found", code="NOT_FOUND"), 404
 
@@ -94,7 +94,7 @@ def get_entry_photos():
         using_admin = extensions.has_admin_client()
         logger.info(f"[get_entry_photos] entry_id={entry_id} using_admin={using_admin}")
 
-        entry_rows = rows(_db.table("audits").select("store").eq("id", entry_id).execute())
+        entry_rows = rows(_db.table("audits").select("store").eq("id", entry_id).is_("deleted_at", "null").execute())
         if not entry_rows:
             logger.warning(f"[get_entry_photos] entry_id={entry_id} not found in audits")
             return jsonify(error="Not found", code="NOT_FOUND"), 404

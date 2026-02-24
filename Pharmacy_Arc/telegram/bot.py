@@ -868,7 +868,7 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
                 return
             result_rows = rows(db.table("audits").select(
                 "date, reg, gross, variance, staff"
-            ).eq("store", store).order("date", desc=True).limit(1).execute())
+            ).eq("store", store).is_("deleted_at", "null").order("date", desc=True).limit(1).execute())
             if not result_rows:
                 send_message(chat_id, f"No hay reportes recientes para {store}.")
                 return

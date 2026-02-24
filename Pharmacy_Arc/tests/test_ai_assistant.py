@@ -50,7 +50,7 @@ def test_fetch_store_context_with_data():
     mock_result = MagicMock()
     mock_result.data = mock_rows
     mock_db = MagicMock()
-    mock_db.table.return_value.select.return_value.eq.return_value.gte.return_value.order.return_value.execute.return_value = mock_result
+    mock_db.table.return_value.select.return_value.eq.return_value.is_.return_value.gte.return_value.order.return_value.execute.return_value = mock_result
 
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = mock_db
@@ -187,7 +187,7 @@ def test_analyze_variance_trend_detects_pattern():
     mock_result = MagicMock()
     mock_result.data = mock_rows
     mock_db = MagicMock()
-    mock_db.table.return_value.select.return_value.eq.return_value.gte.return_value.order.return_value.execute.return_value = mock_result
+    mock_db.table.return_value.select.return_value.eq.return_value.is_.return_value.gte.return_value.order.return_value.execute.return_value = mock_result
 
     mock_message = MagicMock()
     mock_message.content = [MagicMock(text="Alerta: Caja 1 muestra varianza alta por 2 días consecutivos.")]

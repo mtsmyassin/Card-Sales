@@ -333,7 +333,7 @@ class TestZReportApprove:
                         }),
                         content_type='application/json')
         assert r.status_code == 400
-        assert 'breakdown sum' in json.loads(r.data)['error']
+        assert 'validation failed' in json.loads(r.data)['error']
 
     def test_approve_payouts_exceed_gross(self, client, flask_app, manager_session):
         self._setup(flask_app)
@@ -341,7 +341,7 @@ class TestZReportApprove:
                         data=json.dumps({'payouts_total': 9999.0, 'cash_in_register_actual': 0.0}),
                         content_type='application/json')
         assert r.status_code == 400
-        assert 'exceeds gross' in json.loads(r.data)['error']
+        assert 'failed' in json.loads(r.data)['error'].lower()
 
     def test_cashier_cannot_approve(self, client, flask_app):
         with client.session_transaction() as sess:

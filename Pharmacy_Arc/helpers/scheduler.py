@@ -22,7 +22,7 @@ def _send_eod_reminders() -> None:
             logger.warning("_send_eod_reminders: DB unavailable at reminder time (%s) — skipping", today)
             return
         from helpers.supabase_types import rows
-        subs = _db.table("audits").select("store").eq("date", today).execute()
+        subs = _db.table("audits").select("store").eq("date", today).is_("deleted_at", "null").execute()
         submitted_stores = {s["store"] for s in rows(subs)}
         bot_users = rows(_db.table("bot_users").select("telegram_id, store").execute())
         if not bot_users:
