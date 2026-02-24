@@ -263,8 +263,12 @@ def zr_unlock(audit_id: int):
     ip = request.remote_addr
     try:
         audit = row0(db.table('audits').select(
-            'id,review_status,review_locked_by'
+            'id,store,review_status,review_locked_by'
         ).eq('id', audit_id).is_('deleted_at', 'null').single().execute())
+
+        ok, err = _check_manager_store(audit)
+        if not ok:
+            return jsonify(error=err, code="STORE_MISMATCH"), 403
 
         if audit['review_status'] != 'IN_REVIEW':
             return jsonify(error="Audit is not IN_REVIEW", code="CONFLICT"), 409
@@ -624,7 +628,7 @@ def zr_history(audit_id: int):
             return jsonify(error=err, code="STORE_MISMATCH"), 403
 
         result = db.table('z_report_reviews').select('*').eq(
-            'audit_id', audit_id).order('version', desc=True).execute()
+            'audit_id', audit_id).order('version', desc=True).limit(100).execute()
         return jsonify(rows(result))
     except Exception as e:
         logger.error(f"[zr_history] audit_id={audit_id}: {e}", exc_info=True)

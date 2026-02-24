@@ -196,11 +196,11 @@ def create_app() -> Flask:
     # ── Lazy Supabase reconnect (S3) ─────────────────────────────────────────
     @app.before_request
     def _lazy_reconnect_supabase():
-        """Attempt to reconnect Supabase if the anon client is None (throttled to 60s)."""
+        """Attempt to reconnect Supabase if the anon client is None (throttled to 10s)."""
         if extensions.supabase is not None:
             return
         last = getattr(app, '_last_supabase_reconnect', 0)
-        if time.time() - last < 60:
+        if time.time() - last < 10:
             return
         app._last_supabase_reconnect = time.time()
         extensions.supabase = _init_supabase(Config.SUPABASE_URL, Config.SUPABASE_KEY, "anon", max_attempts=1)
@@ -209,14 +209,14 @@ def create_app() -> Flask:
 
     @app.before_request
     def _lazy_reconnect_admin():
-        """Reconnect admin Supabase client if None (throttled to 60s)."""
+        """Reconnect admin Supabase client if None (throttled to 10s)."""
         if extensions.supabase_admin is not None:
             return
         _svc_key = Config.SUPABASE_SERVICE_KEY
         if not _svc_key:
             return
         last = getattr(app, '_last_admin_reconnect', 0)
-        if time.time() - last < 60:
+        if time.time() - last < 10:
             return
         app._last_admin_reconnect = time.time()
         extensions.supabase_admin = _init_supabase(

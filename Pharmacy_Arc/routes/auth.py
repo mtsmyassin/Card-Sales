@@ -303,6 +303,7 @@ def change_password():
 
 
 @bp.route('/api/logout', methods=['POST'])
+@extensions.limiter.limit(Config.RATELIMIT_LOGIN)
 def logout():
     """Log out user and record in audit log."""
     username = session.get('user', 'unknown')

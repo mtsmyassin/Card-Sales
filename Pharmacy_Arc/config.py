@@ -86,7 +86,7 @@ class Config:
     RATELIMIT_LOGIN: str = '5 per minute'
     RATELIMIT_WRITE: str = '30 per minute'
     RATELIMIT_READ: str = '60 per minute'
-    RATELIMIT_STORAGE_URI: str = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
+    RATELIMIT_STORAGE_URI: str = os.getenv('RATELIMIT_STORAGE_URI', os.getenv('REDIS_URL', 'memory://'))
 
     # ── Resilience / Retry ────────────────────────────────────────────────────
     MATH_TOLERANCE: float = 0.02          # 2-cent floating-point tolerance
@@ -136,7 +136,15 @@ class Config:
         
         if cls.LOCKOUT_DURATION_MINUTES < 1:
             errors.append("LOCKOUT_DURATION_MINUTES must be at least 1")
-        
+
+        # Production warnings (non-blocking)
+        if cls.REQUIRE_HTTPS and cls.RATELIMIT_STORAGE_URI == 'memory://':
+            print("  [WARN] RATELIMIT_STORAGE_URI=memory:// — rate limits are per-worker. "
+                  "Set REDIS_URL for shared rate limiting across gunicorn workers.", file=sys.stderr)
+
+        if cls.REQUIRE_HTTPS and not cls.TELEGRAM_WEBHOOK_SECRET:
+            print("  [WARN] TELEGRAM_WEBHOOK_SECRET is empty — Telegram webhook will reject all requests.", file=sys.stderr)
+
         return errors
     
     @classmethod
