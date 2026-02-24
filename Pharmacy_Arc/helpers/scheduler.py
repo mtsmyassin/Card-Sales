@@ -21,15 +21,16 @@ def _send_eod_reminders() -> None:
         if _db is None:
             logger.warning("_send_eod_reminders: DB unavailable at reminder time (%s) — skipping", today)
             return
+        from helpers.supabase_types import rows
         subs = _db.table("audits").select("store").eq("date", today).execute()
-        submitted_stores = {s["store"] for s in (subs.data or [])}
-        bot_users_resp = _db.table("bot_users").select("telegram_id, store").execute()
-        if not bot_users_resp.data:
+        submitted_stores = {s["store"] for s in rows(subs)}
+        bot_users = rows(_db.table("bot_users").select("telegram_id, store").execute())
+        if not bot_users:
             return
         from telegram_bot import send_message
         notified = set()
         failed = []
-        for bu in bot_users_resp.data:
+        for bu in bot_users:
             store = bu.get("store", "")
             tid = bu["telegram_id"]
             if store in ("All", "") or tid in notified:
@@ -65,13 +66,14 @@ def _daily_ai_insights() -> None:
             logger.warning("_daily_ai_insights: DB unavailable — skipping")
             return
 
-        bot_users_resp = _db.table("bot_users").select("telegram_id, store").execute()
-        if not bot_users_resp.data:
+        from helpers.supabase_types import rows as _rows
+        bot_users = _rows(_db.table("bot_users").select("telegram_id, store").execute())
+        if not bot_users:
             return
 
         # Build map: store → list of admin telegram IDs to notify
         store_admins: dict[str, list[int]] = {}
-        for bu in bot_users_resp.data:
+        for bu in bot_users:
             store = bu.get("store", "")
             tid = bu["telegram_id"]
             if store in ("", ):
@@ -79,7 +81,7 @@ def _daily_ai_insights() -> None:
             store_admins.setdefault(store, []).append(tid)
 
         # "All" store users get insights for every store
-        all_store_users = [bu["telegram_id"] for bu in bot_users_resp.data
+        all_store_users = [bu["telegram_id"] for bu in bot_users
                           if bu.get("store") == "All"]
 
         notified = 0

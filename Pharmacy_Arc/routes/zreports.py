@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify, session
 import extensions
 from helpers.auth_utils import require_auth, is_admin_role
+from helpers.supabase_types import rows, row0
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -95,9 +96,10 @@ def _zr_compensate(db, audit_id: int, old_status: str,
                 # Re-activate the most recent review that was deactivated
                 latest = db.table('z_report_reviews').select('id').eq(
                     'audit_id', audit_id).order('version', desc=True).limit(1).execute()
-                if latest.data:
+                latest_rows = rows(latest)
+                if latest_rows:
                     db.table('z_report_reviews').update({'is_current': True}).eq(
-                        'id', latest.data[0]['id']).execute()
+                        'id', latest_rows[0]['id']).execute()
             logger.info("[zr_compensate] Rolled back step %s for audit_id=%d", step_name, audit_id)
         except Exception as rollback_err:
             logger.critical(
@@ -108,9 +110,9 @@ def _zr_compensate(db, audit_id: int, old_status: str,
 
 def _zr_next_version(db, audit_id: int) -> int:
     """Return the next review version number for an audit."""
-    existing = db.table('z_report_reviews').select('version').eq(
-        'audit_id', audit_id).order('version', desc=True).limit(1).execute()
-    return (existing.data[0]['version'] + 1) if existing.data else 1
+    existing = rows(db.table('z_report_reviews').select('version').eq(
+        'audit_id', audit_id).order('version', desc=True).limit(1).execute())
+    return (existing[0]['version'] + 1) if existing else 1
 
 
 @bp.route('/api/z-reports')
@@ -132,7 +134,7 @@ def zr_list():
         if session.get('role') == 'manager':
             q = q.eq('store', session.get('store'))
         result = q.execute()
-        return jsonify(result.data)
+        return jsonify(rows(result))
     except Exception as e:
         logger.error(f"[zr_list] {e}", exc_info=True)
         return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
@@ -147,13 +149,13 @@ def zr_detail(audit_id: int):
     if db is None:
         return jsonify(error="Z-report review service unavailable", code="SERVICE_UNAVAILABLE"), 503
     try:
-        audit = db.table('audits').select('*').eq('id', audit_id).single().execute()
-        ok, err = _check_manager_store(audit.data)
+        audit = row0(db.table('audits').select('*').eq('id', audit_id).single().execute())
+        ok, err = _check_manager_store(audit)
         if not ok:
             return jsonify(error=err, code="STORE_MISMATCH"), 403
-        review = db.table('z_report_reviews').select('*').eq(
-            'audit_id', audit_id).eq('is_current', True).maybe_single().execute()
-        return jsonify({'audit': audit.data, 'review': review.data if review else None})
+        review = row0(db.table('z_report_reviews').select('*').eq(
+            'audit_id', audit_id).eq('is_current', True).maybe_single().execute())
+        return jsonify({'audit': audit, 'review': review or None})
     except Exception as e:
         logger.error(f"[zr_detail] audit_id={audit_id}: {e}", exc_info=True)
         return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
@@ -170,9 +172,9 @@ def zr_lock(audit_id: int):
     actor = session['user']
     ip = request.remote_addr
     try:
-        audit = db.table('audits').select(
+        audit = row0(db.table('audits').select(
             'id,store,review_status,review_locked_by,review_locked_at'
-        ).eq('id', audit_id).single().execute().data
+        ).eq('id', audit_id).single().execute())
 
         ok, err = _check_manager_store(audit)
         if not ok:
@@ -229,9 +231,9 @@ def zr_unlock(audit_id: int):
     role = session.get('role')
     ip = request.remote_addr
     try:
-        audit = db.table('audits').select(
+        audit = row0(db.table('audits').select(
             'id,review_status,review_locked_by'
-        ).eq('id', audit_id).single().execute().data
+        ).eq('id', audit_id).single().execute())
 
         if audit['review_status'] != 'IN_REVIEW':
             return jsonify(error="Audit is not IN_REVIEW", code="CONFLICT"), 409
@@ -278,7 +280,7 @@ def zr_approve(audit_id: int):
         return jsonify(error=str(e), code="INVALID_INPUT"), 400
 
     try:
-        audit = db.table('audits').select('*').eq('id', audit_id).single().execute().data
+        audit = row0(db.table('audits').select('*').eq('id', audit_id).single().execute())
 
         if audit['review_status'] != 'IN_REVIEW':
             return jsonify(error=f"Audit is not IN_REVIEW (status: {audit['review_status']})", code="CONFLICT"), 409
@@ -307,7 +309,7 @@ def zr_approve(audit_id: int):
             next_version = _zr_next_version(db, audit_id)
 
             # Step 2: Insert new review
-            new_review = db.table('z_report_reviews').insert({
+            new_review_rows = rows(db.table('z_report_reviews').insert({
                 'audit_id': audit_id,
                 'payouts_total': payouts_total,
                 'cash_in_register_actual': cash_actual,
@@ -322,8 +324,8 @@ def zr_approve(audit_id: int):
                 'action': 'APPROVED',
                 'version': next_version,
                 'is_current': True,
-            }).execute()
-            new_review_id = new_review.data[0]['id'] if new_review.data else None
+            }).execute())
+            new_review_id = new_review_rows[0]['id'] if new_review_rows else None
             completed_steps.append(('insert_review', new_review_id))
 
             # Step 3: Update audit status
@@ -366,9 +368,9 @@ def zr_reject(audit_id: int):
         return jsonify(error="rejection_reason is required", code="MISSING_PARAM"), 400
 
     try:
-        audit = db.table('audits').select(
+        audit = row0(db.table('audits').select(
             'id,store,review_status,review_locked_by,review_locked_at'
-        ).eq('id', audit_id).single().execute().data
+        ).eq('id', audit_id).single().execute())
 
         if audit['review_status'] != 'IN_REVIEW':
             return jsonify(error=f"Audit is not IN_REVIEW (status: {audit['review_status']})", code="CONFLICT"), 409
@@ -390,7 +392,7 @@ def zr_reject(audit_id: int):
             completed_steps.append(('deactivate_old_review', audit_id))
 
             # Step 2: Insert new review
-            new_review = db.table('z_report_reviews').insert({
+            new_review_rows = rows(db.table('z_report_reviews').insert({
                 'audit_id': audit_id,
                 'payouts_total': 0,
                 'cash_in_register_actual': 0,
@@ -404,8 +406,8 @@ def zr_reject(audit_id: int):
                 'rejection_reason': reason,
                 'version': next_version,
                 'is_current': True,
-            }).execute()
-            new_review_id = new_review.data[0]['id'] if new_review.data else None
+            }).execute())
+            new_review_id = new_review_rows[0]['id'] if new_review_rows else None
             completed_steps.append(('insert_review', new_review_id))
 
             # Step 3: Update audit status
@@ -448,9 +450,9 @@ def zr_reopen(audit_id: int):
         return jsonify(error="reason is required", code="MISSING_PARAM"), 400
 
     try:
-        audit = db.table('audits').select(
+        audit = row0(db.table('audits').select(
             'id,store,review_status'
-        ).eq('id', audit_id).single().execute().data
+        ).eq('id', audit_id).single().execute())
 
         if audit['review_status'] != 'REJECTED':
             return jsonify(error=f"Audit is not REJECTED (status: {audit['review_status']})", code="CONFLICT"), 409
@@ -490,9 +492,9 @@ def zr_amend(audit_id: int):
         return jsonify(error="amendment_reason is required", code="MISSING_PARAM"), 400
 
     try:
-        audit = db.table('audits').select(
+        audit = row0(db.table('audits').select(
             'id,review_status,review_locked_by,review_locked_at'
-        ).eq('id', audit_id).single().execute().data
+        ).eq('id', audit_id).single().execute())
 
         if audit['review_status'] != 'FINAL_APPROVED':
             return jsonify(
@@ -501,9 +503,8 @@ def zr_amend(audit_id: int):
             ), 409
 
         # Get current review row to link amendment chain
-        current = db.table('z_report_reviews').select('id,version').eq(
-            'audit_id', audit_id).eq('is_current', True).maybe_single().execute()
-        current_data = current.data if current else None
+        current_data = row0(db.table('z_report_reviews').select('id,version').eq(
+            'audit_id', audit_id).eq('is_current', True).maybe_single().execute()) or None
         amendment_of_id = current_data['id'] if current_data else None
         next_version = (current_data['version'] + 1) if current_data else 1
 
@@ -517,7 +518,7 @@ def zr_amend(audit_id: int):
             completed_steps.append(('deactivate_old_review', audit_id))
 
             # Step 2: Insert new review
-            new_review = db.table('z_report_reviews').insert({
+            new_review_rows = rows(db.table('z_report_reviews').insert({
                 'audit_id': audit_id,
                 'payouts_total': 0,
                 'cash_in_register_actual': 0,
@@ -532,8 +533,8 @@ def zr_amend(audit_id: int):
                 'amendment_of_id': amendment_of_id,
                 'version': next_version,
                 'is_current': True,
-            }).execute()
-            new_review_id = new_review.data[0]['id'] if new_review.data else None
+            }).execute())
+            new_review_id = new_review_rows[0]['id'] if new_review_rows else None
             completed_steps.append(('insert_review', new_review_id))
 
             # Step 3: Update audit status
@@ -570,16 +571,16 @@ def zr_history(audit_id: int):
         return jsonify(error="Z-report review service unavailable", code="SERVICE_UNAVAILABLE"), 503
     try:
         # Store-scoping: managers can only view history for their own store's audits
-        audit = db.table('audits').select('id,store').eq('id', audit_id).maybe_single().execute()
-        if not audit.data:
+        audit_data = row0(db.table('audits').select('id,store').eq('id', audit_id).maybe_single().execute())
+        if not audit_data:
             return jsonify(error="Audit not found", code="NOT_FOUND"), 404
-        ok, err = _check_manager_store(audit.data)
+        ok, err = _check_manager_store(audit_data)
         if not ok:
             return jsonify(error=err, code="STORE_MISMATCH"), 403
 
         result = db.table('z_report_reviews').select('*').eq(
             'audit_id', audit_id).order('version', desc=True).execute()
-        return jsonify(result.data)
+        return jsonify(rows(result))
     except Exception as e:
         logger.error(f"[zr_history] audit_id={audit_id}: {e}", exc_info=True)
         return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
@@ -596,7 +597,7 @@ def zr_audit_log(audit_id: int):
     try:
         result = db.table('z_report_audit_log').select('*').eq(
             'audit_id', audit_id).order('ts', desc=True).execute()
-        return jsonify(result.data)
+        return jsonify(rows(result))
     except Exception as e:
         logger.error(f"[zr_audit_log] audit_id={audit_id}: {e}", exc_info=True)
         return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
@@ -614,10 +615,10 @@ def zr_unlock_timed_out():
     ip = request.remote_addr
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=Config.ZREPORT_LOCK_TIMEOUT_MINUTES)).isoformat()
     try:
-        stale = db.table('audits').select('id,review_locked_by').eq(
-            'review_status', 'IN_REVIEW').lt('review_locked_at', cutoff).execute()
+        stale_rows = rows(db.table('audits').select('id,review_locked_by').eq(
+            'review_status', 'IN_REVIEW').lt('review_locked_at', cutoff).execute())
         count = 0
-        for row in stale.data:
+        for row in stale_rows:
             db.table('audits').update({
                 'review_status': 'PENDING_REVIEW',
                 'review_locked_by': None,

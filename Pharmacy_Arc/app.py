@@ -73,7 +73,7 @@ class _RequestIdFilter(logging.Filter):
 _rid_filter = _RequestIdFilter()
 
 if _HAS_JSON_LOGGER:
-    _json_fmt = jsonlogger.JsonFormatter(
+    _json_fmt = jsonlogger.JsonFormatter(  # type: ignore[possibly-undefined]
         '%(asctime)s %(name)s %(levelname)s %(request_id)s %(message)s',
         rename_fields={"asctime": "timestamp", "levelname": "level"},
     )

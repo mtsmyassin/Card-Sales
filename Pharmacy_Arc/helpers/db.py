@@ -24,7 +24,7 @@ def db_retry(operation, label="db_call", max_attempts=None, backoff_factor=2):
     """
     if max_attempts is None:
         max_attempts = Config.DB_RETRY_MAX_ATTEMPTS
-    last_err = None
+    last_err: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
             return operation()
@@ -39,7 +39,9 @@ def db_retry(operation, label="db_call", max_attempts=None, backoff_factor=2):
                 time.sleep(wait)
             else:
                 logger.error("%s failed after %d attempts: %s", label, max_attempts, e)
-    raise last_err
+    if last_err is not None:
+        raise last_err
+    raise RuntimeError(f"{label}: no attempts made")
 
 
 def is_unique_violation(exc: Exception) -> bool:

@@ -60,8 +60,9 @@ def test_password_hashing(results):
     hasher = PasswordHasher()
     
     # Test 1: Hash generation
+    password = "TestPassword123!"
+    hash1 = ""
     try:
-        password = "TestPassword123!"
         hash1 = hasher.hash_password(password)
         
         if not hash1.startswith('$2b$'):
@@ -217,6 +218,7 @@ def test_audit_logging(results):
         results.add_fail("Create audit log entry", str(e))
     
     # Test 2: Read entries
+    entries: list = []
     try:
         entries = logger.get_entries(limit=10)
         if len(entries) > 0:

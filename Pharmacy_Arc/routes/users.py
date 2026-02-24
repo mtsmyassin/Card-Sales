@@ -6,6 +6,7 @@ import extensions
 from config import Config
 from helpers.auth_utils import require_auth
 from helpers.validation import validate_user_data
+from helpers.supabase_types import rows
 from helpers.db import db_retry
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ def list_users():
     try:
         result = extensions.get_db().table("users").select("username, role, store").execute()
         logger.info(f"User list accessed by {session.get('user')}")
-        return jsonify(result.data)
+        return jsonify(rows(result))
     except Exception as e:
         logger.error(f"Error listing users: {e}")
         return jsonify(error="Failed to list users", code="LIST_ERROR"), 500
@@ -45,9 +46,9 @@ def save_user():
             return jsonify(error="Username is required", code="MISSING_PARAM"), 400
 
         try:
-            existing = extensions.get_db().table("users").select("*").eq("username", user_to_save).execute()
-            is_update = len(existing.data) > 0
-            before_state = existing.data[0] if is_update else None
+            existing_rows = rows(extensions.get_db().table("users").select("*").eq("username", user_to_save).execute())
+            is_update = len(existing_rows) > 0
+            before_state = existing_rows[0] if is_update else None
         except Exception as fetch_err:
             logger.warning(f"[save_user] Failed to check existing user {user_to_save!r}: {fetch_err}")
             is_update = False
@@ -113,7 +114,7 @@ def save_user():
             actor=username,
             role=role,
             entity_type="USER",
-            entity_id=u.get('username') if 'u' in locals() else None,
+            entity_id=u.get('username') if 'u' in locals() and u else None,  # type: ignore[possibly-undefined]
             success=False,
             error=str(e),
             context={"ip": request.remote_addr}
@@ -148,8 +149,8 @@ def delete_user():
 
         # Get user details before deletion
         try:
-            existing = extensions.get_db().table("users").select("*").eq("username", user_to_delete).execute()
-            before_state = existing.data[0] if existing.data else None
+            existing_rows = rows(extensions.get_db().table("users").select("*").eq("username", user_to_delete).execute())
+            before_state = existing_rows[0] if existing_rows else None
             if not before_state:
                 return jsonify(error="User not found", code="NOT_FOUND"), 404
         except Exception as fetch_err:

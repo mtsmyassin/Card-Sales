@@ -110,13 +110,14 @@ def diagnostics():
             storage_info["z_reports_bucket"] = "error: bucket check failed"
 
         try:
-            count_resp = _db.table("z_report_photos").select("id", count="exact").execute()
+            count_resp = _db.table("z_report_photos").select(
+                "id", count="exact"  # type: ignore[arg-type]
+            ).execute()
             storage_info["photos_total"] = count_resp.count or 0
 
-            no_path_resp = _db.table("z_report_photos") \
-                .select("id", count="exact") \
-                .eq("storage_path", "") \
-                .execute()
+            no_path_resp = _db.table("z_report_photos").select(
+                "id", count="exact"  # type: ignore[arg-type]
+            ).eq("storage_path", "").execute()
             storage_info["photos_missing_path"] = no_path_resp.count or 0
         except Exception as diag_err:
             logger.warning(f"diagnostics storage query failed: {diag_err}")

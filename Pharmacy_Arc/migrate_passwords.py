@@ -50,8 +50,9 @@ def migrate_passwords(dry_run=True):
     # Get all users
     print("\n[2/4] Fetching users...")
     try:
+        from helpers.supabase_types import rows
         response = supabase.table("users").select("*").execute()
-        users = response.data
+        users = rows(response)
         print(f"✅ Found {len(users)} user(s)")
     except Exception as e:
         print(f"❌ Failed to fetch users: {e}")

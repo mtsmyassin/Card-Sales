@@ -4,6 +4,7 @@ import logging
 
 import extensions
 from config import Config
+from helpers.supabase_types import rows
 from helpers.db import is_unique_violation
 from audit_log import audit_log
 from helpers.validation import validate_audit_entry
@@ -63,7 +64,7 @@ def save_audit_entry(
     username: str,
     payouts: float = 0.0,
     actual_cash: float = 0.0,
-    variance: float = None,
+    variance: float | None = None,
 ) -> int | None:
     """Save the extracted Z report data to the audits table."""
     client = extensions.get_db()
@@ -130,8 +131,8 @@ def save_audit_entry(
         raise ValueError(f"Datos invalidos: {error_msg}")
 
     try:
-        result = client.table("audits").insert(record).execute()
-        entry_id = result.data[0]["id"]
+        result_rows = rows(client.table("audits").insert(record).execute())
+        entry_id = result_rows[0]["id"]
         logger.info(
             f"[BOT] audit saved: entry_id={entry_id} store={store!r} "
             f"date={record['date']!r} staff={username!r}"
@@ -195,7 +196,7 @@ def save_photo_record(
         logger.warning("save_photo_record: no supabase client available")
         return
     try:
-        result = client.table("z_report_photos").insert({
+        result_rows = rows(client.table("z_report_photos").insert({
             "entry_id": entry_id,
             "store": store,
             "business_date": business_date,
@@ -203,8 +204,8 @@ def save_photo_record(
             "uploaded_by": uploaded_by,
             "storage_path": storage_path,
             "content_type": content_type,
-        }).execute()
-        photo_id = result.data[0]["id"] if result.data else None
+        }).execute())
+        photo_id = result_rows[0]["id"] if result_rows else None
         logger.info(
             f"[BOT] photo record saved: photo_id={photo_id} entry_id={entry_id} "
             f"store={store!r} path={storage_path!r}"

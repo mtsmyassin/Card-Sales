@@ -7,7 +7,7 @@ import json
 import os
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Dict
+from typing import Any, Optional, Dict
 from threading import Lock
 from config import Config
 
@@ -106,12 +106,30 @@ class LoginAttemptTracker:
         else:
             self._save_to_file()
 
+    @staticmethod
+    def _rows(response: Any) -> list[dict[str, Any]]:
+        """Extract row list from Supabase response."""
+        data = getattr(response, "data", None)
+        if isinstance(data, list):
+            return data  # type: ignore[return-value]
+        return []
+
+    @staticmethod
+    def _row0(response: Any) -> dict[str, Any]:
+        """Extract first row from Supabase response."""
+        data = getattr(response, "data", None)
+        if isinstance(data, dict):
+            return data  # type: ignore[return-value]
+        if isinstance(data, list) and data:
+            return data[0]  # type: ignore[return-value]
+        return {}
+
     def _load_from_db(self) -> None:
         """Load lockout state from Supabase login_lockouts table."""
         try:
             resp = self._supabase.table('login_lockouts').select('*').execute()
             now = datetime.now()
-            for row in resp.data:
+            for row in self._rows(resp):
                 username = row['username']
                 if row.get('attempts'):
                     self._attempts[username] = [
@@ -192,9 +210,9 @@ class LoginAttemptTracker:
         try:
             resp = self._supabase.table('login_lockouts').select('*').eq(
                 'username', username).maybe_single().execute()
-            if not resp.data:
+            row = self._row0(resp)
+            if not row:
                 return [], None
-            row = resp.data
             attempts = []
             if row.get('attempts'):
                 attempts = [datetime.fromisoformat(ts) for ts in row['attempts']]

@@ -11,6 +11,7 @@ from ocr import extract_z_report, has_null_fields, null_field_names, OCRParseErr
 from ai_assistant import ask_ai
 import extensions
 from config import Config
+from helpers.supabase_types import rows
 
 from telegram.client import (
     TelegramAPIError, _tg, _token,
@@ -244,8 +245,9 @@ def _handle_broadcast_confirm(telegram_id, chat_id, text, state):
         sent, total = 0, 0
         try:
             db = extensions.get_db()
-            users_resp = db.table("bot_users").select("telegram_id").execute()
-            targets = users_resp.data or []
+            if db is None:
+                raise RuntimeError("DB unavailable")
+            targets = rows(db.table("bot_users").select("telegram_id").execute())
             total = len(targets)
             for u in targets:
                 tid = u["telegram_id"]
@@ -666,6 +668,8 @@ def handle_update(update: dict) -> None:
                 return
             else:
                 user_row = get_bot_user(telegram_id)
+                if user_row is None:
+                    return
                 new_state = {
                     "state": "REGISTERED",
                     "store": user_row["store"],
@@ -754,6 +758,8 @@ def handle_update(update: dict) -> None:
     # default
     if is_registered(telegram_id):
         user_row = get_bot_user(telegram_id)
+        if user_row is None:
+            return
         new_state = {
             "state": "REGISTERED",
             "store": user_row["store"],
@@ -778,17 +784,18 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
     if cmd in ("/start", "/help"):
         if is_registered(telegram_id):
             user_row = get_bot_user(telegram_id)
-            new_state = {
-                "state": "REGISTERED",
-                "store": user_row["store"],
-                "username": user_row["username"],
-                "retry_count": 0,
-            }
-            _set_state(telegram_id, new_state)
-            if cmd == "/start":
-                send_message(chat_id, msg(telegram_id, "welcome_back", store=user_row["store"]),
-                             reply_markup=_kb_registered(telegram_id))
-                return
+            if user_row is not None:
+                new_state = {
+                    "state": "REGISTERED",
+                    "store": user_row["store"],
+                    "username": user_row["username"],
+                    "retry_count": 0,
+                }
+                _set_state(telegram_id, new_state)
+                if cmd == "/start":
+                    send_message(chat_id, msg(telegram_id, "welcome_back", store=user_row["store"]),
+                                 reply_markup=_kb_registered(telegram_id))
+                    return
         send_message(chat_id, msg(telegram_id, "help"))
 
     elif cmd == "/status":
@@ -811,15 +818,16 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
         if not current or current in ("AWAITING_USERNAME", "AWAITING_PASSWORD"):
             if is_registered(telegram_id):
                 user_row = get_bot_user(telegram_id)
-                new_state = {
-                    "state": "REGISTERED",
-                    "store": user_row["store"],
-                    "username": user_row["username"],
-                    "retry_count": 0,
-                }
-                _set_state(telegram_id, new_state)
-                send_message(chat_id, msg(telegram_id, "welcome_back", store=user_row["store"]),
-                             reply_markup=_kb_registered(telegram_id))
+                if user_row is not None:
+                    new_state = {
+                        "state": "REGISTERED",
+                        "store": user_row["store"],
+                        "username": user_row["username"],
+                        "retry_count": 0,
+                    }
+                    _set_state(telegram_id, new_state)
+                    send_message(chat_id, msg(telegram_id, "welcome_back", store=user_row["store"]),
+                                 reply_markup=_kb_registered(telegram_id))
             else:
                 send_message(chat_id, msg(telegram_id, "cancel_nothing"))
         elif current == "AI_CHAT":
@@ -858,13 +866,13 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
             if db is None:
                 send_message(chat_id, "\u274c Base de datos no disponible.")
                 return
-            result = db.table("audits").select(
+            result_rows = rows(db.table("audits").select(
                 "date, reg, gross, variance, staff"
-            ).eq("store", store).order("date", desc=True).limit(1).execute()
-            if not result.data:
+            ).eq("store", store).order("date", desc=True).limit(1).execute())
+            if not result_rows:
                 send_message(chat_id, f"No hay reportes recientes para {store}.")
                 return
-            e = result.data[0]
+            e = result_rows[0]
             send_message(chat_id, (
                 f"\U0001f4cb \u00daltimo reporte \u2014 {store}\n"
                 f"Fecha: {e.get('date', '?')}\n"
@@ -890,8 +898,10 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
         broadcast_text = parts[1].strip()
         try:
             db = extensions.get_db()
-            users_resp = db.table("bot_users").select("telegram_id").execute()
-            count = len(users_resp.data) if users_resp.data else 0
+            if db is None:
+                raise RuntimeError("DB unavailable")
+            broadcast_users = rows(db.table("bot_users").select("telegram_id").execute())
+            count: int | str = len(broadcast_users)
         except Exception:
             count = "?"
         state["state"] = "BROADCAST_CONFIRM"

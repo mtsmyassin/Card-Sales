@@ -7,6 +7,7 @@ from audit_log import audit_log
 import extensions
 from helpers.auth_utils import require_auth
 from helpers.offline_queue import get_logo
+from helpers.supabase_types import rows
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -165,9 +166,9 @@ def login():
 
         # --- CHECK DATABASE ACCOUNTS ---
         try:
-            res = extensions.get_db().table("users").select("*").ilike("username", u).execute()
-            if res.data:
-                user = res.data[0]
+            res_rows = rows(extensions.get_db().table("users").select("*").ilike("username", u).execute())
+            if res_rows:
+                user = res_rows[0]
 
                 # Only accept bcrypt-hashed passwords — plaintext is rejected
                 if user['password'].startswith('$2b$'):
@@ -261,11 +262,11 @@ def change_password():
             return jsonify(error="Emergency accounts cannot change password here", code="FORBIDDEN"), 403
 
         # Fetch user from DB and verify current password
-        res = extensions.get_db().table("users").select("id, password").ilike("username", username).execute()
-        if not res.data:
+        res_rows = rows(extensions.get_db().table("users").select("id, password").ilike("username", username).execute())
+        if not res_rows:
             return jsonify(error="User not found", code="NOT_FOUND"), 404
 
-        user = res.data[0]
+        user = res_rows[0]
         if not extensions.password_hasher.verify_password(current_password, user['password']):
             audit_log(
                 action="PASSWORD_CHANGE_FAILED",

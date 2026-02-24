@@ -6,6 +6,7 @@ from threading import Thread
 from flask import Blueprint, request, jsonify, session
 import extensions
 from helpers.auth_utils import require_auth, can_access_photo, is_admin_role
+from helpers.supabase_types import rows, row0
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -52,11 +53,11 @@ def telegram_webhook():
 def get_zreport_image(audit_id: int):
     """Return a short-lived signed URL for the Z report image of an audit entry (legacy)."""
     try:
-        result = extensions.get_db().table("audits").select("payload,store").eq("id", audit_id).execute()
-        if not result.data:
+        result_rows = rows(extensions.get_db().table("audits").select("payload,store").eq("id", audit_id).execute())
+        if not result_rows:
             return jsonify(error="Not found", code="NOT_FOUND"), 404
 
-        row = result.data[0]
+        row = result_rows[0]
         entry_store = row.get('store')
         if not can_access_photo(entry_store, session.get('role'), session.get('store')):
             logger.warning(
@@ -93,12 +94,12 @@ def get_entry_photos():
         using_admin = extensions.has_admin_client()
         logger.info(f"[get_entry_photos] entry_id={entry_id} using_admin={using_admin}")
 
-        entry_resp = _db.table("audits").select("store").eq("id", entry_id).execute()
-        if not entry_resp.data:
+        entry_rows = rows(_db.table("audits").select("store").eq("id", entry_id).execute())
+        if not entry_rows:
             logger.warning(f"[get_entry_photos] entry_id={entry_id} not found in audits")
             return jsonify(error="Not found", code="NOT_FOUND"), 404
 
-        entry_store = entry_resp.data[0].get('store')
+        entry_store = entry_rows[0].get('store')
         if not can_access_photo(entry_store, session.get('role'), session.get('store')):
             logger.warning(
                 f"[get_entry_photos] Access denied: user={session.get('user')!r} "
@@ -106,17 +107,17 @@ def get_entry_photos():
             )
             return jsonify(error="Not authorized", code="FORBIDDEN"), 403
 
-        photos = _db.table("z_report_photos") \
-            .select("id, store, business_date, register_id, uploaded_by, uploaded_at, storage_path") \
-            .eq("entry_id", entry_id) \
-            .order("uploaded_at") \
-            .execute()
+        photo_rows = rows(_db.table("z_report_photos")
+            .select("id, store, business_date, register_id, uploaded_by, uploaded_at, storage_path")
+            .eq("entry_id", entry_id)
+            .order("uploaded_at")
+            .execute())
 
         logger.info(
             f"[get_entry_photos] entry_id={entry_id} store={entry_store!r} "
-            f"using_admin={using_admin} → {len(photos.data)} photo(s)"
+            f"using_admin={using_admin} → {len(photo_rows)} photo(s)"
         )
-        return jsonify(photos.data)
+        return jsonify(photo_rows)
 
     except Exception as e:
         logger.error(f"[get_entry_photos] entry_id={entry_id} EXCEPTION: {e}", exc_info=True)
@@ -136,12 +137,12 @@ def get_photo_signed_url():
         # Use service-role client so RLS doesn't block server-side reads
         _db = extensions.get_db()
 
-        photo_resp = _db.table("z_report_photos").select("*").eq("id", photo_id).execute()
-        if not photo_resp.data:
+        photo_rows = rows(_db.table("z_report_photos").select("*").eq("id", photo_id).execute())
+        if not photo_rows:
             logger.warning(f"[signed_url] photo_id={photo_id} not found in z_report_photos")
             return jsonify(error="Photo record not found", code="NOT_FOUND"), 404
 
-        photo = photo_resp.data[0]
+        photo = photo_rows[0]
         storage_path = photo.get('storage_path', '')
         photo_store = photo.get('store')
 
@@ -188,14 +189,14 @@ def delete_photo(photo_id):
     """Delete a Z-report photo from storage and DB (manager/admin only)."""
     try:
         _db = extensions.get_db()
-        photo_resp = _db.table("z_report_photos").select("*") \
-            .eq("id", photo_id).maybe_single().execute()
+        photo_data = row0(_db.table("z_report_photos").select("*")
+            .eq("id", photo_id).maybe_single().execute())
 
-        if not photo_resp.data:
+        if not photo_data:
             return jsonify(error="Photo not found", code="NOT_FOUND"), 404
 
         # IDOR check — non-admins can only delete photos from their own store
-        photo_store = photo_resp.data.get('store')
+        photo_store = photo_data.get('store')
         user_store = session.get('store')
         user_role = session.get('role')
         if not is_admin_role(user_role) and photo_store != user_store:
@@ -206,7 +207,7 @@ def delete_photo(photo_id):
             return jsonify(error="Not authorized", code="FORBIDDEN"), 403
 
         # Remove from Supabase Storage (non-fatal if file already gone)
-        storage_path = photo_resp.data.get('storage_path', '')
+        storage_path = photo_data.get('storage_path', '')
         if storage_path:
             try:
                 extensions.get_db().storage.from_(Config.STORAGE_BUCKET).remove([storage_path])

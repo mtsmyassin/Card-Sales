@@ -4,6 +4,7 @@ import threading
 
 import extensions
 from config import Config
+from helpers.supabase_types import rows
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +38,10 @@ def load_session(telegram_id: int) -> dict | None:
         client = extensions.get_db()
         if client is None:
             return None
-        result = client.table("bot_sessions").select("*").eq("telegram_id", telegram_id).execute()
-        if not result.data:
+        result_rows = rows(client.table("bot_sessions").select("*").eq("telegram_id", telegram_id).execute())
+        if not result_rows:
             return None
-        row = result.data[0]
+        row = result_rows[0]
         return {
             "state": row.get("state", "AWAITING_USERNAME"),
             "username": row.get("username"),
@@ -67,10 +68,10 @@ def is_registered(telegram_id: int) -> bool:
     if client is None:
         return False
     try:
-        result = client.table("bot_users").select("telegram_id").eq(
+        result_rows = rows(client.table("bot_users").select("telegram_id").eq(
             "telegram_id", telegram_id
-        ).execute()
-        return len(result.data) > 0
+        ).execute())
+        return len(result_rows) > 0
     except Exception as e:
         logger.error(f"bot_users lookup failed: {e}")
         return False
@@ -82,10 +83,10 @@ def get_bot_user(telegram_id: int) -> dict | None:
     if client is None:
         return None
     try:
-        result = client.table("bot_users").select("*").eq(
+        result_rows = rows(client.table("bot_users").select("*").eq(
             "telegram_id", telegram_id
-        ).execute()
-        return result.data[0] if result.data else None
+        ).execute())
+        return result_rows[0] if result_rows else None
     except Exception as e:
         logger.error(f"get_bot_user failed: {e}")
         return None
@@ -112,10 +113,10 @@ def verify_web_credentials(username: str, password: str) -> dict | None:
                 return {"username": username, "role": role, "store": "All"}
             return None
 
-        result = supabase.table("users").select("*").ilike("username", username).execute()
-        if not result.data:
+        result_rows = rows(supabase.table("users").select("*").ilike("username", username).execute())
+        if not result_rows:
             return None
-        user = result.data[0]
+        user = result_rows[0]
         stored = user.get("password", "")
         if stored.startswith("$2b$"):
             valid = password_hasher.verify_password(password, stored)

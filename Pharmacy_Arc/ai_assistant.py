@@ -74,7 +74,8 @@ def _fetch_store_context(store: str, days: int = 7) -> dict:
         ).eq("store", store).gte("date", since).order(
             "date", desc=True
         ).execute()
-        rows = result.data or []
+        from helpers.supabase_types import rows as _rows
+        rows = _rows(result)
     except Exception as e:
         logger.warning(f"_fetch_store_context query failed: {e}")
         rows = []

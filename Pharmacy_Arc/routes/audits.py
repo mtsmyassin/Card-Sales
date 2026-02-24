@@ -10,6 +10,7 @@ from helpers.validation import validate_audit_entry
 from helpers.offline_queue import save_to_queue, load_queue, clear_queue, get_queue_path, _atomic_write_json
 from helpers.db import db_retry, is_unique_violation
 from helpers.exceptions import AuditNotFoundError, DuplicateEntryError, StoreMismatchError
+from helpers.supabase_types import rows
 from services.audit_service import (
     get_audit, check_store_access, check_duplicate,
     insert_audit, update_audit, soft_delete_audit,
@@ -26,22 +27,22 @@ def _send_variance_alert(store: str, date: str, reg: str, variance: float, gross
         _db = extensions.get_db()
         if _db is None:
             return
-        bot_users_resp = _db.table("bot_users").select("telegram_id, username, store").execute()
-        if not (bot_users_resp.data):
+        bot_users = rows(_db.table("bot_users").select("telegram_id, username, store").execute())
+        if not bot_users:
             return
         # Cross-reference roles
-        unames = [u["username"] for u in bot_users_resp.data if u.get("username")]
+        unames = [u["username"] for u in bot_users if u.get("username")]
         role_map = {}
         if unames:
             users_resp = _db.table("users").select("username, role, store").in_("username", unames).execute()
-            role_map = {u["username"]: (u.get("role", "staff"), u.get("store", "")) for u in (users_resp.data or [])}
+            role_map = {u["username"]: (u.get("role", "staff"), u.get("store", "")) for u in rows(users_resp)}
         sign = "Corto" if variance < 0 else "Sobre"
         msg = (
             f"Varianza {sign}: ${abs(variance):.2f}\n"
             f"Tienda: {store} | Caja: {reg} | Fecha: {date}\n"
             f"Bruto: ${gross:.2f} | Enviado por: {submitted_by}"
         )
-        for bu in bot_users_resp.data:
+        for bu in bot_users:
             role, user_store = role_map.get(bu.get("username", ""), ("staff", ""))
             if role in ("admin", "super_admin", "manager") or user_store == store:
                 try:
@@ -217,7 +218,7 @@ def sync():
             reg_val = item.get('reg')
             dup = _db.table("audits").select("id").eq("date", date_val).eq(
                 "store", store_val).eq("reg", reg_val).is_("deleted_at", "null").limit(1).execute()
-            if dup.data:
+            if rows(dup):
                 logger.warning(f"[sync] Skipping duplicate: date={date_val} store={store_val} reg={reg_val}")
                 success_count += 1  # Don't keep retrying a duplicate — remove from queue
                 continue
@@ -493,7 +494,7 @@ def list_audits():
         if not is_admin_role(user_role):
             query = query.eq("store", user_store)
         response = db_retry(lambda: query.execute(), label="list_audits")
-        allowed_rows = response.data
+        allowed_rows = rows(response)
 
         logger.info(
             f"[list_audits] user={user!r} role={user_role!r} store={user_store!r} "
@@ -505,15 +506,15 @@ def list_audits():
         photo_counts: dict = {}
         if allowed_rows:
             entry_ids = [r['id'] for r in allowed_rows]
-            photo_resp = _db.table("z_report_photos") \
-                .select("entry_id") \
-                .in_("entry_id", entry_ids) \
-                .execute()
-            for p in photo_resp.data:
+            photo_rows = rows(_db.table("z_report_photos")
+                .select("entry_id")
+                .in_("entry_id", entry_ids)
+                .execute())
+            for p in photo_rows:
                 eid = p['entry_id']
                 photo_counts[eid] = photo_counts.get(eid, 0) + 1
             logger.info(
-                f"[list_audits] photo_counts fetched: {len(photo_resp.data)} photo rows "
+                f"[list_audits] photo_counts fetched: {len(photo_rows)} photo rows "
                 f"for {len(entry_ids)} entries -> {len(photo_counts)} entries have photos"
             )
 

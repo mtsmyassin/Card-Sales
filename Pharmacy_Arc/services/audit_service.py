@@ -2,6 +2,7 @@
 import logging
 import extensions
 from helpers.auth_utils import is_admin_role
+from helpers.supabase_types import rows
 from helpers.db import db_retry, is_unique_violation
 from helpers.exceptions import AuditNotFoundError, DuplicateEntryError, StoreMismatchError
 
@@ -14,10 +15,10 @@ def get_audit(audit_id: int) -> dict:
     Raises AuditNotFoundError if the entry does not exist or is soft-deleted.
     """
     db = extensions.get_db()
-    result = db.table("audits").select("*").eq("id", audit_id).is_("deleted_at", "null").execute()
-    if not result.data:
+    result_rows = rows(db.table("audits").select("*").eq("id", audit_id).is_("deleted_at", "null").execute())
+    if not result_rows:
         raise AuditNotFoundError(audit_id)
-    return result.data[0]
+    return result_rows[0]
 
 
 def check_store_access(audit_data: dict, user_role: str, user_store: str) -> None:
@@ -35,13 +36,13 @@ def check_store_access(audit_data: dict, user_role: str, user_store: str) -> Non
 def check_duplicate(date: str, store: str, reg: str) -> None:
     """Check for duplicate audit entry. Raises DuplicateEntryError if found."""
     db = extensions.get_db()
-    dup = db.table("audits").select("id") \
-        .eq("date", date) \
-        .eq("store", store) \
-        .eq("reg", reg) \
-        .is_("deleted_at", "null") \
-        .execute()
-    if dup.data:
+    dup_rows = rows(db.table("audits").select("id")
+        .eq("date", date)
+        .eq("store", store)
+        .eq("reg", reg)
+        .is_("deleted_at", "null")
+        .execute())
+    if dup_rows:
         raise DuplicateEntryError(date=date, store=store, reg=reg)
 
 
@@ -55,7 +56,8 @@ def insert_audit(record: dict) -> dict:
             lambda: extensions.get_db().table("audits").insert(record).execute(),
             label="insert_audit",
         )
-        return result.data[0] if result.data else {}
+        result_rows = rows(result)
+        return result_rows[0] if result_rows else {}
     except Exception as e:
         if is_unique_violation(e):
             raise DuplicateEntryError(
