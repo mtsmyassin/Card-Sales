@@ -14,37 +14,38 @@ from config import Config
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
-    "Eres el asistente de IA de Farmacia Carimas. Respondes en español, "
-    "de forma concisa y profesional. Tu trabajo es ayudar al personal de la farmacia "
-    "a entender sus datos de ventas (Reportes Z), detectar anomalías en varianzas, "
-    "y responder preguntas operativas.\n\n"
-    "Reglas:\n"
-    "- Responde siempre en español.\n"
-    "- Sé breve (máximo 3-4 oraciones por respuesta).\n"
-    "- Si no tienes datos suficientes, dilo claramente.\n"
-    "- Usa formato de moneda con $ y dos decimales.\n"
-    "- Varianza negativa = efectivo corto (faltante). Positiva = sobrante.\n"
-    "- No inventes datos. Solo usa la información proporcionada.\n"
+    "You are the AI assistant for Farmacia Carimas. You are concise and professional. "
+    "Your job is to help pharmacy staff understand their sales data (Z-Reports), "
+    "detect variance anomalies, and answer operational questions.\n\n"
+    "Language rule:\n"
+    "- Reply in the SAME language the user writes in. "
+    "If they write in Spanish, reply in Spanish. If they write in English, reply in English.\n\n"
+    "Rules:\n"
+    "- Be brief (max 3-4 sentences per response).\n"
+    "- If you don't have enough data, say so clearly.\n"
+    "- Use currency format with $ and two decimals.\n"
+    "- Negative variance = cash short (faltante). Positive = overage (sobrante).\n"
+    "- Never make up data. Only use the information provided.\n"
 )
 
 PHARMACY_CONTEXT = (
-    "\n\n--- Información Operativa de Farmacia Carimas ---\n"
-    "Tiendas:\n"
-    "  Carimas #1 — [DIRECCIÓN] — Tel: [TELÉFONO] — Horario: L-S 8AM-9PM, D 9AM-5PM\n"
-    "  Carimas #2 — [DIRECCIÓN] — Tel: [TELÉFONO] — Horario: L-S 8AM-9PM, D 9AM-5PM\n"
-    "  Carimas #3 — [DIRECCIÓN] — Tel: [TELÉFONO] — Horario: L-S 8AM-9PM, D 9AM-5PM\n"
-    "  Carimas #4 — [DIRECCIÓN] — Tel: [TELÉFONO] — Horario: L-S 8AM-9PM, D 9AM-5PM\n"
-    "  Carthage   — [DIRECCIÓN] — Tel: [TELÉFONO] — Horario: L-S 8AM-9PM, D 9AM-5PM\n\n"
-    "Procedimientos:\n"
-    "  - Reporte Z: Imprimir al cierre de cada caja, tomar foto y enviar por Telegram.\n"
-    "  - Payouts: Registrar todo desembolso de efectivo (cambio, pagos, etc.) antes del cierre.\n"
-    "  - Varianza: Diferencia entre efectivo esperado y contado. Negativa = faltante.\n"
-    "  - Si la varianza excede $5.00, reportar al supervisor inmediatamente.\n\n"
-    "Contactos:\n"
-    "  - Soporte técnico: [NOMBRE] — [TELÉFONO/EMAIL]\n"
-    "  - Gerencia general: [NOMBRE] — [TELÉFONO]\n\n"
-    "Usa esta información para responder preguntas operativas.\n"
-    "Si el usuario pregunta algo que no está aquí ni en los datos de ventas, dilo claramente.\n"
+    "\n\n--- Farmacia Carimas Operational Info ---\n"
+    "Stores:\n"
+    "  Carimas #1 — [ADDRESS] — Tel: [PHONE] — Hours: M-S 8AM-9PM, Sun 9AM-5PM\n"
+    "  Carimas #2 — [ADDRESS] — Tel: [PHONE] — Hours: M-S 8AM-9PM, Sun 9AM-5PM\n"
+    "  Carimas #3 — [ADDRESS] — Tel: [PHONE] — Hours: M-S 8AM-9PM, Sun 9AM-5PM\n"
+    "  Carimas #4 — [ADDRESS] — Tel: [PHONE] — Hours: M-S 8AM-9PM, Sun 9AM-5PM\n"
+    "  Carthage   — [ADDRESS] — Tel: [PHONE] — Hours: M-S 8AM-9PM, Sun 9AM-5PM\n\n"
+    "Procedures:\n"
+    "  - Z-Report: Print at register close, take photo, send via Telegram.\n"
+    "  - Payouts: Record all cash disbursements (change, payments, etc.) before close.\n"
+    "  - Variance: Difference between expected and counted cash. Negative = short.\n"
+    "  - If variance exceeds $5.00, report to supervisor immediately.\n\n"
+    "Contacts:\n"
+    "  - Tech support: [NAME] — [PHONE/EMAIL]\n"
+    "  - General management: [NAME] — [PHONE]\n\n"
+    "Use this info to answer operational questions.\n"
+    "If the user asks about something not covered here or in the sales data, say so clearly.\n"
 )
 
 
@@ -109,25 +110,25 @@ def ask_ai(question: str, store: str, role: str, username: str,
     context = _fetch_store_context(store)
 
     context_block = (
-        f"Usuario: {username} | Rol: {role} | Tienda: {store}\n"
-        f"Datos últimos 7 días: {context['day_count']} días con reportes, "
-        f"{len(context['entries'])} entradas.\n"
-        f"Bruto total: ${context['total_gross']:.2f} | "
-        f"Varianza promedio: ${context['avg_variance']:.2f}\n"
-        f"Cajas activas: {', '.join(context['registers']) or 'ninguna'}\n\n"
-        f"Detalle de entradas recientes:\n"
+        f"User: {username} | Role: {role} | Store: {store}\n"
+        f"Last 7 days: {context['day_count']} days with reports, "
+        f"{len(context['entries'])} entries.\n"
+        f"Total gross: ${context['total_gross']:.2f} | "
+        f"Avg variance: ${context['avg_variance']:.2f}\n"
+        f"Active registers: {', '.join(context['registers']) or 'none'}\n\n"
+        f"Recent entries:\n"
     )
     for entry in context["entries"][:15]:  # cap to keep tokens low
         context_block += (
             f"  {entry.get('date')} | {entry.get('reg')} | "
-            f"Bruto: ${entry.get('gross', 0):.2f} | "
-            f"Varianza: ${entry.get('variance', 0):.2f}\n"
+            f"Gross: ${entry.get('gross', 0):.2f} | "
+            f"Variance: ${entry.get('variance', 0):.2f}\n"
         )
 
     # Build message list: context as first user message, then history, then new question
     messages = [
-        {"role": "user", "content": context_block + "\n(Contexto de datos — no es una pregunta.)"},
-        {"role": "assistant", "content": "Entendido. Tengo el contexto de datos listo."},
+        {"role": "user", "content": context_block + "\n(Data context — not a question.)"},
+        {"role": "assistant", "content": "Got it. I have the data context ready."},
     ]
     if history:
         messages.extend(history[-10:])  # cap at last 10 messages (5 pairs)
@@ -136,7 +137,7 @@ def ask_ai(question: str, store: str, role: str, username: str,
     try:
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         message = client.messages.create(
-            model=Config.AI_MODEL,
+            model=Config.AI_ASSISTANT_MODEL,
             max_tokens=Config.AI_MAX_TOKENS,
             system=SYSTEM_PROMPT + PHARMACY_CONTEXT,
             messages=messages,
@@ -145,7 +146,7 @@ def ask_ai(question: str, store: str, role: str, username: str,
         return message.content[0].text.strip()
     except Exception as e:
         logger.error(f"ask_ai failed: {e}")
-        return "Lo siento, ocurrió un error al procesar tu pregunta. Intenta de nuevo."
+        return "Sorry, an error occurred processing your question. Please try again. / Lo siento, ocurrió un error. Intenta de nuevo."
 
 
 def analyze_variance_trend(store: str, days: int = 3) -> str | None:
@@ -169,21 +170,22 @@ def analyze_variance_trend(store: str, days: int = 3) -> str | None:
 
     # Build a mini-prompt for AI analysis
     detail = "\n".join(
-        f"  {e.get('date')} {e.get('reg')}: varianza ${e.get('variance', 0):.2f}"
+        f"  {e.get('date')} {e.get('reg')}: variance ${e.get('variance', 0):.2f}"
         for e in high_variance
     )
     prompt = (
-        f"Tienda: {store}\n"
-        f"Las siguientes entradas tienen varianza alta (umbral ${threshold:.2f}):\n"
+        f"Store: {store}\n"
+        f"The following entries have high variance (threshold ${threshold:.2f}):\n"
         f"{detail}\n\n"
-        f"Genera una alerta breve (2-3 oraciones) para el administrador "
-        f"explicando el patrón y sugiriendo acción."
+        f"Generate a brief alert (2-3 sentences) for the administrator "
+        f"explaining the pattern and suggesting action. "
+        f"Write in Spanish."
     )
 
     try:
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         message = client.messages.create(
-            model=Config.AI_MODEL,
+            model=Config.AI_ASSISTANT_MODEL,
             max_tokens=200,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],

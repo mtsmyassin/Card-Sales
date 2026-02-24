@@ -113,7 +113,7 @@ def test_ask_ai_includes_pharmacy_context():
     from ai_assistant import SYSTEM_PROMPT
     assert len(system_text) > len(SYSTEM_PROMPT)
     assert "Carimas #1" in system_text
-    assert "Horario" in system_text or "horario" in system_text
+    assert "Hours" in system_text or "hours" in system_text
 
 
 def test_ask_ai_error_returns_friendly_message():
@@ -128,7 +128,7 @@ def test_ask_ai_error_returns_friendly_message():
 
 
 def test_ask_ai_uses_config_model():
-    """ask_ai passes Config.AI_MODEL and AI_MAX_TOKENS to Claude."""
+    """ask_ai passes Config.AI_ASSISTANT_MODEL and AI_MAX_TOKENS to Claude."""
     mock_message = MagicMock()
     mock_message.content = [MagicMock(text="respuesta")]
     mock_client = MagicMock()
@@ -138,14 +138,14 @@ def test_ask_ai_uses_config_model():
         mock_ext.get_db.return_value = None
         with patch("ai_assistant.anthropic.Anthropic", return_value=mock_client):
             with patch("ai_assistant.Config") as mock_cfg:
-                mock_cfg.AI_MODEL = "claude-sonnet-4-6"
+                mock_cfg.AI_ASSISTANT_MODEL = "claude-haiku-4-5-20251001"
                 mock_cfg.AI_MAX_TOKENS = 500
                 mock_cfg.VARIANCE_ALERT_THRESHOLD = 5.0
                 from ai_assistant import ask_ai
                 ask_ai("test", "Carimas #1", "staff", "user")
 
     call_kwargs = mock_client.messages.create.call_args
-    assert call_kwargs.kwargs["model"] == "claude-sonnet-4-6"
+    assert call_kwargs.kwargs["model"] == "claude-haiku-4-5-20251001"
     assert call_kwargs.kwargs["max_tokens"] == 500
 
 
