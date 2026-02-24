@@ -1,13 +1,13 @@
 """
 Offline queue: persists audit entries to a local JSON file when Supabase is
-unavailable. Also contains path helpers and logo loader used by routes/main.py.
+unavailable. Path helpers and logo loader live in helpers/paths.py and are
+re-exported here for backward compatibility.
 """
 import os
-import sys
 import json
-import base64
 import logging
 from config import Config
+from helpers.paths import get_base_path, get_logo  # noqa: F401 — re-exported
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +37,6 @@ def _atomic_write_json(path: str, data) -> None:
 _IS_EPHEMERAL_FS = bool(os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('RAILWAY_PUBLIC_DOMAIN'))
 
 
-def get_base_path() -> str:
-    """Return directory for data files (PyInstaller-safe)."""
-    if getattr(sys, 'frozen', False):
-        return sys._MEIPASS
-    # Always use the project root (one level above helpers/)
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
 def get_queue_path() -> str:
     """Return the path to the offline queue JSON file.
 
@@ -53,20 +45,6 @@ def get_queue_path() -> str:
     is ever used, so the path value is irrelevant in production.
     """
     return os.path.join(get_base_path(), OFFLINE_FILE)
-
-
-def get_logo(store_name=None) -> str:
-    """Return base64-encoded logo PNG for the given store name."""
-    filename = 'logo.png'
-    if store_name == 'Carthage':
-        filename = 'carthage.png'
-    p = os.path.join(get_base_path(), filename)
-    if not os.path.exists(p):
-        p = os.path.join(get_base_path(), 'logo.png')
-    if not os.path.exists(p):
-        return ""
-    with open(p, "rb") as fh:
-        return base64.b64encode(fh.read()).decode()
 
 
 def save_to_queue(payload: dict) -> bool:

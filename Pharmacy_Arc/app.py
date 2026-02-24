@@ -60,18 +60,32 @@ _file_handler = RotatingFileHandler(
 )
 _stream_handler = logging.StreamHandler(sys.stdout)
 
+class _RequestIdFilter(logging.Filter):
+    """Inject request_id from Flask request context into every log record."""
+    def filter(self, record):
+        try:
+            from flask import has_request_context, request as _req
+            record.request_id = getattr(_req, '_request_id', '-') if has_request_context() else '-'
+        except Exception:
+            record.request_id = '-'
+        return True
+
+_rid_filter = _RequestIdFilter()
+
 if _HAS_JSON_LOGGER:
     _json_fmt = jsonlogger.JsonFormatter(
-        '%(asctime)s %(name)s %(levelname)s %(message)s',
+        '%(asctime)s %(name)s %(levelname)s %(request_id)s %(message)s',
         rename_fields={"asctime": "timestamp", "levelname": "level"},
     )
     _file_handler.setFormatter(_json_fmt)
     _stream_handler.setFormatter(_json_fmt)
 else:
-    _text_fmt = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    _text_fmt = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - [%(request_id)s] %(message)s')
     _file_handler.setFormatter(_text_fmt)
     _stream_handler.setFormatter(_text_fmt)
 
+_file_handler.addFilter(_rid_filter)
+_stream_handler.addFilter(_rid_filter)
 logging.basicConfig(level=_log_level, handlers=[_file_handler, _stream_handler])
 logger = logging.getLogger(__name__)
 
@@ -101,6 +115,16 @@ def _init_supabase(url: str, key: str, label: str, max_attempts: int = None):
 def create_app() -> Flask:
     """Build and return the configured Flask application."""
     Config.startup_check()
+
+    _sentry_dsn = os.getenv('SENTRY_DSN')
+    if _sentry_dsn:
+        try:
+            import sentry_sdk
+            sentry_sdk.init(dsn=_sentry_dsn, traces_sample_rate=0.1,
+                            environment=os.getenv('RAILWAY_ENVIRONMENT', 'local'))
+            logger.info("Sentry initialized")
+        except ImportError:
+            logger.warning("SENTRY_DSN set but sentry-sdk not installed")
 
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.secret_key = Config.SECRET_KEY
@@ -182,6 +206,24 @@ def create_app() -> Flask:
         extensions.supabase = _init_supabase(Config.SUPABASE_URL, Config.SUPABASE_KEY, "anon", max_attempts=1)
         if extensions.supabase:
             logger.info("Supabase lazy reconnection succeeded")
+
+    @app.before_request
+    def _lazy_reconnect_admin():
+        """Reconnect admin Supabase client if None (throttled to 60s)."""
+        if extensions.supabase_admin is not None:
+            return
+        _svc_key = Config.SUPABASE_SERVICE_KEY
+        if not _svc_key:
+            return
+        last = getattr(app, '_last_admin_reconnect', 0)
+        if time.time() - last < 60:
+            return
+        app._last_admin_reconnect = time.time()
+        extensions.supabase_admin = _init_supabase(
+            Config.SUPABASE_URL, _svc_key, "admin", max_attempts=1
+        )
+        if extensions.supabase_admin:
+            logger.info("Supabase admin lazy reconnection succeeded")
 
     # Supabase clients
     extensions.supabase = _init_supabase(Config.SUPABASE_URL, Config.SUPABASE_KEY, "anon")

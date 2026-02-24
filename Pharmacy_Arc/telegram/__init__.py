@@ -1,0 +1,61 @@
+"""telegram package — re-exports for backward compatibility with telegram_bot.py."""
+
+# Import order matters: client → session → i18n → storage → bot (dependency chain)
+
+from telegram.client import (  # noqa: F401
+    TelegramAPIError, _BOT_TOKEN, _token, _tg,
+    send_message, send_message_safe, download_photo,
+    _log_dead_letter, _ADMIN_CHAT_ID, _admin_last_notified,
+    _ADMIN_NOTIFY_COOLDOWN, _notify_admin_if_needed,
+)
+
+from telegram.session import (  # noqa: F401
+    bot_state, _bot_state_lock,
+    persist_session, load_session, _set_state,
+    is_registered, get_bot_user, verify_web_credentials, save_bot_user,
+)
+
+from telegram.i18n import MESSAGES, msg, KNOWN_STORES, _STORE_CHOICE  # noqa: F401
+
+from telegram.storage import (  # noqa: F401
+    StorageUploadError, _ensure_bucket, upload_image_to_storage,
+    _format_register_id, save_audit_entry, save_photo_record,
+)
+
+from telegram.bot import (  # noqa: F401
+    BUTTON_TIMEOUT_SECONDS, INLINE_STORES,
+    _ai_history, _AI_HISTORY_MAX_AGE, _ai_history_ts, _ai_lock,
+    _is_button_expired, handle_update, register_webhook,
+    _format_preview, _ascii_upper, _parse_date,
+    _handle_ai_message, _handle_payouts, _handle_actual_cash,
+    _handle_broadcast_confirm, _handle_password, _handle_photo,
+    _handle_ocr_failure, _handle_date, _handle_register,
+    _handle_confirmation, _handle_callback, _handle_slash,
+)
+
+# __all__ includes underscore names so `from telegram import *` re-exports everything.
+__all__ = [
+    # client
+    "TelegramAPIError", "_BOT_TOKEN", "_token", "_tg",
+    "send_message", "send_message_safe", "download_photo",
+    "_log_dead_letter", "_ADMIN_CHAT_ID", "_admin_last_notified",
+    "_ADMIN_NOTIFY_COOLDOWN", "_notify_admin_if_needed",
+    # session
+    "bot_state", "_bot_state_lock",
+    "persist_session", "load_session", "_set_state",
+    "is_registered", "get_bot_user", "verify_web_credentials", "save_bot_user",
+    # i18n
+    "MESSAGES", "msg", "KNOWN_STORES", "_STORE_CHOICE",
+    # storage
+    "StorageUploadError", "_ensure_bucket", "upload_image_to_storage",
+    "_format_register_id", "save_audit_entry", "save_photo_record",
+    # bot
+    "BUTTON_TIMEOUT_SECONDS", "INLINE_STORES",
+    "_ai_history", "_AI_HISTORY_MAX_AGE", "_ai_history_ts", "_ai_lock",
+    "_is_button_expired", "handle_update", "register_webhook",
+    "_format_preview", "_ascii_upper", "_parse_date",
+    "_handle_ai_message", "_handle_payouts", "_handle_actual_cash",
+    "_handle_broadcast_confirm", "_handle_password", "_handle_photo",
+    "_handle_ocr_failure", "_handle_date", "_handle_register",
+    "_handle_confirmation", "_handle_callback", "_handle_slash",
+]

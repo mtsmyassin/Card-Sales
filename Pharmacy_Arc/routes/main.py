@@ -3,7 +3,8 @@ import io
 import os
 import logging
 from flask import Blueprint, current_app, jsonify, render_template, session, send_file
-from helpers.offline_queue import get_logo, get_base_path, load_queue
+from helpers.paths import get_logo, get_base_path
+from helpers.offline_queue import load_queue
 from helpers.auth_utils import require_auth
 import extensions
 from config import Config

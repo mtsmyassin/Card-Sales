@@ -140,8 +140,9 @@ class TestPayloadSizeLimit:
 class TestBotTokenFailFast:
     def test_bot_token_loaded_at_module_level(self):
         """_BOT_TOKEN must be set at module level (not None at import time)."""
+        # _BOT_TOKEN lives in telegram/client.py after the package split
         src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "telegram_bot.py"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "telegram", "client.py"),
             encoding="utf-8",
         ).read()
         # _BOT_TOKEN should be assigned from os.getenv at module level, not None
@@ -153,18 +154,18 @@ class TestBotTokenFailFast:
         """_token() must raise RuntimeError if TELEGRAM_BOT_TOKEN is not set."""
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": ""}):
             import importlib
-            import telegram_bot
-            importlib.reload(telegram_bot)
+            import telegram.client
+            importlib.reload(telegram.client)
             with pytest.raises((RuntimeError, KeyError)):
-                telegram_bot._token()
+                telegram.client._token()
 
     def test_token_function_returns_value_when_set(self):
         """_token() must return the token string when TELEGRAM_BOT_TOKEN is set."""
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "12345:ABCDEF"}):
             import importlib
-            import telegram_bot
-            importlib.reload(telegram_bot)
-            assert telegram_bot._token() == "12345:ABCDEF"
+            import telegram.client
+            importlib.reload(telegram.client)
+            assert telegram.client._token() == "12345:ABCDEF"
 
 
 # ── BUG-11: audit_log.py encoding + write order ───────────────────────────────

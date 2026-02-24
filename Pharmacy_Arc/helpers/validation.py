@@ -18,6 +18,15 @@ def validate_audit_entry(data: dict) -> tuple[bool, str]:
     if not re.match(r'^\d{4}-\d{2}-\d{2}$', str(data['date'])):
         return False, "Invalid date format. Use YYYY-MM-DD"
 
+    # Validate actual calendar date (e.g. reject 2026-02-30)
+    try:
+        from datetime import date as _date
+        parsed = _date.fromisoformat(str(data['date']))
+        if parsed.year < 2020 or parsed.year > 2030:
+            return False, "Date year must be between 2020 and 2030"
+    except ValueError:
+        return False, "Invalid calendar date"
+
     # Validate numeric fields
     try:
         gross = float(data['gross'])

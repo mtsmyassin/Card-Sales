@@ -139,6 +139,7 @@ def ask_ai(question: str, store: str, role: str, username: str,
             max_tokens=Config.AI_MAX_TOKENS,
             system=SYSTEM_PROMPT + PHARMACY_CONTEXT,
             messages=messages,
+            timeout=30.0,
         )
         return message.content[0].text.strip()
     except Exception as e:
@@ -185,6 +186,7 @@ def analyze_variance_trend(store: str, days: int = 3) -> str | None:
             max_tokens=200,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
         )
         return message.content[0].text.strip()
     except Exception as e:

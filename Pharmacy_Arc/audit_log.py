@@ -30,6 +30,8 @@ class AuditLogger:
         self.log_file = Path(log_file)
         self._lock = Lock()
         self._supabase = None
+        self._last_hash = None
+        self._db_write_failures = 0
         self._ensure_log_exists()
 
     def configure_db(self, supabase_client) -> None:
@@ -63,8 +65,12 @@ class AuditLogger:
                 'previous_hash': entry.get('previous_hash'),
             }).execute()
         except Exception as e:
+            self._db_write_failures += 1
             import logging
-            logging.getLogger(__name__).warning(f"[audit_log] Supabase write failed: {e}")
+            logging.getLogger(__name__).warning(
+                "[audit_log] Supabase write failed (total=%d): %s",
+                self._db_write_failures, e
+            )
     
     def _ensure_log_exists(self) -> None:
         """Create log file if it doesn't exist."""
@@ -75,10 +81,12 @@ class AuditLogger:
     def _get_last_hash(self) -> str:
         """
         Get the hash of the last log entry for chain verification.
-        
+
         Returns:
             Hash string of last entry, or 'GENESIS' if empty log
         """
+        if self._last_hash is not None:
+            return self._last_hash
         try:
             with open(self.log_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
@@ -163,7 +171,8 @@ class AuditLogger:
             # Compute hash of this entry
             entry_hash = self._compute_entry_hash(entry)
             entry['entry_hash'] = entry_hash
-            
+            self._last_hash = entry_hash
+
             # Write to Supabase first (canonical store; survives Railway redeploys).
             self._write_to_db(entry)
 

@@ -94,7 +94,14 @@ def save():
             "gross": float(d['gross']),
             "net": float(d['net']),
             "variance": float(d['variance']),
-            "payload": d
+            "payload": {
+                "date": d['date'], "reg": d['reg'], "staff": d['staff'],
+                "store": d.get('store', 'Main'),
+                "gross": float(d['gross']), "net": float(d['net']),
+                "variance": float(d['variance']),
+                "breakdown": d.get('breakdown', {}),
+                "notes": d.get('notes', ''),
+            },
         }
 
         # S1: Enforce store from session for non-admin users (prevent store IDOR)
@@ -322,7 +329,14 @@ def update():
             "gross": float(d['gross']),
             "net": float(d['net']),
             "variance": float(d['variance']),
-            "payload": d,
+            "payload": {
+                "date": d['date'], "reg": d['reg'], "staff": d['staff'],
+                "store": d.get('store', 'Main'),
+                "gross": float(d['gross']), "net": float(d['net']),
+                "variance": float(d['variance']),
+                "breakdown": d.get('breakdown', {}),
+                "notes": d.get('notes', ''),
+            },
             "version": (int(current_version) + 1) if current_version is not None else 1,
         }
 

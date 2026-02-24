@@ -126,8 +126,9 @@ class TestBotStateThreadSafety:
 
     def test_set_state_uses_lock(self):
         """_set_state must acquire _bot_state_lock when writing to bot_state."""
+        # _set_state lives in telegram/session.py after the package split
         src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "telegram_bot.py"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "telegram", "session.py"),
             encoding="utf-8",
         ).read()
         set_state_start = src.index("def _set_state(")
@@ -138,7 +139,7 @@ class TestBotStateThreadSafety:
     def test_set_state_sync_persist(self):
         """_set_state must call persist_session synchronously (prevents state loss on deploys)."""
         src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "telegram_bot.py"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "telegram", "session.py"),
             encoding="utf-8",
         ).read()
         set_state_start = src.index("def _set_state(")
@@ -153,8 +154,9 @@ class TestBotStateThreadSafety:
 
     def test_handle_update_reads_state_under_lock(self):
         """handle_update must read bot_state under _bot_state_lock."""
+        # handle_update lives in telegram/bot.py after the package split
         src = open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "telegram_bot.py"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "telegram", "bot.py"),
             encoding="utf-8",
         ).read()
         handle_start = src.index("def handle_update(")

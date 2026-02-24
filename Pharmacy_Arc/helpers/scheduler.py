@@ -104,6 +104,20 @@ def _daily_ai_insights() -> None:
         logger.warning(f"_daily_ai_insights failed: {e}")
 
 
+def _audit_integrity_check() -> None:
+    """Weekly integrity check of the audit log hash chain."""
+    try:
+        from audit_log import get_audit_logger
+        al = get_audit_logger()
+        is_valid, errors = al.verify_integrity()
+        if not is_valid:
+            logger.error("AUDIT INTEGRITY FAILED: %s", errors)
+        else:
+            logger.info("Audit log integrity check passed")
+    except Exception as e:
+        logger.error("Audit integrity check error: %s", e)
+
+
 def init_scheduler(app) -> None:
     """Start APScheduler in the current process. Stores instance as app._scheduler."""
     try:
@@ -115,12 +129,21 @@ def init_scheduler(app) -> None:
             CronTrigger(hour=21, minute=0, timezone="America/Puerto_Rico"),
             id="eod_reminder",
             replace_existing=True,
+            misfire_grace_time=300,
         )
         scheduler.add_job(
             _daily_ai_insights,
             CronTrigger(hour=22, minute=0, timezone="America/Puerto_Rico"),
             id="daily_ai_insights",
             replace_existing=True,
+            misfire_grace_time=300,
+        )
+        scheduler.add_job(
+            _audit_integrity_check,
+            CronTrigger(day_of_week='sun', hour=6, minute=0, timezone="America/Puerto_Rico"),
+            id="audit_integrity_check",
+            replace_existing=True,
+            misfire_grace_time=3600,
         )
         scheduler.start()
         atexit.register(lambda: scheduler.shutdown(wait=False))

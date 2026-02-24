@@ -65,10 +65,6 @@ class Config:
     LOCKOUT_DURATION_MINUTES: int = int(os.getenv('LOCKOUT_DURATION_MINUTES', '15'))
     REQUIRE_HTTPS: bool = os.getenv('REQUIRE_HTTPS', 'false').lower() == 'true'
     
-    # Backup Configuration
-    BACKUP_ENABLED: bool = os.getenv('BACKUP_ENABLED', 'true').lower() == 'true'
-    BACKUP_ROTATION_DAYS: int = int(os.getenv('BACKUP_ROTATION_DAYS', '30'))
-    
     # Logging Configuration
     LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
     LOG_FILE: str = os.getenv('LOG_FILE', 'pharmacy_app.log')
@@ -191,3 +187,5 @@ class Config:
         print(f"   Debug: {cls.DEBUG}")
         print(f"   Session Timeout: {cls.SESSION_TIMEOUT_MINUTES} minutes")
         print(f"   Max Login Attempts: {cls.MAX_LOGIN_ATTEMPTS}")
+        if not cls.REQUIRE_HTTPS:
+            print("  [WARN] REQUIRE_HTTPS=false — session cookies are not Secure-flagged")

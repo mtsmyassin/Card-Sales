@@ -1,7 +1,7 @@
 """Diagnostics Blueprint — /api/diagnostics health and status endpoint."""
 import os
 import logging
-from flask import Blueprint, jsonify, session
+from flask import Blueprint, current_app, jsonify, session
 from audit_log import get_audit_logger
 import extensions
 from helpers.auth_utils import require_auth
@@ -73,6 +73,27 @@ def diagnostics():
             },
             "session": session_info,
         }
+
+        # Audit DB write failure counter (safely handle mocked audit_logger)
+        try:
+            db_failures = int(audit_logger._db_write_failures)
+        except (TypeError, ValueError):
+            db_failures = 0
+        diagnostics_data["audit_log"]["db_write_failures"] = db_failures
+
+        # Scheduler status
+        scheduler_info = {"status": "not_available"}
+        try:
+            sched = getattr(current_app._get_current_object(), '_scheduler', None)
+            if sched:
+                jobs = sched.get_jobs()
+                scheduler_info = {
+                    "status": "running" if sched.running else "stopped",
+                    "jobs": [{"id": j.id, "next_run": str(j.next_run_time)} for j in jobs],
+                }
+        except Exception:
+            pass
+        diagnostics_data["scheduler"] = scheduler_info
 
         # Storage diagnostics — prefer admin client to bypass RLS on bucket listing
         _storage_client = extensions.get_db()
