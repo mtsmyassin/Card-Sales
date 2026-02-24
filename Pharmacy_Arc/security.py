@@ -6,7 +6,7 @@ import time
 import json
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Dict
 from threading import Lock
 from config import Config
@@ -107,6 +107,14 @@ class LoginAttemptTracker:
             self._save_to_file()
 
     @staticmethod
+    def _parse_utc(ts: str) -> datetime:
+        """Parse an ISO timestamp string into a UTC-aware datetime."""
+        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    @staticmethod
     def _rows(response: Any) -> list[dict[str, Any]]:
         """Extract row list from Supabase response."""
         data = getattr(response, "data", None)
@@ -128,17 +136,15 @@ class LoginAttemptTracker:
         """Load lockout state from Supabase login_lockouts table."""
         try:
             resp = self._supabase.table('login_lockouts').select('*').execute()
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             for row in self._rows(resp):
                 username = row['username']
                 if row.get('attempts'):
                     self._attempts[username] = [
-                        datetime.fromisoformat(ts) for ts in row['attempts']
+                        self._parse_utc(ts) for ts in row['attempts']
                     ]
                 if row.get('locked_until'):
-                    expiry = datetime.fromisoformat(
-                        row['locked_until'].replace('Z', '+00:00')
-                    ).replace(tzinfo=None)
+                    expiry = self._parse_utc(row['locked_until'])
                     if expiry > now:
                         self._lockouts[username] = expiry
         except Exception as e:
@@ -172,11 +178,11 @@ class LoginAttemptTracker:
                     data = json.load(f)
                 for username, timestamps in data.get('attempts', {}).items():
                     self._attempts[username] = [
-                        datetime.fromisoformat(ts) for ts in timestamps
+                        self._parse_utc(ts) for ts in timestamps
                     ]
                 for username, expiry in data.get('lockouts', {}).items():
-                    expiry_time = datetime.fromisoformat(expiry)
-                    if expiry_time > datetime.now():
+                    expiry_time = self._parse_utc(expiry)
+                    if expiry_time > datetime.now(timezone.utc):
                         self._lockouts[username] = expiry_time
         except Exception as e:
             logger.warning(f"Could not load lockout state from file: {e}")
@@ -215,12 +221,10 @@ class LoginAttemptTracker:
                 return [], None
             attempts = []
             if row.get('attempts'):
-                attempts = [datetime.fromisoformat(ts) for ts in row['attempts']]
+                attempts = [self._parse_utc(ts) for ts in row['attempts']]
             locked_until = None
             if row.get('locked_until'):
-                locked_until = datetime.fromisoformat(
-                    row['locked_until'].replace('Z', '+00:00')
-                ).replace(tzinfo=None)
+                locked_until = self._parse_utc(row['locked_until'])
             return attempts, locked_until
         except Exception as e:
             logger.warning(f"[LoginAttemptTracker] DB read failed for {username!r}, using in-memory: {e}")
@@ -239,7 +243,7 @@ class LoginAttemptTracker:
         """
         with self._lock:
             _, locked_until = self._db_get_user_state(username)
-            if locked_until and datetime.now() < locked_until:
+            if locked_until and datetime.now(timezone.utc) < locked_until:
                 return True
             # Lockout expired or doesn't exist — clean up in-memory
             self._lockouts.pop(username, None)
@@ -260,7 +264,7 @@ class LoginAttemptTracker:
         with self._lock:
             _, locked_until = self._db_get_user_state(username)
             if locked_until:
-                remaining = (locked_until - datetime.now()).total_seconds()
+                remaining = (locked_until - datetime.now(timezone.utc)).total_seconds()
                 return max(0, int(remaining))
             return None
     
@@ -276,7 +280,7 @@ class LoginAttemptTracker:
             Tuple of (is_now_locked_out, remaining_attempts_before_lockout)
         """
         with self._lock:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
 
             # Load current attempts from DB (not stale in-memory) so all workers
             # see the same count. Falls back to in-memory if DB is unavailable.
@@ -328,12 +332,12 @@ class LoginAttemptTracker:
         with self._lock:
             if username not in self._attempts:
                 return 0
-            
+
             # Clean up old attempts
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             cutoff = now - self.lockout_duration
             self._attempts[username] = [t for t in self._attempts[username] if t > cutoff]
-            
+
             return len(self._attempts[username])
 
 

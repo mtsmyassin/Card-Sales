@@ -110,6 +110,7 @@ def save():
             user_store = session.get('store')
             if user_store and user_store != 'All':
                 record['store'] = user_store
+                record['payload']['store'] = user_store
 
         try:
             inserted = insert_audit(record)
@@ -343,7 +344,9 @@ def update():
 
         # F3: Non-admins cannot reassign store — force original store value
         if not is_admin_role(role):
-            record['store'] = before_state.get('store', 'Main')
+            original_store = before_state.get('store', 'Main')
+            record['store'] = original_store
+            record['payload']['store'] = original_store
 
         update_audit(uid, record)
 

@@ -166,9 +166,9 @@ class TestZReportList:
     def test_manager_can_list(self, client, flask_app, manager_session):
         mock_result = MagicMock()
         mock_result.data = [{'id': 1, 'review_status': 'PENDING_REVIEW'}]
-        # Manager store-scoping adds .eq('store', ...) after .order()
+        # Chain: .select().is_('deleted_at', 'null').order().eq(store) for managers
         flask_app.supabase_admin.table.return_value.select.return_value \
-            .order.return_value.eq.return_value.execute.return_value = mock_result
+            .is_.return_value.order.return_value.eq.return_value.execute.return_value = mock_result
         r = client.get('/api/z-reports')
         assert r.status_code == 200
         data = json.loads(r.data)
@@ -177,9 +177,9 @@ class TestZReportList:
     def test_status_filter_applied(self, client, flask_app, manager_session):
         mock_result = MagicMock()
         mock_result.data = []
-        # Chain: .order().eq(status_filter).eq(store) for managers
+        # Chain: .select().is_().order().eq(status_filter).eq(store) for managers
         chain = flask_app.supabase_admin.table.return_value.select.return_value \
-            .order.return_value
+            .is_.return_value.order.return_value
         chain.eq.return_value.eq.return_value.execute.return_value = mock_result
         r = client.get('/api/z-reports?status=FINAL_APPROVED')
         assert r.status_code == 200
@@ -191,7 +191,7 @@ class TestZReportList:
         mock_result.data = []
         # No status filter, but store-scoping .eq() still added for managers
         flask_app.supabase_admin.table.return_value.select.return_value \
-            .order.return_value.eq.return_value.execute.return_value = mock_result
+            .is_.return_value.order.return_value.eq.return_value.execute.return_value = mock_result
         r = client.get('/api/z-reports?status=BADSTATUS')
         assert r.status_code == 200
 
@@ -210,7 +210,7 @@ class TestZReportLock:
         mock = MagicMock()
         mock.data = audit_dict
         flask_app.supabase_admin.table.return_value.select.return_value \
-            .eq.return_value.single.return_value.execute.return_value = mock
+            .eq.return_value.is_.return_value.single.return_value.execute.return_value = mock
 
     def test_lock_pending_review(self, client, flask_app, manager_session):
         self._setup_mock_audit(flask_app, self._audit())
@@ -275,7 +275,7 @@ class TestZReportApprove:
             }}
         }
         flask_app.supabase_admin.table.return_value.select.return_value \
-            .eq.return_value.single.return_value.execute.return_value = audit_mock
+            .eq.return_value.is_.return_value.single.return_value.execute.return_value = audit_mock
         flask_app.supabase_admin.table.return_value.update.return_value \
             .eq.return_value.execute.return_value = MagicMock()
         existing_mock = MagicMock()
@@ -345,7 +345,7 @@ class TestZReportRejectAmend:
         m = MagicMock()
         m.data = {'id': 1, 'store': 'Main', 'review_status': status, 'review_locked_by': locked_by}
         flask_app.supabase_admin.table.return_value.select.return_value \
-            .eq.return_value.single.return_value.execute.return_value = m
+            .eq.return_value.is_.return_value.single.return_value.execute.return_value = m
         flask_app.supabase_admin.table.return_value.update.return_value \
             .eq.return_value.execute.return_value = MagicMock()
         existing = MagicMock()

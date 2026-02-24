@@ -127,7 +127,7 @@ def zr_list():
     try:
         q = db.table('audits').select(
             'id,store,date,review_status,review_locked_by,review_locked_at'
-        ).order('date', desc=True)
+        ).is_('deleted_at', 'null').order('date', desc=True)
         if status_filter and status_filter in VALID_REVIEW_STATUSES:
             q = q.eq('review_status', status_filter)
         # Store-scoping: managers only see their own store's audits
@@ -149,7 +149,7 @@ def zr_detail(audit_id: int):
     if db is None:
         return jsonify(error="Z-report review service unavailable", code="SERVICE_UNAVAILABLE"), 503
     try:
-        audit = row0(db.table('audits').select('*').eq('id', audit_id).single().execute())
+        audit = row0(db.table('audits').select('*').eq('id', audit_id).is_('deleted_at', 'null').single().execute())
         ok, err = _check_manager_store(audit)
         if not ok:
             return jsonify(error=err, code="STORE_MISMATCH"), 403
@@ -174,7 +174,7 @@ def zr_lock(audit_id: int):
     try:
         audit = row0(db.table('audits').select(
             'id,store,review_status,review_locked_by,review_locked_at'
-        ).eq('id', audit_id).single().execute())
+        ).eq('id', audit_id).is_('deleted_at', 'null').single().execute())
 
         ok, err = _check_manager_store(audit)
         if not ok:
@@ -233,7 +233,7 @@ def zr_unlock(audit_id: int):
     try:
         audit = row0(db.table('audits').select(
             'id,review_status,review_locked_by'
-        ).eq('id', audit_id).single().execute())
+        ).eq('id', audit_id).is_('deleted_at', 'null').single().execute())
 
         if audit['review_status'] != 'IN_REVIEW':
             return jsonify(error="Audit is not IN_REVIEW", code="CONFLICT"), 409
@@ -280,7 +280,7 @@ def zr_approve(audit_id: int):
         return jsonify(error=str(e), code="INVALID_INPUT"), 400
 
     try:
-        audit = row0(db.table('audits').select('*').eq('id', audit_id).single().execute())
+        audit = row0(db.table('audits').select('*').eq('id', audit_id).is_('deleted_at', 'null').single().execute())
 
         if audit['review_status'] != 'IN_REVIEW':
             return jsonify(error=f"Audit is not IN_REVIEW (status: {audit['review_status']})", code="CONFLICT"), 409
@@ -370,7 +370,7 @@ def zr_reject(audit_id: int):
     try:
         audit = row0(db.table('audits').select(
             'id,store,review_status,review_locked_by,review_locked_at'
-        ).eq('id', audit_id).single().execute())
+        ).eq('id', audit_id).is_('deleted_at', 'null').single().execute())
 
         if audit['review_status'] != 'IN_REVIEW':
             return jsonify(error=f"Audit is not IN_REVIEW (status: {audit['review_status']})", code="CONFLICT"), 409
@@ -452,7 +452,7 @@ def zr_reopen(audit_id: int):
     try:
         audit = row0(db.table('audits').select(
             'id,store,review_status'
-        ).eq('id', audit_id).single().execute())
+        ).eq('id', audit_id).is_('deleted_at', 'null').single().execute())
 
         if audit['review_status'] != 'REJECTED':
             return jsonify(error=f"Audit is not REJECTED (status: {audit['review_status']})", code="CONFLICT"), 409
@@ -494,7 +494,7 @@ def zr_amend(audit_id: int):
     try:
         audit = row0(db.table('audits').select(
             'id,review_status,review_locked_by,review_locked_at'
-        ).eq('id', audit_id).single().execute())
+        ).eq('id', audit_id).is_('deleted_at', 'null').single().execute())
 
         if audit['review_status'] != 'FINAL_APPROVED':
             return jsonify(
@@ -571,7 +571,7 @@ def zr_history(audit_id: int):
         return jsonify(error="Z-report review service unavailable", code="SERVICE_UNAVAILABLE"), 503
     try:
         # Store-scoping: managers can only view history for their own store's audits
-        audit_data = row0(db.table('audits').select('id,store').eq('id', audit_id).maybe_single().execute())
+        audit_data = row0(db.table('audits').select('id,store').eq('id', audit_id).is_('deleted_at', 'null').maybe_single().execute())
         if not audit_data:
             return jsonify(error="Audit not found", code="NOT_FOUND"), 404
         ok, err = _check_manager_store(audit_data)
@@ -616,7 +616,7 @@ def zr_unlock_timed_out():
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=Config.ZREPORT_LOCK_TIMEOUT_MINUTES)).isoformat()
     try:
         stale_rows = rows(db.table('audits').select('id,review_locked_by').eq(
-            'review_status', 'IN_REVIEW').lt('review_locked_at', cutoff).execute())
+            'review_status', 'IN_REVIEW').is_('deleted_at', 'null').lt('review_locked_at', cutoff).execute())
         count = 0
         for row in stale_rows:
             db.table('audits').update({

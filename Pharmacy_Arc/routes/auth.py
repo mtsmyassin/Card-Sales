@@ -114,6 +114,11 @@ def login():
             logger.warning("Login attempt with empty username or password")
             return jsonify(status="fail", error="Username and password required", code="BAD_REQUEST"), 400
 
+        # Reject usernames with SQL LIKE wildcards to prevent ilike injection
+        if '%' in u:
+            logger.warning(f"Login attempt with wildcard in username: {u!r}")
+            return jsonify(status="fail", error="Invalid credentials", code="LOGIN_FAILED"), 401
+
         # Check if account is locked out
         if extensions.login_tracker.is_locked_out(u):
             remaining = extensions.login_tracker.get_lockout_remaining(u)
@@ -261,8 +266,8 @@ def change_password():
         if username in extensions.EMERGENCY_ACCOUNTS:
             return jsonify(error="Emergency accounts cannot change password here", code="FORBIDDEN"), 403
 
-        # Fetch user from DB and verify current password
-        res_rows = rows(extensions.get_db().table("users").select("id, password").ilike("username", username).execute())
+        # Fetch user from DB and verify current password (exact match — username is from session)
+        res_rows = rows(extensions.get_db().table("users").select("id, password").eq("username", username).execute())
         if not res_rows:
             return jsonify(error="User not found", code="NOT_FOUND"), 404
 
