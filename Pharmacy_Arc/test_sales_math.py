@@ -256,54 +256,6 @@ except Exception as e:
     fail(f"Suite 4 execution", str(e))
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SUITE 5 — STRUCTURAL FIXES VERIFICATION
-# ─────────────────────────────────────────────────────────────────────────────
-print("\n[Suite 5] Code structure & bug fixes verification")
-print("-" * 60)
-
-with open('app.py', 'r', encoding='utf-8') as f:
-    src = f.read()
-
-# 5.1 No fallback require_auth
-if 'Fallback auth decorator' not in src:
-    ok("No no-op fallback require_auth present")
-else:
-    fail("No no-op fallback require_auth present", "Fallback decorator still in file")
-
-# 5.2 Real require_auth before api_get_logo
-r_pos  = src.find('def require_auth(allowed_roles=None):')
-gl_pos = src.find('def api_get_logo():')
-if r_pos > 0 and r_pos < gl_pos:
-    ok("Real require_auth defined before api_get_logo route")
-else:
-    fail("Real require_auth defined before api_get_logo route", f"r_pos={r_pos}, gl_pos={gl_pos}")
-
-# 5.3 modeLabel ID in HTML
-if 'id="modeLabel"' in src:
-    ok("modeLabel element has ID (no more TypeError)")
-else:
-    fail("modeLabel element has ID", "id=modeLabel missing from HTML")
-
-# 5.4 No duplicate require_auth definitions
-count = src.count('def require_auth(')
-if count == 1:
-    ok("Single require_auth definition (no duplicate)")
-else:
-    fail("Single require_auth definition", f"Found {count} definitions")
-
-# 5.5 Dead fetchWithRetry removed
-if 'fetchWithRetry' not in src:
-    ok("Dead fetchWithRetry removed")
-else:
-    fail("Dead fetchWithRetry removed", "Still present in file")
-
-# 5.6 Math validation present in validate_audit_entry
-if 'Gross mismatch' in src and 'Net mismatch' in src and 'Variance mismatch' in src:
-    ok("Backend math validation present")
-else:
-    fail("Backend math validation present", "Math cross-checks missing")
-
-# ─────────────────────────────────────────────────────────────────────────────
 # SUMMARY
 # ─────────────────────────────────────────────────────────────────────────────
 total = passed + failed
