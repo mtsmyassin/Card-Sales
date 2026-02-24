@@ -166,9 +166,10 @@ class TestZReportList:
     def test_manager_can_list(self, client, flask_app, manager_session):
         mock_result = MagicMock()
         mock_result.data = [{'id': 1, 'review_status': 'PENDING_REVIEW'}]
-        # Chain: .select().is_('deleted_at', 'null').order().eq(store) for managers
+        # Chain: .select().is_().order().eq(store).range().execute() for managers
         flask_app.supabase_admin.table.return_value.select.return_value \
-            .is_.return_value.order.return_value.eq.return_value.execute.return_value = mock_result
+            .is_.return_value.order.return_value.eq.return_value \
+            .range.return_value.execute.return_value = mock_result
         r = client.get('/api/z-reports')
         assert r.status_code == 200
         data = json.loads(r.data)
@@ -177,10 +178,11 @@ class TestZReportList:
     def test_status_filter_applied(self, client, flask_app, manager_session):
         mock_result = MagicMock()
         mock_result.data = []
-        # Chain: .select().is_().order().eq(status_filter).eq(store) for managers
+        # Chain: .select().is_().order().eq(status_filter).eq(store).range().execute()
         chain = flask_app.supabase_admin.table.return_value.select.return_value \
             .is_.return_value.order.return_value
-        chain.eq.return_value.eq.return_value.execute.return_value = mock_result
+        chain.eq.return_value.eq.return_value \
+            .range.return_value.execute.return_value = mock_result
         r = client.get('/api/z-reports?status=FINAL_APPROVED')
         assert r.status_code == 200
         # First .eq() call should be the status filter
@@ -189,9 +191,10 @@ class TestZReportList:
     def test_invalid_status_filter_ignored(self, client, flask_app, manager_session):
         mock_result = MagicMock()
         mock_result.data = []
-        # No status filter, but store-scoping .eq() still added for managers
+        # No status filter, but store-scoping .eq() still added for managers, then .range()
         flask_app.supabase_admin.table.return_value.select.return_value \
-            .is_.return_value.order.return_value.eq.return_value.execute.return_value = mock_result
+            .is_.return_value.order.return_value.eq.return_value \
+            .range.return_value.execute.return_value = mock_result
         r = client.get('/api/z-reports?status=BADSTATUS')
         assert r.status_code == 200
 
@@ -212,10 +215,18 @@ class TestZReportLock:
         flask_app.supabase_admin.table.return_value.select.return_value \
             .eq.return_value.is_.return_value.single.return_value.execute.return_value = mock
 
+    def _setup_update_chain(self, flask_app, audit_id=42):
+        """Configure a self-referencing update mock so guarded update chains work."""
+        update_chain = flask_app.supabase_admin.table.return_value.update.return_value
+        update_chain.eq.return_value = update_chain
+        update_chain.is_.return_value = update_chain
+        guarded_result = MagicMock()
+        guarded_result.data = [{'id': audit_id}]
+        update_chain.execute.return_value = guarded_result
+
     def test_lock_pending_review(self, client, flask_app, manager_session):
         self._setup_mock_audit(flask_app, self._audit())
-        flask_app.supabase_admin.table.return_value.update.return_value \
-            .eq.return_value.execute.return_value = MagicMock()
+        self._setup_update_chain(flask_app)
         flask_app.supabase_admin.table.return_value.insert.return_value \
             .execute.return_value = MagicMock()
         r = client.post('/api/z-reports/42/lock')
@@ -243,8 +254,7 @@ class TestZReportLock:
         self._setup_mock_audit(flask_app, self._audit(
             status='IN_REVIEW', locked_by='othermanager', locked_at=old
         ))
-        flask_app.supabase_admin.table.return_value.update.return_value \
-            .eq.return_value.execute.return_value = MagicMock()
+        self._setup_update_chain(flask_app)
         flask_app.supabase_admin.table.return_value.insert.return_value \
             .execute.return_value = MagicMock()
         r = client.post('/api/z-reports/42/lock')
@@ -256,8 +266,7 @@ class TestZReportLock:
         self._setup_mock_audit(flask_app, self._audit(
             status='IN_REVIEW', locked_by='testmanager', locked_at=recent
         ))
-        flask_app.supabase_admin.table.return_value.update.return_value \
-            .eq.return_value.execute.return_value = MagicMock()
+        self._setup_update_chain(flask_app)
         flask_app.supabase_admin.table.return_value.insert.return_value \
             .execute.return_value = MagicMock()
         r = client.post('/api/z-reports/42/lock')
@@ -276,8 +285,13 @@ class TestZReportApprove:
         }
         flask_app.supabase_admin.table.return_value.select.return_value \
             .eq.return_value.is_.return_value.single.return_value.execute.return_value = audit_mock
-        flask_app.supabase_admin.table.return_value.update.return_value \
-            .eq.return_value.execute.return_value = MagicMock()
+        # Self-referencing update chain for guarded updates
+        update_chain = flask_app.supabase_admin.table.return_value.update.return_value
+        update_chain.eq.return_value = update_chain
+        update_chain.is_.return_value = update_chain
+        guarded_result = MagicMock()
+        guarded_result.data = [{'id': 1}]
+        update_chain.execute.return_value = guarded_result
         existing_mock = MagicMock()
         existing_mock.data = []
         flask_app.supabase_admin.table.return_value.select.return_value \
@@ -346,8 +360,13 @@ class TestZReportRejectAmend:
         m.data = {'id': 1, 'store': 'Main', 'review_status': status, 'review_locked_by': locked_by}
         flask_app.supabase_admin.table.return_value.select.return_value \
             .eq.return_value.is_.return_value.single.return_value.execute.return_value = m
-        flask_app.supabase_admin.table.return_value.update.return_value \
-            .eq.return_value.execute.return_value = MagicMock()
+        # Self-referencing update chain for guarded updates
+        update_chain = flask_app.supabase_admin.table.return_value.update.return_value
+        update_chain.eq.return_value = update_chain
+        update_chain.is_.return_value = update_chain
+        guarded_result = MagicMock()
+        guarded_result.data = [{'id': 1}]
+        update_chain.execute.return_value = guarded_result
         existing = MagicMock()
         existing.data = []
         flask_app.supabase_admin.table.return_value.select.return_value \

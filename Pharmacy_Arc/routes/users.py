@@ -116,7 +116,7 @@ def save_user():
             entity_type="USER",
             entity_id=u.get('username') if 'u' in locals() and u else None,  # type: ignore[possibly-undefined]
             success=False,
-            error=str(e),
+            error="User save operation failed",
             context={"ip": request.remote_addr}
         )
 
@@ -187,7 +187,7 @@ def delete_user():
             entity_type="USER",
             entity_id=request.json.get('username') if request.json else None,
             success=False,
-            error=str(e),
+            error="User deletion failed",
             context={"ip": request.remote_addr}
         )
 

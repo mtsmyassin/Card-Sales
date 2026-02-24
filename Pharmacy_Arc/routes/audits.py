@@ -376,7 +376,7 @@ def update():
             entity_type="AUDIT_ENTRY",
             entity_id=str(uid) if uid else None,
             success=False,
-            error=str(e),
+            error="Audit entry update failed",
             context={"ip": request.remote_addr}
         )
 
@@ -464,7 +464,7 @@ def delete():
             entity_type="AUDIT_ENTRY",
             entity_id=str(request.json.get('id')) if request.json and request.json.get('id') else None,
             success=False,
-            error=str(e),
+            error="Audit entry deletion failed",
             context={"ip": request.remote_addr}
         )
 

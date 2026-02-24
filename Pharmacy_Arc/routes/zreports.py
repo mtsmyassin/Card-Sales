@@ -115,6 +115,27 @@ def _zr_next_version(db, audit_id: int) -> int:
     return (existing[0]['version'] + 1) if existing else 1
 
 
+_SENTINEL = object()
+
+
+def _zr_guarded_update(db, audit_id: int, update_data: dict,
+                       expected_status: str,
+                       expected_locked_by=_SENTINEL) -> bool:
+    """Atomically update an audit row only if it still has the expected state.
+
+    Returns True if exactly 1 row was updated, False if 0 rows matched
+    (meaning the state changed between read and write — TOCTOU race).
+    """
+    q = db.table('audits').update(update_data).eq('id', audit_id).eq('review_status', expected_status)
+    if expected_locked_by is not _SENTINEL:
+        if expected_locked_by is None:
+            q = q.is_('review_locked_by', 'null')
+        else:
+            q = q.eq('review_locked_by', expected_locked_by)
+    result = q.execute()
+    return len(rows(result)) > 0
+
+
 @bp.route('/api/z-reports')
 @require_auth(allowed_roles=['manager', 'admin', 'super_admin'])
 @extensions.limiter.limit(Config.RATELIMIT_READ)
@@ -125,6 +146,10 @@ def zr_list():
         return jsonify(error="Z-report review service unavailable", code="SERVICE_UNAVAILABLE"), 503
     status_filter = request.args.get('status')
     try:
+        page = max(1, request.args.get('page', 1, type=int))
+        per_page = min(request.args.get('per_page', 2000, type=int), 2000)
+        offset = (page - 1) * per_page
+
         q = db.table('audits').select(
             'id,store,date,review_status,review_locked_by,review_locked_at'
         ).is_('deleted_at', 'null').order('date', desc=True)
@@ -133,7 +158,7 @@ def zr_list():
         # Store-scoping: managers only see their own store's audits
         if session.get('role') == 'manager':
             q = q.eq('store', session.get('store'))
-        result = q.execute()
+        result = q.range(offset, offset + per_page - 1).execute()
         return jsonify(rows(result))
     except Exception as e:
         logger.error(f"[zr_list] {e}", exc_info=True)
@@ -204,11 +229,17 @@ def zr_lock(audit_id: int):
             return jsonify(error=f"Cannot lock audit in status '{status}'", code="CONFLICT"), 409
 
         old_status = audit['review_status']
-        db.table('audits').update({
+        update_data = {
             'review_status': 'IN_REVIEW',
             'review_locked_by': actor,
             'review_locked_at': datetime.now(timezone.utc).isoformat(),
-        }).eq('id', audit_id).execute()
+        }
+
+        # Try guarded update against the current status
+        updated = _zr_guarded_update(db, audit_id, update_data, old_status,
+                                     expected_locked_by=locked_by)
+        if not updated:
+            return jsonify(error="Audit state changed — please refresh and retry", code="CONFLICT"), 409
 
         _zr_log(db, audit_id, 'LOCK', actor, ip=ip,
                 old_val={'review_status': old_status},
@@ -241,11 +272,17 @@ def zr_unlock(audit_id: int):
         if audit['review_locked_by'] != actor and not is_admin_role(role):
             return jsonify(error="You do not hold the lock on this audit", code="FORBIDDEN"), 403
 
-        db.table('audits').update({
+        update_data = {
             'review_status': 'PENDING_REVIEW',
             'review_locked_by': None,
             'review_locked_at': None,
-        }).eq('id', audit_id).execute()
+        }
+        # Admins can unlock anyone's lock, so only guard on locked_by for non-admins
+        expected_locker = audit['review_locked_by'] if not is_admin_role(role) else _SENTINEL
+        updated = _zr_guarded_update(db, audit_id, update_data, 'IN_REVIEW',
+                                     expected_locked_by=expected_locker)
+        if not updated:
+            return jsonify(error="Audit state changed — please refresh and retry", code="CONFLICT"), 409
 
         _zr_log(db, audit_id, 'UNLOCK', actor, ip=ip,
                 old_val={'locked_by': audit['review_locked_by']},
@@ -328,12 +365,14 @@ def zr_approve(audit_id: int):
             new_review_id = new_review_rows[0]['id'] if new_review_rows else None
             completed_steps.append(('insert_review', new_review_id))
 
-            # Step 3: Update audit status
-            db.table('audits').update({
+            # Step 3: Guarded update — only succeeds if state hasn't changed
+            updated = _zr_guarded_update(db, audit_id, {
                 'review_status': 'FINAL_APPROVED',
                 'review_locked_by': None,
                 'review_locked_at': None,
-            }).eq('id', audit_id).execute()
+            }, expected_status='IN_REVIEW', expected_locked_by=actor)
+            if not updated:
+                raise RuntimeError("Audit state changed during approve — TOCTOU race")
             completed_steps.append(('update_audit_status', audit_id))
 
         except Exception as step_err:
@@ -410,12 +449,14 @@ def zr_reject(audit_id: int):
             new_review_id = new_review_rows[0]['id'] if new_review_rows else None
             completed_steps.append(('insert_review', new_review_id))
 
-            # Step 3: Update audit status
-            db.table('audits').update({
+            # Step 3: Guarded update — only succeeds if state hasn't changed
+            updated = _zr_guarded_update(db, audit_id, {
                 'review_status': 'REJECTED',
                 'review_locked_by': None,
                 'review_locked_at': None,
-            }).eq('id', audit_id).execute()
+            }, expected_status='IN_REVIEW', expected_locked_by=actor)
+            if not updated:
+                raise RuntimeError("Audit state changed during reject — TOCTOU race")
             completed_steps.append(('update_audit_status', audit_id))
 
         except Exception as step_err:
@@ -460,11 +501,13 @@ def zr_reopen(audit_id: int):
         if not ok:
             return jsonify(error=err, code="STORE_MISMATCH"), 403
 
-        db.table('audits').update({
+        updated = _zr_guarded_update(db, audit_id, {
             'review_status': 'PENDING_REVIEW',
             'review_locked_by': None,
             'review_locked_at': None,
-        }).eq('id', audit_id).execute()
+        }, expected_status='REJECTED')
+        if not updated:
+            return jsonify(error="Audit state changed — please refresh and retry", code="CONFLICT"), 409
 
         _zr_log(db, audit_id, 'REOPEN', actor, ip=ip,
                 old_val={'review_status': 'REJECTED'},
@@ -537,12 +580,14 @@ def zr_amend(audit_id: int):
             new_review_id = new_review_rows[0]['id'] if new_review_rows else None
             completed_steps.append(('insert_review', new_review_id))
 
-            # Step 3: Update audit status
-            db.table('audits').update({
+            # Step 3: Guarded update — only succeeds if state hasn't changed
+            updated = _zr_guarded_update(db, audit_id, {
                 'review_status': 'PENDING_REVIEW',
                 'review_locked_by': None,
                 'review_locked_at': None,
-            }).eq('id', audit_id).execute()
+            }, expected_status='FINAL_APPROVED')
+            if not updated:
+                raise RuntimeError("Audit state changed during amend — TOCTOU race")
             completed_steps.append(('update_audit_status', audit_id))
 
         except Exception as step_err:
