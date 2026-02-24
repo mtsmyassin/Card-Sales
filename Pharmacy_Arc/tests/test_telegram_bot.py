@@ -454,13 +454,15 @@ def test_payout_then_cash_calculates_variance():
     assert bot_state[941]["state"] == "AWAITING_ACTUAL_CASH"
     assert bot_state[941]["pending_payouts"] == 50.0
 
-    # Enter actual cash = $440 (expected: 500 - 50 = 450, variance = 440 - 450 = -10)
+    # Enter actual cash = $440
+    # New formula: (actual - opening_float) - (ocr_cash - payouts)
+    # = (440 - 100) - (500 - 50) = 340 - 450 = -110
     replies.clear()
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
         handle_update(make_text_update(941, "440"))
     assert bot_state[941]["state"] == "AWAITING_CONFIRMATION"
     assert bot_state[941]["pending_actual_cash"] == 440.0
-    assert bot_state[941]["pending_variance"] == -10.0
+    assert bot_state[941]["pending_variance"] == -110.0
 
 
 def test_payout_skip_actual_cash():

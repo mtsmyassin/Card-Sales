@@ -19,6 +19,7 @@ def _send_eod_reminders() -> None:
         today = datetime.now(pr_tz).strftime("%Y-%m-%d")
         _db = extensions.get_db()
         if _db is None:
+            logger.warning("_send_eod_reminders: DB unavailable at reminder time (%s) — skipping", today)
             return
         subs = _db.table("audits").select("store").eq("date", today).execute()
         submitted_stores = {s["store"] for s in (subs.data or [])}
@@ -61,6 +62,7 @@ def _daily_ai_insights() -> None:
 
         _db = extensions.get_db()
         if _db is None:
+            logger.warning("_daily_ai_insights: DB unavailable — skipping")
             return
 
         bot_users_resp = _db.table("bot_users").select("telegram_id, store").execute()

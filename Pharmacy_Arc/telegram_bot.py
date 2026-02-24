@@ -40,6 +40,8 @@ _bot_state_lock = threading.Lock()
 
 # AI conversation history: { telegram_id: [{"role": "user", "content": ...}, ...] }
 _ai_history: dict[int, list[dict]] = {}
+_AI_HISTORY_MAX_AGE = 3600  # seconds
+_ai_history_ts: dict[int, float] = {}  # telegram_id -> last access timestamp
 
 # Load bot token at import time so a missing token is caught at startup, not on the first message.
 _BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -124,6 +126,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "photo_warn": "No se pudo subir la foto. El reporte se guardara sin ella.",
         "db_error": "Error guardando el reporte. Por favor ingresalo manualmente en la app web.",
         "photo_dl_error": "No se pudo descargar la foto. Intentalo de nuevo.",
+        "photo_too_large": "La foto es demasiado grande (máximo 5 MB). Por favor envía una foto más pequeña.",
         "ocr_error": "Error procesando la imagen. Intentalo de nuevo.",
         "session_reset": (
             "Tu sesion fue restaurada despues de un reinicio del sistema.\n"
@@ -272,6 +275,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "photo_warn": "Could not upload the photo. The report will be saved without it.",
         "db_error": "Error saving the report. Please enter it manually in the web app.",
         "photo_dl_error": "Could not download the photo. Please try again.",
+        "photo_too_large": "Photo is too large (max 5 MB). Please send a smaller photo.",
         "ocr_error": "Error processing the image. Please try again.",
         "session_reset": (
             "Your session was restored after a system restart.\n"
@@ -954,6 +958,14 @@ def _handle_ai_message(telegram_id: int, chat_id: int, text: str, state: dict) -
     user_row = get_bot_user(telegram_id)
     role = user_row.get("role", "staff") if user_row else "staff"
 
+    # Prune stale AI history entries (older than 1 hour)
+    now = time.time()
+    stale = [tid for tid, ts in _ai_history_ts.items() if now - ts > _AI_HISTORY_MAX_AGE]
+    for tid in stale:
+        _ai_history.pop(tid, None)
+        _ai_history_ts.pop(tid, None)
+    _ai_history_ts[telegram_id] = now
+
     history = _ai_history.get(telegram_id, [])
 
     try:
@@ -1001,10 +1013,12 @@ def _handle_actual_cash(telegram_id, chat_id, text, state):
             send_message(chat_id, msg(telegram_id, "bad_amount"))
             return
         state["pending_actual_cash"] = round(actual_cash, 2)
-        # variance = actual_cash - (ocr_cash - payouts)
+        # variance = (actual_cash - opening_float) - (ocr_cash - payouts)
+        # Matches Z-report review formula; OCR doesn't extract float so use default
+        opening_float = Config.DEFAULT_OPENING_FLOAT
         ocr_cash = state.get("pending_data", {}).get("cash") or 0
         payouts = state.get("pending_payouts", 0)
-        state["pending_variance"] = round(actual_cash - (ocr_cash - payouts), 2)
+        state["pending_variance"] = round((actual_cash - opening_float) - (ocr_cash - payouts), 2)
 
     state["state"] = "AWAITING_CONFIRMATION"
     _set_state(telegram_id, state)
@@ -1225,6 +1239,7 @@ def handle_update(update: dict) -> None:
     # ── "Cancelar" / "Cancel" button press from AI_CHAT ──────────────────────
     if text in (MESSAGES["en"]["btn_cancel"], MESSAGES["es"]["btn_cancel"]) and current_state == "AI_CHAT":
         _ai_history.pop(telegram_id, None)
+        _ai_history_ts.pop(telegram_id, None)
         state["state"] = "REGISTERED"
         _set_state(telegram_id, state)
         send_message(chat_id, msg(telegram_id, "ai_exit"),
@@ -1362,6 +1377,7 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
                 send_message(chat_id, msg(telegram_id, "cancel_nothing"))
         elif current == "AI_CHAT":
             _ai_history.pop(telegram_id, None)
+            _ai_history_ts.pop(telegram_id, None)
             new_state = {
                 "state": "REGISTERED",
                 "store": state.get("store"),
@@ -1517,6 +1533,12 @@ def _handle_photo(telegram_id, chat_id, tg_username, photo_msg, state):
         send_message(chat_id, msg(telegram_id, "photo_dl_error"))
         return
 
+    _MAX_PHOTO_BYTES = 5 * 1024 * 1024  # 5 MB
+    if len(image_bytes) > _MAX_PHOTO_BYTES:
+        logger.warning("Photo too large (%d bytes) from user %s", len(image_bytes), telegram_id)
+        send_message(chat_id, msg(telegram_id, "photo_too_large"))
+        return
+
     retry_count = state.get("retry_count", 0)
 
     try:
@@ -1556,6 +1578,7 @@ def _handle_photo(telegram_id, chat_id, tg_username, photo_msg, state):
 
 def _handle_ocr_failure(telegram_id, chat_id, state, retry_count):
     if retry_count >= 1:
+        state.pop("pending_image_bytes", None)
         state["retry_count"] = 0
         _set_state(telegram_id, state)
         send_message(chat_id, msg(telegram_id, "ocr_fail_final"))

@@ -135,8 +135,8 @@ class TestBotStateThreadSafety:
         block = src[set_state_start:set_state_end]
         assert "_bot_state_lock" in block, "_set_state must use _bot_state_lock"
 
-    def test_set_state_async_persist(self):
-        """_set_state must start a daemon thread for persist_session (non-blocking)."""
+    def test_set_state_sync_persist(self):
+        """_set_state must call persist_session synchronously (prevents state loss on deploys)."""
         src = open(
             os.path.join(os.path.dirname(os.path.dirname(__file__)), "telegram_bot.py"),
             encoding="utf-8",
@@ -144,11 +144,11 @@ class TestBotStateThreadSafety:
         set_state_start = src.index("def _set_state(")
         set_state_end = src.index("\ndef ", set_state_start + 1)
         block = src[set_state_start:set_state_end]
-        assert "threading.Thread" in block, (
-            "_set_state must use threading.Thread for async persist_session"
+        assert "persist_session(" in block, (
+            "_set_state must call persist_session synchronously"
         )
-        assert "daemon=True" in block, (
-            "persist thread must be daemon=True so it doesn't block process exit"
+        assert "threading.Thread" not in block, (
+            "_set_state should NOT use threading.Thread — persist must be synchronous"
         )
 
     def test_handle_update_reads_state_under_lock(self):

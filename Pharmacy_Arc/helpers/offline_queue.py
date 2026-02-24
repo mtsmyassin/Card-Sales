@@ -14,6 +14,23 @@ logger = logging.getLogger(__name__)
 OFFLINE_QUEUE_MAX_SIZE = int(os.getenv('OFFLINE_QUEUE_MAX_SIZE', '2000'))
 OFFLINE_FILE = Config.OFFLINE_FILE
 
+
+def _atomic_write_json(path: str, data) -> None:
+    """Write JSON atomically using temp file + os.replace."""
+    import tempfile
+    dir_name = os.path.dirname(path) or '.'
+    fd, tmp = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
 # Railway (and similar cloud platforms) use ephemeral filesystems — data written
 # to disk is silently lost on every deploy. Detect this so save_to_queue can
 # refuse to pretend data is safe when it isn't.
@@ -82,8 +99,7 @@ def save_to_queue(payload: dict) -> bool:
         )
         return False
     queue.append(payload)
-    with open(q_path, 'w', encoding='utf-8') as f:
-        json.dump(queue, f, ensure_ascii=False)
+    _atomic_write_json(q_path, queue)
     return True
 
 

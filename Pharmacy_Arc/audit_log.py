@@ -60,6 +60,7 @@ class AuditLogger:
                 'after_val':   entry.get('after'),
                 'context':     entry.get('context'),
                 'entry_hash':  entry.get('entry_hash'),
+                'previous_hash': entry.get('previous_hash'),
             }).execute()
         except Exception as e:
             import logging

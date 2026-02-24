@@ -7,7 +7,7 @@ import extensions
 from config import Config
 from helpers.auth_utils import require_auth, is_admin_role
 from helpers.validation import validate_audit_entry
-from helpers.offline_queue import save_to_queue, load_queue, clear_queue, get_queue_path
+from helpers.offline_queue import save_to_queue, load_queue, clear_queue, get_queue_path, _atomic_write_json
 from helpers.db import db_retry, is_unique_violation
 from helpers.exceptions import AuditNotFoundError, DuplicateEntryError, StoreMismatchError
 from services.audit_service import (
@@ -236,8 +236,7 @@ def sync():
             failed_items.append(item)
     if failed_items:
         q_path = get_queue_path()
-        with open(q_path, 'w', encoding='utf-8') as f:
-            json.dump(failed_items, f, ensure_ascii=False)
+        _atomic_write_json(q_path, failed_items)
     else:
         clear_queue()
     return jsonify(status="success", count=success_count, remaining=len(failed_items))
