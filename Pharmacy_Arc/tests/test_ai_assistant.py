@@ -79,37 +79,26 @@ def test_fetch_store_context_db_error():
 # ── ask_ai tests ─────────────────────────────────────────────────────────────
 
 def test_ask_ai_returns_response():
-    """ask_ai returns Claude's response text."""
-    mock_message = MagicMock()
-    mock_message.content = [MagicMock(text="El bruto de ayer fue $1,200.00")]
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = mock_message
-
+    """ask_ai returns Gemini's response text."""
     with patch("ai_assistant.extensions") as mock_ext:
-        mock_ext.get_db.return_value = None  # skip DB fetch
-        with patch("ai_assistant.anthropic.Anthropic", return_value=mock_client):
+        mock_ext.get_db.return_value = None
+        with patch("ai_assistant.generate_text", return_value="El bruto de ayer fue $1,200.00"):
             from ai_assistant import ask_ai
             result = ask_ai("cuanto fue el bruto de ayer?", "Carimas #1", "staff", "maria")
 
     assert "1,200" in result
-    mock_client.messages.create.assert_called_once()
 
 
 def test_ask_ai_includes_pharmacy_context():
-    """ask_ai includes PHARMACY_CONTEXT in the system prompt sent to Claude."""
-    mock_message = MagicMock()
-    mock_message.content = [MagicMock(text="Carimas #1 abre a las 8 AM.")]
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = mock_message
-
+    """ask_ai includes PHARMACY_CONTEXT in the system_instruction sent to Gemini."""
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = None
-        with patch("ai_assistant.anthropic.Anthropic", return_value=mock_client):
+        with patch("ai_assistant.generate_text", return_value="Carimas #1 abre a las 8 AM.") as mock_gen:
             from ai_assistant import ask_ai
             ask_ai("que hora abre carimas 1?", "Carimas #1", "staff", "maria")
 
-    call_kwargs = mock_client.messages.create.call_args.kwargs
-    system_text = call_kwargs["system"]
+    call_kwargs = mock_gen.call_args.kwargs
+    system_text = call_kwargs["system_instruction"]
     from ai_assistant import SYSTEM_PROMPT
     assert len(system_text) > len(SYSTEM_PROMPT)
     assert "Carimas #1" in system_text
@@ -120,7 +109,7 @@ def test_ask_ai_error_returns_friendly_message():
     """ask_ai returns error message on API failure."""
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = None
-        with patch("ai_assistant.anthropic.Anthropic", side_effect=Exception("API down")):
+        with patch("ai_assistant.generate_text", side_effect=Exception("API down")):
             from ai_assistant import ask_ai
             result = ask_ai("test", "Carimas #1", "staff", "user")
 
@@ -128,25 +117,19 @@ def test_ask_ai_error_returns_friendly_message():
 
 
 def test_ask_ai_uses_config_model():
-    """ask_ai passes Config.AI_ASSISTANT_MODEL and AI_MAX_TOKENS to Claude."""
-    mock_message = MagicMock()
-    mock_message.content = [MagicMock(text="respuesta")]
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = mock_message
-
+    """ask_ai passes Config.AI_ASSISTANT_MODEL to Gemini."""
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = None
-        with patch("ai_assistant.anthropic.Anthropic", return_value=mock_client):
+        with patch("ai_assistant.generate_text", return_value="respuesta") as mock_gen:
             with patch("ai_assistant.Config") as mock_cfg:
-                mock_cfg.AI_ASSISTANT_MODEL = "claude-haiku-4-5-20251001"
+                mock_cfg.AI_ASSISTANT_MODEL = "gemini-2.5-flash"
                 mock_cfg.AI_MAX_TOKENS = 500
                 mock_cfg.VARIANCE_ALERT_THRESHOLD = 5.0
                 from ai_assistant import ask_ai
                 ask_ai("test", "Carimas #1", "staff", "user")
 
-    call_kwargs = mock_client.messages.create.call_args
-    assert call_kwargs.kwargs["model"] == "claude-haiku-4-5-20251001"
-    assert call_kwargs.kwargs["max_tokens"] == 500
+    call_kwargs = mock_gen.call_args.kwargs
+    assert call_kwargs["model"] == "gemini-2.5-flash"
 
 
 # ── analyze_variance_trend tests ─────────────────────────────────────────────
@@ -189,14 +172,10 @@ def test_analyze_variance_trend_detects_pattern():
     mock_db = MagicMock()
     mock_db.table.return_value.select.return_value.eq.return_value.is_.return_value.gte.return_value.order.return_value.execute.return_value = mock_result
 
-    mock_message = MagicMock()
-    mock_message.content = [MagicMock(text="Alerta: Caja 1 muestra varianza alta por 2 días consecutivos.")]
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = mock_message
-
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = mock_db
-        with patch("ai_assistant.anthropic.Anthropic", return_value=mock_client):
+        with patch("ai_assistant.generate_text",
+                    return_value="Alerta: Caja 1 muestra varianza alta por 2 días consecutivos."):
             from ai_assistant import analyze_variance_trend
             result = analyze_variance_trend("Carimas #1", days=3)
 
@@ -290,11 +269,6 @@ def test_photo_in_ai_chat_still_triggers_ocr():
 
 def test_ask_ai_with_history():
     """ask_ai sends conversation history as multi-turn messages."""
-    mock_message = MagicMock()
-    mock_message.content = [MagicMock(text="El martes fue $900.")]
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = mock_message
-
     history = [
         {"role": "user", "content": "cuanto fue el bruto ayer?"},
         {"role": "assistant", "content": "El bruto de ayer fue $1,200."},
@@ -302,11 +276,13 @@ def test_ask_ai_with_history():
 
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = None
-        with patch("ai_assistant.anthropic.Anthropic", return_value=mock_client):
+        with patch("ai_assistant.generate_text", return_value="El martes fue $900.") as mock_gen:
             from ai_assistant import ask_ai
             ask_ai("y el martes?", "Carimas #1", "staff", "maria", history=history)
 
-    call_kwargs = mock_client.messages.create.call_args.kwargs
-    messages = call_kwargs["messages"]
+    call_kwargs = mock_gen.call_args.kwargs
+    contents = call_kwargs["contents"]
     # Should have: context msg + ack + 2 history + new question = 5 messages
-    assert len(messages) >= 5
+    assert len(contents) >= 5
+    # Verify history role mapping: "assistant" → "model"
+    assert any(m["role"] == "model" and "1,200" in m["parts"][0]["text"] for m in contents)

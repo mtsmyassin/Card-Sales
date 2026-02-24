@@ -94,8 +94,8 @@ class Config:
     SUPABASE_CONNECT_RETRIES: int = 3     # _init_supabase() startup retries
 
     # ── AI Assistant ─────────────────────────────────────────────────────────
-    AI_MODEL: str = os.getenv('AI_MODEL', 'claude-sonnet-4-6')
-    AI_ASSISTANT_MODEL: str = os.getenv('AI_ASSISTANT_MODEL', 'claude-haiku-4-5-20251001')
+    AI_MODEL: str = os.getenv('AI_MODEL', 'gemini-3-pro-preview')
+    AI_ASSISTANT_MODEL: str = os.getenv('AI_ASSISTANT_MODEL', 'gemini-2.5-flash')
     AI_MAX_TOKENS: int = int(os.getenv('AI_MAX_TOKENS', '500'))
 
     # ── Crypto ────────────────────────────────────────────────────────────────

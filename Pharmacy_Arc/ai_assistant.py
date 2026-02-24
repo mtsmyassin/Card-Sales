@@ -1,12 +1,13 @@
 """
 AI Assistant module for Carimas Telegram bot.
 Provides natural-language querying of sales data and variance analysis.
+Uses Google Gemini via REST API (no SDK dependencies).
 """
 import os
 import logging
 from datetime import datetime, timedelta, timezone
 
-import anthropic
+from gemini_client import generate_text
 
 import extensions
 from config import Config
@@ -97,7 +98,7 @@ def _fetch_store_context(store: str, days: int = 7) -> dict:
 
 def ask_ai(question: str, store: str, role: str, username: str,
            history: list[dict] | None = None) -> str:
-    """Send a question to Claude with store context and return the response.
+    """Send a question to Gemini with store context and return the response.
 
     Args:
         question: The user's question text.
@@ -125,25 +126,26 @@ def ask_ai(question: str, store: str, role: str, username: str,
             f"Variance: ${entry.get('variance', 0):.2f}\n"
         )
 
-    # Build message list: context as first user message, then history, then new question
-    messages = [
-        {"role": "user", "content": context_block + "\n(Data context — not a question.)"},
-        {"role": "assistant", "content": "Got it. I have the data context ready."},
+    # Build Gemini contents: context as first user message, then history, then question
+    contents = [
+        {"role": "user", "parts": [{"text": context_block + "\n(Data context — not a question.)"}]},
+        {"role": "model", "parts": [{"text": "Got it. I have the data context ready."}]},
     ]
     if history:
-        messages.extend(history[-10:])  # cap at last 10 messages (5 pairs)
-    messages.append({"role": "user", "content": question})
+        for msg_item in history[-10:]:  # cap at last 10 messages (5 pairs)
+            gemini_role = "model" if msg_item["role"] == "assistant" else "user"
+            contents.append({"role": gemini_role, "parts": [{"text": msg_item["content"]}]})
+    contents.append({"role": "user", "parts": [{"text": question}]})
 
     try:
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        message = client.messages.create(
+        text = generate_text(
             model=Config.AI_ASSISTANT_MODEL,
-            max_tokens=Config.AI_MAX_TOKENS,
-            system=SYSTEM_PROMPT + PHARMACY_CONTEXT,
-            messages=messages,
-            timeout=30.0,
+            contents=contents,
+            system_instruction=SYSTEM_PROMPT + PHARMACY_CONTEXT,
+            max_output_tokens=Config.AI_MAX_TOKENS,
+            timeout=30,
         )
-        return message.content[0].text.strip()
+        return text.strip()
     except Exception as e:
         logger.error(f"ask_ai failed: {e}")
         return "Sorry, an error occurred processing your question. Please try again. / Lo siento, ocurrió un error. Intenta de nuevo."
@@ -183,15 +185,15 @@ def analyze_variance_trend(store: str, days: int = 3) -> str | None:
     )
 
     try:
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        message = client.messages.create(
+        contents = [{"role": "user", "parts": [{"text": prompt}]}]
+        text = generate_text(
             model=Config.AI_ASSISTANT_MODEL,
-            max_tokens=200,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-            timeout=30.0,
+            contents=contents,
+            system_instruction=SYSTEM_PROMPT,
+            max_output_tokens=200,
+            timeout=30,
         )
-        return message.content[0].text.strip()
+        return text.strip()
     except Exception as e:
         logger.error(f"analyze_variance_trend failed for {store}: {e}")
         return None
