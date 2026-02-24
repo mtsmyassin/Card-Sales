@@ -602,8 +602,8 @@ def test_tg_retries_on_network_error():
     from telegram_bot import _tg, TelegramAPIError
     import requests
 
-    with patch("telegram_bot._token", return_value="fake-token"):
-        with patch("telegram_bot.http.post", side_effect=requests.ConnectionError("timeout")):
+    with patch("telegram.client._token", return_value="fake-token"):
+        with patch("telegram.client.http.post", side_effect=requests.ConnectionError("timeout")):
             with pytest.raises(TelegramAPIError) as exc_info:
                 _tg("getMe")
             assert exc_info.value.attempts == 2
@@ -616,8 +616,8 @@ def test_tg_returns_result_on_success():
     mock_resp = MagicMock()
     mock_resp.json.return_value = {"ok": True, "result": {"id": 123, "is_bot": True}}
 
-    with patch("telegram_bot._token", return_value="fake-token"):
-        with patch("telegram_bot.http.post", return_value=mock_resp):
+    with patch("telegram.client._token", return_value="fake-token"):
+        with patch("telegram.client.http.post", return_value=mock_resp):
             result = _tg("getMe")
     assert result == {"id": 123, "is_bot": True}
 
@@ -629,8 +629,8 @@ def test_tg_raises_on_telegram_error_response():
     mock_resp = MagicMock()
     mock_resp.json.return_value = {"ok": False, "description": "Bad Request: query is too old"}
 
-    with patch("telegram_bot._token", return_value="fake-token"):
-        with patch("telegram_bot.http.post", return_value=mock_resp):
+    with patch("telegram.client._token", return_value="fake-token"):
+        with patch("telegram.client.http.post", return_value=mock_resp):
             with pytest.raises(TelegramAPIError) as exc_info:
                 _tg("answerCallbackQuery", callback_query_id="expired")
             assert "Bad Request" in str(exc_info.value)
@@ -644,8 +644,8 @@ def test_tg_succeeds_on_second_attempt():
     mock_resp = MagicMock()
     mock_resp.json.return_value = {"ok": True, "result": {"message_id": 1}}
 
-    with patch("telegram_bot._token", return_value="fake-token"):
-        with patch("telegram_bot.http.post", side_effect=[
+    with patch("telegram.client._token", return_value="fake-token"):
+        with patch("telegram.client.http.post", side_effect=[
             requests.ConnectionError("first attempt"),
             mock_resp,
         ]):
@@ -658,14 +658,14 @@ def test_tg_succeeds_on_second_attempt():
 def test_send_message_safe_returns_true_on_success():
     from telegram_bot import send_message_safe
 
-    with patch("telegram_bot.send_message"):
+    with patch("telegram.client.send_message"):
         assert send_message_safe(123, "hello") is True
 
 
 def test_send_message_safe_returns_false_on_error():
     from telegram_bot import send_message_safe
 
-    with patch("telegram_bot.send_message", side_effect=Exception("network")):
+    with patch("telegram.client.send_message", side_effect=Exception("network")):
         assert send_message_safe(123, "hello") is False
 
 

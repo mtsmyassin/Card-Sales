@@ -152,19 +152,15 @@ class TestBotTokenFailFast:
 
     def test_token_function_raises_on_empty(self):
         """_token() must raise RuntimeError if TELEGRAM_BOT_TOKEN is not set."""
-        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": ""}):
-            import importlib
-            import telegram.client
-            importlib.reload(telegram.client)
-            with pytest.raises((RuntimeError, KeyError)):
+        import telegram.client
+        with patch.object(telegram.client, '_BOT_TOKEN', ''):
+            with pytest.raises(RuntimeError):
                 telegram.client._token()
 
     def test_token_function_returns_value_when_set(self):
         """_token() must return the token string when TELEGRAM_BOT_TOKEN is set."""
-        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "12345:ABCDEF"}):
-            import importlib
-            import telegram.client
-            importlib.reload(telegram.client)
+        import telegram.client
+        with patch.object(telegram.client, '_BOT_TOKEN', '12345:ABCDEF'):
             assert telegram.client._token() == "12345:ABCDEF"
 
 
