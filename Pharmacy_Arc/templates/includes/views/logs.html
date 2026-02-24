@@ -5,7 +5,7 @@
             <div style="display:flex;gap:10px;">
                 <select id="histRange" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="9999" selected>All</option><option value="30">Last 30 Days</option><option value="7">Last 7 Days</option><option value="0">Today</option><option value="custom">Custom</option></select>
                 <input type="date" id="historyFilter" onchange="document.getElementById('histRange').value='custom';app.filterHistory()" style="margin:0;padding:5px;">
-                <select id="histStoreFilter" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="All">All Stores</option><option>Carimas #1</option><option>Carimas #2</option><option>Carimas #3</option><option>Carimas #4</option><option>Carthage</option></select>
+                <select id="histStoreFilter" onchange="app.filterHistory()" style="margin:0;width:120px"><option value="All">All Stores</option>{% for s in stores %}<option>{{ s }}</option>{% endfor %}</select>
                 <button onclick="app.fetch()" class="btn-main" style="padding:7px 14px;font-size:12px;width:auto;">↻ Refresh</button>
                 <button onclick="app.exportCSV()" class="btn-main" style="padding:7px 14px;font-size:12px;width:auto;background:#047857;">📥 CSV</button>
             </div>

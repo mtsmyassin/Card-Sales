@@ -5,7 +5,7 @@
             <input type="text" id="u_name" placeholder="Username">
             <input type="password" id="u_pass" placeholder="Password" autocomplete="new-password">
             <select id="u_role"><option value="staff">Staff</option><option value="manager">Manager</option><option value="admin">Admin</option><option value="super_admin">Super Admin</option></select>
-            <select id="u_store"><option value="All">All (Admin)</option><option>Carimas #1</option><option>Carimas #2</option><option>Carimas #3</option><option>Carimas #4</option><option>Carthage</option></select>
+            <select id="u_store"><option value="All">All (Admin)</option>{% for s in stores %}<option>{{ s }}</option>{% endfor %}</select>
         </div>
         <button id="userSaveBtn" class="btn-main" onclick="app.saveUser()" style="margin-top:10px">Create User</button>
         <br><br><div id="userTable"></div>

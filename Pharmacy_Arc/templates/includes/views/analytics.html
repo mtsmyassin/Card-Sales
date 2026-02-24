@@ -5,11 +5,7 @@
                 <span class="control-label">Scope</span>
                 <select id="anStoreFilter" onchange="app.renderAnalytics()" style="width:200px;margin:0">
                     <option value="All">All Locations</option>
-                    <option>Carimas #1</option>
-                    <option>Carimas #2</option>
-                    <option>Carimas #3</option>
-                    <option>Carimas #4</option>
-                    <option>Carthage</option>
+                    {% for s in stores %}<option>{{ s }}</option>{% endfor %}
                 </select>
             </div>
             <div class="control-group">

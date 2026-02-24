@@ -113,7 +113,7 @@ def verify_web_credentials(username: str, password: str) -> dict | None:
                 return {"username": username, "role": role, "store": "All"}
             return None
 
-        result_rows = rows(supabase.table("users").select("*").ilike("username", username).execute())
+        result_rows = rows(supabase.table("users").select("*").eq("username", username).execute())
         if not result_rows:
             return None
         user = result_rows[0]
