@@ -207,7 +207,7 @@ class TestNewBotFlow:
         assert any("payout" in r.lower() or "desembolso" in r.lower() for r in replies)
 
     def test_yes_confirmation_saves_entry_and_photo(self):
-        """YES in AWAITING_CONFIRMATION calls save_audit_entry + save_photo_record."""
+        """YES in AWAITING_CONFIRMATION calls save_audit_entry + save_photo_record + send_photo_safe."""
         from telegram_bot import bot_state, handle_update
 
         bot_state.clear()
@@ -220,15 +220,18 @@ class TestNewBotFlow:
             "retry_count": 0,
         }
         replies = []
+        photo_calls = []
 
         with patch("telegram_bot.send_message", side_effect=lambda c, t, **kw: replies.append(t)):
-            with patch("telegram_bot.upload_image_to_storage", return_value="Carimas2/2026-02-20/reg2_123.jpg"):
-                with patch("telegram_bot.save_audit_entry", return_value=99):
-                    with patch("telegram_bot.save_photo_record") as mock_photo:
-                        handle_update(make_text_update(105, "YES"))
+            with patch("telegram_bot.send_photo_safe", side_effect=lambda c, img, **kw: photo_calls.append(kw)):
+                with patch("telegram_bot.upload_image_to_storage", return_value="Carimas2/2026-02-20/reg2_123.jpg"):
+                    with patch("telegram_bot.save_audit_entry", return_value=99):
+                        with patch("telegram_bot.save_photo_record") as mock_photo:
+                            handle_update(make_text_update(105, "YES"))
 
         assert bot_state[105]["state"] == "REGISTERED"
-        assert any("guardado" in r.lower() for r in replies)
+        assert len(photo_calls) == 1
+        assert "guardado" in photo_calls[0].get("caption", "").lower()
         mock_photo.assert_called_once_with(
             entry_id=99,
             store="Carimas #2",

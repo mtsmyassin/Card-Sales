@@ -72,6 +72,48 @@ def send_message_safe(chat_id: int, text: str, reply_markup: dict | None = None)
         return False
 
 
+def send_photo(chat_id: int, photo_bytes: bytes, caption: str = "", reply_markup: dict | None = None) -> None:
+    """Send a photo via Telegram Bot API using multipart upload."""
+    import json as _json
+    data: dict = {"chat_id": chat_id}
+    if caption:
+        data["caption"] = caption
+    if reply_markup:
+        data["reply_markup"] = _json.dumps(reply_markup)
+    files = {"photo": ("z_report.jpg", photo_bytes, "image/jpeg")}
+    last_error = None
+    for attempt in range(1, 3):
+        try:
+            resp = http.post(
+                f"https://api.telegram.org/bot{_token()}/sendPhoto",
+                data=data,
+                files=files,
+                timeout=30,
+            )
+            result = resp.json()
+            if not result.get("ok"):
+                raise TelegramAPIError("sendPhoto", result.get("description", "unknown"), attempt)
+            return
+        except TelegramAPIError:
+            raise
+        except Exception as e:
+            last_error = e
+            logger.warning(f"send_photo attempt {attempt}/2 failed: {e}")
+            if attempt < 2:
+                time.sleep(1)
+    raise TelegramAPIError("sendPhoto", str(last_error), 2)
+
+
+def send_photo_safe(chat_id: int, photo_bytes: bytes, caption: str = "", reply_markup: dict | None = None) -> bool:
+    """Send a photo, swallowing exceptions. Returns True on success."""
+    try:
+        send_photo(chat_id, photo_bytes, caption, reply_markup)
+        return True
+    except Exception as e:
+        logger.error(f"send_photo_safe({chat_id}) failed: {e}")
+        return False
+
+
 def _log_dead_letter(telegram_id: int, callback_data: str, error: Exception) -> None:
     """Log a structured dead-letter entry for failed callback processing."""
     logger.error(

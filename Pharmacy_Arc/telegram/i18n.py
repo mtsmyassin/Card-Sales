@@ -22,7 +22,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "bad_reg": "Ingresa un numero de caja (ej. 1) o responde OK para mantener el valor del OCR.",
         "yes_no": "Responde SI para guardar o NO para cancelar.",
         "saved": (
-            "Guardado{photo_note}. Caja #{reg} -- ${gross:.2f} bruto.\n"
+            "Guardado. Caja #{reg} -- ${gross:.2f} bruto.\n"
             "Si no lo ves en la app, selecciona el filtro 'Todos'."
         ),
         "cancelled": "Cancelado. Envia otra foto cuando estes listo.",
@@ -147,7 +147,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "bad_reg": "Enter a register number (e.g. 1) or reply OK to keep the OCR value.",
         "yes_no": "Reply YES to save or NO to cancel.",
         "saved": (
-            "Saved{photo_note}. Register #{reg} -- ${gross:.2f} gross.\n"
+            "Saved. Register #{reg} -- ${gross:.2f} gross.\n"
             "If you don't see it in the app, select the 'All' filter."
         ),
         "cancelled": "Cancelled. Send another photo when ready.",

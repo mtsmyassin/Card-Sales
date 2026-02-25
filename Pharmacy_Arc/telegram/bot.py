@@ -24,6 +24,8 @@ from telegram.client import (
     download_photo,
     send_message,
     send_message_safe,
+    send_photo,
+    send_photo_safe,
 )
 from telegram.i18n import _STORE_CHOICE, KNOWN_STORES, MESSAGES, msg
 from telegram.session import (
@@ -271,6 +273,9 @@ def _handle_actual_cash(telegram_id, chat_id, text, state):
 
     state["state"] = "AWAITING_CONFIRMATION"
     _set_state(telegram_id, state)
+    image_bytes = state.get("pending_image_bytes")
+    if image_bytes:
+        send_photo_safe(chat_id, image_bytes, caption=msg(telegram_id, "preview_header"))
     send_message(
         chat_id, _format_preview(state["pending_data"], telegram_id), reply_markup=_build_inline_save(telegram_id)
     )
@@ -545,16 +550,15 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
             "retry_count": 0,
         }
         _set_state(telegram_id, new_state)
-        photo_note = " (foto adjunta)" if storage_path and entry_id else ""
         saved_text = msg(
             telegram_id,
             "saved",
-            photo_note=photo_note,
             reg=ocr_data.get("register", "?"),
             gross=gross,
         )
 
         variance = ocr_data.get("variance") or 0
+        insight = ""
         if variance != 0:
             try:
                 insight = ask_ai(
@@ -564,11 +568,22 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
                     "system",
                     username,
                 )
-                saved_text += f"\n\n{insight}"
             except Exception as e:
                 logger.debug(f"[BOT sid={sid}] AI insight skipped: {e}")
 
-        send_message(chat_id, saved_text, reply_markup=_kb_registered(telegram_id))
+        if image_bytes and storage_path:
+            photo_caption = saved_text
+            if insight:
+                photo_caption += f"\n\n{insight}"
+            send_photo_safe(chat_id, image_bytes, caption=photo_caption)
+            if insight:
+                send_message(chat_id, insight, reply_markup=_kb_registered(telegram_id))
+            else:
+                send_message(chat_id, msg(telegram_id, "photo_send"), reply_markup=_kb_registered(telegram_id))
+        else:
+            if insight:
+                saved_text += f"\n\n{insight}"
+            send_message(chat_id, saved_text, reply_markup=_kb_registered(telegram_id))
 
     elif _ascii_upper(text) == "NO":
         new_state = {

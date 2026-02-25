@@ -146,15 +146,18 @@ def test_confirmation_yes_saves_entry():
         "retry_count": 0,
     }
     replies = []
+    photo_calls = []
 
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
-        with patch("telegram_bot.upload_image_to_storage", return_value="https://img.url/file.jpg"):
-            with patch("telegram_bot.save_audit_entry", return_value=99):
-                with patch("telegram_bot.save_photo_record"):
-                    handle_update(make_text_update(444, "YES"))
+        with patch("telegram_bot.send_photo_safe", side_effect=lambda cid, img, **kw: photo_calls.append((cid, kw))) as mock_photo:
+            with patch("telegram_bot.upload_image_to_storage", return_value="https://img.url/file.jpg"):
+                with patch("telegram_bot.save_audit_entry", return_value=99):
+                    with patch("telegram_bot.save_photo_record"):
+                        handle_update(make_text_update(444, "YES"))
 
     assert bot_state[444]["state"] == "REGISTERED"
-    assert any("guardado" in r.lower() for r in replies)
+    assert len(photo_calls) == 1  # photo sent with saved caption
+    assert "guardado" in photo_calls[0][1].get("caption", "").lower()
 
 
 def test_confirmation_no_cancels():
@@ -276,7 +279,7 @@ def test_callback_date_ok():
 
 
 def test_callback_save_yes():
-    """Inline save:yes button saves the entry."""
+    """Inline save:yes button saves the entry and sends photo."""
     from telegram_bot import bot_state, handle_update
 
     bot_state.clear()
@@ -304,17 +307,20 @@ def test_callback_save_yes():
         "retry_count": 0,
     }
     replies = []
+    photo_calls = []
 
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
-        with patch("telegram_bot._tg") as mock_tg:
-            mock_tg.return_value = {"ok": True}
-            with patch("telegram_bot.upload_image_to_storage", return_value="path/file.jpg"):
-                with patch("telegram_bot.save_audit_entry", return_value=99):
-                    with patch("telegram_bot.save_photo_record"):
-                        handle_update(make_callback_update(902, "save:yes"))
+        with patch("telegram_bot.send_photo_safe", side_effect=lambda cid, img, **kw: photo_calls.append((cid, kw))):
+            with patch("telegram_bot._tg") as mock_tg:
+                mock_tg.return_value = {"ok": True}
+                with patch("telegram_bot.upload_image_to_storage", return_value="path/file.jpg"):
+                    with patch("telegram_bot.save_audit_entry", return_value=99):
+                        with patch("telegram_bot.save_photo_record"):
+                            handle_update(make_callback_update(902, "save:yes"))
 
     assert bot_state[902]["state"] == "REGISTERED"
-    assert any("guardado" in r.lower() for r in replies)
+    assert len(photo_calls) == 1  # photo sent with saved caption
+    assert "guardado" in photo_calls[0][1].get("caption", "").lower()
 
 
 def test_date_confirmation_shows_inline_keyboard():
@@ -540,7 +546,8 @@ def test_payout_then_cash_calculates_variance():
     # = (440 - 100) - (500 - 50) = 340 - 450 = -110
     replies.clear()
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
-        handle_update(make_text_update(941, "440"))
+        with patch("telegram_bot.send_photo_safe", return_value=True):
+            handle_update(make_text_update(941, "440"))
     assert bot_state[941]["state"] == "AWAITING_CONFIRMATION"
     assert bot_state[941]["pending_actual_cash"] == 440.0
     assert bot_state[941]["pending_variance"] == -110.0
@@ -578,7 +585,8 @@ def test_payout_skip_actual_cash():
     replies = []
 
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
-        handle_update(make_text_update(942, "omitir"))
+        with patch("telegram_bot.send_photo_safe", return_value=True):
+            handle_update(make_text_update(942, "omitir"))
     assert bot_state[942]["state"] == "AWAITING_CONFIRMATION"
     assert bot_state[942]["pending_variance"] is None  # OCR variance kept
 
@@ -930,3 +938,130 @@ def test_lang_command_shows_language_keyboard():
     assert len(messages) >= 1
     # Should have inline keyboard with language options
     assert any("reply_markup" in kw for _, kw in messages)
+
+
+# ── send_photo tests ──────────────────────────────────────────────────────
+
+def test_send_photo_safe_at_awaiting_confirmation():
+    """send_photo_safe is called when entering AWAITING_CONFIRMATION with image bytes."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    good_ocr = {
+        "register": 2, "date": "2026-02-22",
+        "cash": 500.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
+        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
+        "sss": 0.0, "variance": 0,
+    }
+    bot_state[960] = {
+        "state": "AWAITING_ACTUAL_CASH",
+        "store": "Carimas #1",
+        "username": "maria",
+        "pending_data": good_ocr,
+        "pending_image_bytes": b"fake_photo_bytes",
+        "pending_payouts": 0.0,
+        "retry_count": 0,
+    }
+    photo_calls = []
+
+    with patch("telegram_bot.send_message"):
+        with patch("telegram_bot.send_photo_safe", side_effect=lambda cid, img, **kw: photo_calls.append((cid, img, kw))) as mock_photo:
+            handle_update(make_text_update(960, "500"))
+
+    assert bot_state[960]["state"] == "AWAITING_CONFIRMATION"
+    assert len(photo_calls) == 1
+    assert photo_calls[0][0] == 960  # chat_id
+    assert photo_calls[0][1] == b"fake_photo_bytes"
+
+
+def test_send_photo_safe_at_save_success():
+    """send_photo_safe is called at save success when pending_image_bytes exists."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    good_ocr = {
+        "register": 3, "date": "2026-02-22",
+        "cash": 200.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
+        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
+        "sss": 0.0, "variance": 0,
+    }
+    bot_state[961] = {
+        "state": "AWAITING_CONFIRMATION",
+        "store": "Carimas #2",
+        "username": "pedro",
+        "pending_data": good_ocr,
+        "pending_image_bytes": b"real_photo_bytes",
+        "retry_count": 0,
+    }
+    photo_calls = []
+
+    with patch("telegram_bot.send_message"):
+        with patch("telegram_bot.send_photo_safe", side_effect=lambda cid, img, **kw: photo_calls.append((cid, img, kw))):
+            with patch("telegram_bot.upload_image_to_storage", return_value="storage/path.jpg"):
+                with patch("telegram_bot.save_audit_entry", return_value=42):
+                    with patch("telegram_bot.save_photo_record"):
+                        handle_update(make_text_update(961, "YES"))
+
+    assert bot_state[961]["state"] == "REGISTERED"
+    assert len(photo_calls) == 1
+    assert photo_calls[0][1] == b"real_photo_bytes"
+    assert "guardado" in photo_calls[0][2].get("caption", "").lower()
+
+
+def test_save_no_photo_falls_back_to_text():
+    """When pending_image_bytes is missing, save sends text-only message."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    good_ocr = {
+        "register": 1, "date": "2026-02-22",
+        "cash": 100.0, "ath": 0.0, "athm": 0.0, "visa": 0.0,
+        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
+        "sss": 0.0, "variance": 0,
+    }
+    bot_state[962] = {
+        "state": "AWAITING_CONFIRMATION",
+        "store": "Carimas #1",
+        "username": "ana",
+        "pending_data": good_ocr,
+        # No pending_image_bytes
+        "retry_count": 0,
+    }
+    replies = []
+    photo_calls = []
+
+    with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
+        with patch("telegram_bot.send_photo_safe", side_effect=lambda cid, img, **kw: photo_calls.append(1)):
+            with patch("telegram_bot.upload_image_to_storage", return_value=None):
+                with patch("telegram_bot.save_audit_entry", return_value=50):
+                    handle_update(make_text_update(962, "YES"))
+
+    assert bot_state[962]["state"] == "REGISTERED"
+    assert len(photo_calls) == 0  # no photo sent
+    assert any("guardado" in r.lower() for r in replies)
+
+
+def test_no_photo_at_confirmation_preview_when_no_bytes():
+    """send_photo_safe is NOT called at AWAITING_CONFIRMATION if no image bytes."""
+    from telegram_bot import handle_update, bot_state
+    bot_state.clear()
+    good_ocr = {
+        "register": 1, "date": "2026-02-22",
+        "cash": 200.0, "ath": 0.0, "athm": 0.0, "visa": 0.0,
+        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
+        "sss": 0.0, "variance": 0,
+    }
+    bot_state[963] = {
+        "state": "AWAITING_ACTUAL_CASH",
+        "store": "Carimas #1",
+        "username": "pedro",
+        "pending_data": good_ocr,
+        # No pending_image_bytes — simulates restored session
+        "pending_payouts": 0.0,
+        "retry_count": 0,
+    }
+    photo_calls = []
+
+    with patch("telegram_bot.send_message"):
+        with patch("telegram_bot.send_photo_safe", side_effect=lambda cid, img, **kw: photo_calls.append(1)):
+            handle_update(make_text_update(963, "200"))
+
+    assert bot_state[963]["state"] == "AWAITING_CONFIRMATION"
+    assert len(photo_calls) == 0  # no photo because no bytes
