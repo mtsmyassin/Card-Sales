@@ -2,13 +2,14 @@
 """
 Test script to verify CRITICAL and HIGH priority fixes.
 """
+
 import sys
 from pathlib import Path
 
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-_OPEN = lambda p: open(p, 'r', encoding='utf-8')
+def _OPEN(p): return open(p, encoding="utf-8")  # noqa: E731
 
 print("=" * 80)
 print("VERIFYING SECURITY FIXES")
@@ -20,13 +21,13 @@ issues_found = []
 # Test 1: Verify /api/sync has @require_auth()
 print("\n[TEST 1] Verifying /api/sync endpoint protection...")
 try:
-    with _OPEN('app.py') as f:
+    with _OPEN("app.py") as f:
         content = f.read()
-    
+
     sync_pos = content.find("def sync():")
     if sync_pos > 0:
-        section_before = content[max(0, sync_pos-100):sync_pos]
-        if '@require_auth()' in section_before or '@require_auth(' in section_before:
+        section_before = content[max(0, sync_pos - 100) : sync_pos]
+        if "@require_auth()" in section_before or "@require_auth(" in section_before:
             print("[FIXED]: /api/sync now protected with @require_auth()")
             fixes_verified.append("CRITICAL-1: /api/sync protected")
         else:
@@ -40,18 +41,18 @@ except Exception as e:
 print("\n[TEST 2] Verifying session fixation fix...")
 try:
     # login() now lives in routes/auth.py (refactored from app.py)
-    _login_src = 'routes/auth.py' if Path('routes/auth.py').exists() else 'app.py'
+    _login_src = "routes/auth.py" if Path("routes/auth.py").exists() else "app.py"
     with _OPEN(_login_src) as f:
         content = f.read()
 
     # Check for session.clear() in login function
-    if 'session.clear()' in content and 'Regenerate session' in content:
-        count = content.count('session.clear()')
+    if "session.clear()" in content and "Regenerate session" in content:
+        count = content.count("session.clear()")
         if count >= 2:  # Should be at least 2 (emergency + database login)
             print(f"[FIXED]: Session regenerated on login ({count} locations)")
             fixes_verified.append("HIGH-1: Session fixation fixed")
         else:
-            print(f"[PARTIAL]: Session clearing found but may not cover all paths")
+            print("[PARTIAL]: Session clearing found but may not cover all paths")
             issues_found.append("HIGH-1: Session fixation partially fixed")
     else:
         print("[NOT FIXED]: Session not regenerated on login")
@@ -63,11 +64,11 @@ except Exception as e:
 # Test 3: Verify lockout persistence
 print("\n[TEST 3] Verifying lockout persistence...")
 try:
-    with _OPEN('security.py') as f:
+    with _OPEN("security.py") as f:
         content = f.read()
-    
-    if '_save_state' in content and '_load_state' in content:
-        if 'state_file' in content and 'json.dump' in content:
+
+    if "_save_state" in content and "_load_state" in content:
+        if "state_file" in content and "json.dump" in content:
             print("[FIXED]: Lockout state now persisted to file")
             fixes_verified.append("HIGH-2: Lockout persistence added")
         else:
@@ -83,11 +84,11 @@ except Exception as e:
 # Test 4: Verify HTTPS enforcement
 print("\n[TEST 4] Verifying HTTPS enforcement...")
 try:
-    with _OPEN('app.py') as f:
+    with _OPEN("app.py") as f:
         content = f.read()
-    
-    if 'enforce_https' in content or 'request.is_secure' in content:
-        if 'redirect' in content and 'https://' in content:
+
+    if "enforce_https" in content or "request.is_secure" in content:
+        if "redirect" in content and "https://" in content:
             print("[FIXED]: HTTPS enforcement middleware added")
             fixes_verified.append("HIGH-3: HTTPS enforcement implemented")
         else:
@@ -103,10 +104,10 @@ except Exception as e:
 # Test 5: Verify lockout_state.json in gitignore
 print("\n[TEST 5] Verifying lockout state file in .gitignore...")
 try:
-    with _OPEN('../.gitignore') as f:
+    with _OPEN("../.gitignore") as f:
         content = f.read()
-    
-    if 'lockout_state.json' in content:
+
+    if "lockout_state.json" in content:
         print("[FIXED]: lockout_state.json added to .gitignore")
         fixes_verified.append("EXTRA: .gitignore updated")
     else:

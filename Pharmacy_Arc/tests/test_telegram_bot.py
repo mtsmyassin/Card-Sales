@@ -1,9 +1,11 @@
 """Tests for Telegram bot state machine (Spanish UI, AWAITING_DATE/REGISTER flow)."""
-import pytest
-from unittest.mock import patch, MagicMock
 
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def make_text_update(telegram_id: int, text: str) -> dict:
     return {
@@ -30,8 +32,10 @@ def make_photo_update(telegram_id: int) -> dict:
 
 # ── registration flow tests ───────────────────────────────────────────────────
 
+
 def test_unregistered_user_gets_welcome():
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     replies = []
 
@@ -45,7 +49,8 @@ def test_unregistered_user_gets_welcome():
 
 
 def test_registration_wrong_password():
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[111] = {"state": "AWAITING_USERNAME"}
     replies = []
@@ -65,7 +70,8 @@ def test_registration_wrong_password():
 
 
 def test_registration_success():
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[222] = {"state": "AWAITING_PASSWORD", "username": "maria"}
     replies = []
@@ -81,15 +87,25 @@ def test_registration_success():
 
 
 def test_already_registered_photo_triggers_ocr():
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[333] = {"state": "REGISTERED", "store": "Carimas #1", "username": "pedro"}
     replies = []
     good_ocr = {
-        "register": 2, "date": "2026-07-13",
-        "cash": 100.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
-        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
-        "sss": 0.0, "variance": -1.5,
+        "register": 2,
+        "date": "2026-07-13",
+        "cash": 100.0,
+        "ath": 50.0,
+        "athm": 0.0,
+        "visa": 25.0,
+        "mc": 0.0,
+        "amex": 0.0,
+        "disc": 0.0,
+        "wic": 0.0,
+        "mcs": 0.0,
+        "sss": 0.0,
+        "variance": -1.5,
     }
 
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
@@ -103,13 +119,23 @@ def test_already_registered_photo_triggers_ocr():
 
 
 def test_confirmation_yes_saves_entry():
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     good_ocr = {
-        "register": 2, "date": "2026-07-13",
-        "cash": 100.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
-        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
-        "sss": 0.0, "variance": -1.5,
+        "register": 2,
+        "date": "2026-07-13",
+        "cash": 100.0,
+        "ath": 50.0,
+        "athm": 0.0,
+        "visa": 25.0,
+        "mc": 0.0,
+        "amex": 0.0,
+        "disc": 0.0,
+        "wic": 0.0,
+        "mcs": 0.0,
+        "sss": 0.0,
+        "variance": -1.5,
     }
     bot_state[444] = {
         "state": "AWAITING_CONFIRMATION",
@@ -132,7 +158,8 @@ def test_confirmation_yes_saves_entry():
 
 
 def test_confirmation_no_cancels():
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[555] = {
         "state": "AWAITING_CONFIRMATION",
@@ -152,8 +179,9 @@ def test_confirmation_no_cancels():
 
 
 def test_ocr_failure_increments_retry():
-    from telegram_bot import handle_update, bot_state
     from ocr import OCRParseError
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[666] = {"state": "REGISTERED", "store": "Carimas #1", "username": "ana", "retry_count": 0}
     replies = []
@@ -168,8 +196,9 @@ def test_ocr_failure_increments_retry():
 
 
 def test_ocr_failure_twice_tells_manual():
-    from telegram_bot import handle_update, bot_state
     from ocr import OCRParseError
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[777] = {"state": "REGISTERED", "store": "Carimas #1", "username": "ana", "retry_count": 1}
     replies = []
@@ -185,8 +214,10 @@ def test_ocr_failure_twice_tells_manual():
 
 # ── callback query helpers & tests ───────────────────────────────────────────
 
+
 def make_callback_update(telegram_id: int, data: str, message_id: int = 1) -> dict:
     import time as _time
+
     return {
         "callback_query": {
             "id": "cb_123",
@@ -203,7 +234,8 @@ def make_callback_update(telegram_id: int, data: str, message_id: int = 1) -> di
 
 def test_callback_query_store_selection():
     """Inline button callback for store selection sets the store."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[900] = {
         "state": "AWAITING_STORE",
@@ -222,7 +254,8 @@ def test_callback_query_store_selection():
 
 def test_callback_date_ok():
     """Inline date OK button progresses to register confirmation."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[901] = {
         "state": "AWAITING_DATE",
@@ -244,13 +277,23 @@ def test_callback_date_ok():
 
 def test_callback_save_yes():
     """Inline save:yes button saves the entry."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     good_ocr = {
-        "register": 2, "date": "2026-02-22",
-        "cash": 100.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
-        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
-        "sss": 0.0, "variance": -1.5,
+        "register": 2,
+        "date": "2026-02-22",
+        "cash": 100.0,
+        "ath": 50.0,
+        "athm": 0.0,
+        "visa": 25.0,
+        "mc": 0.0,
+        "amex": 0.0,
+        "disc": 0.0,
+        "wic": 0.0,
+        "mcs": 0.0,
+        "sss": 0.0,
+        "variance": -1.5,
     }
     bot_state[902] = {
         "state": "AWAITING_CONFIRMATION",
@@ -276,7 +319,8 @@ def test_callback_save_yes():
 
 def test_date_confirmation_shows_inline_keyboard():
     """After OCR, date confirmation includes inline keyboard."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[910] = {"state": "REGISTERED", "store": "Carimas #1", "username": "pedro", "retry_count": 0}
     markups = []
@@ -285,10 +329,19 @@ def test_date_confirmation_shows_inline_keyboard():
         markups.append(reply_markup)
 
     good_ocr = {
-        "register": 2, "date": "2026-02-22",
-        "cash": 100.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
-        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
-        "sss": 0.0, "variance": -1.5,
+        "register": 2,
+        "date": "2026-02-22",
+        "cash": 100.0,
+        "ath": 50.0,
+        "athm": 0.0,
+        "visa": 25.0,
+        "mc": 0.0,
+        "amex": 0.0,
+        "disc": 0.0,
+        "wic": 0.0,
+        "mcs": 0.0,
+        "sss": 0.0,
+        "variance": -1.5,
     }
 
     with patch("telegram_bot.send_message", side_effect=capture_msg):
@@ -303,9 +356,11 @@ def test_date_confirmation_shows_inline_keyboard():
 
 # ── AI conversation memory tests ────────────────────────────────────────────
 
+
 def test_ai_chat_builds_history():
     """AI chat accumulates conversation history."""
-    from telegram_bot import handle_update, bot_state, _ai_history
+    from telegram_bot import _ai_history, bot_state, handle_update
+
     bot_state.clear()
     _ai_history.clear()
     bot_state[920] = {"state": "AI_CHAT", "store": "Carimas #1", "username": "maria", "retry_count": 0}
@@ -328,7 +383,8 @@ def test_ai_chat_builds_history():
 
 def test_ai_history_cleared_on_cancel_button():
     """AI history is cleared when user taps Cancel button."""
-    from telegram_bot import handle_update, bot_state, _ai_history, MESSAGES
+    from telegram_bot import MESSAGES, _ai_history, bot_state, handle_update
+
     bot_state.clear()
     _ai_history.clear()
     _ai_history[921] = [
@@ -346,7 +402,8 @@ def test_ai_history_cleared_on_cancel_button():
 
 def test_ai_history_cleared_on_slash_cancel():
     """AI history is cleared when user sends /cancel."""
-    from telegram_bot import handle_update, bot_state, _ai_history
+    from telegram_bot import _ai_history, bot_state, handle_update
+
     bot_state.clear()
     _ai_history.clear()
     _ai_history[922] = [
@@ -364,9 +421,11 @@ def test_ai_history_cleared_on_slash_cancel():
 
 # ── /last command tests ──────────────────────────────────────────────────────
 
+
 def test_slash_last_shows_recent_entry():
     """The /last command shows the most recent audit entry."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[925] = {"state": "REGISTERED", "store": "Carimas #1", "username": "maria", "retry_count": 0}
     replies = []
@@ -388,7 +447,8 @@ def test_slash_last_shows_recent_entry():
 
 def test_slash_last_no_store():
     """The /last command for 'All' store shows an appropriate message."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[926] = {"state": "REGISTERED", "store": "All", "username": "admin1", "retry_count": 0}
     replies = []
@@ -401,15 +461,26 @@ def test_slash_last_no_store():
 
 # ── payout entry flow tests ──────────────────────────────────────────────────
 
+
 def test_register_ok_goes_to_payouts():
     """After register confirmation, bot asks for payouts (not direct to confirmation)."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     good_ocr = {
-        "register": 2, "date": "2026-02-22",
-        "cash": 500.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
-        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
-        "sss": 0.0, "variance": -1.5,
+        "register": 2,
+        "date": "2026-02-22",
+        "cash": 500.0,
+        "ath": 50.0,
+        "athm": 0.0,
+        "visa": 25.0,
+        "mc": 0.0,
+        "amex": 0.0,
+        "disc": 0.0,
+        "wic": 0.0,
+        "mcs": 0.0,
+        "sss": 0.0,
+        "variance": -1.5,
     }
     bot_state[940] = {
         "state": "AWAITING_REGISTER",
@@ -430,13 +501,23 @@ def test_register_ok_goes_to_payouts():
 
 def test_payout_then_cash_calculates_variance():
     """Entering payouts and actual cash auto-calculates variance."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     good_ocr = {
-        "register": 2, "date": "2026-02-22",
-        "cash": 500.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
-        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
-        "sss": 0.0, "variance": 0,
+        "register": 2,
+        "date": "2026-02-22",
+        "cash": 500.0,
+        "ath": 50.0,
+        "athm": 0.0,
+        "visa": 25.0,
+        "mc": 0.0,
+        "amex": 0.0,
+        "disc": 0.0,
+        "wic": 0.0,
+        "mcs": 0.0,
+        "sss": 0.0,
+        "variance": 0,
     }
     bot_state[941] = {
         "state": "AWAITING_PAYOUTS",
@@ -467,13 +548,23 @@ def test_payout_then_cash_calculates_variance():
 
 def test_payout_skip_actual_cash():
     """User can skip actual cash entry to keep OCR variance."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     good_ocr = {
-        "register": 2, "date": "2026-02-22",
-        "cash": 500.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
-        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
-        "sss": 0.0, "variance": -3.0,
+        "register": 2,
+        "date": "2026-02-22",
+        "cash": 500.0,
+        "ath": 50.0,
+        "athm": 0.0,
+        "visa": 25.0,
+        "mc": 0.0,
+        "amex": 0.0,
+        "disc": 0.0,
+        "wic": 0.0,
+        "mcs": 0.0,
+        "sss": 0.0,
+        "variance": -3.0,
     }
     bot_state[942] = {
         "state": "AWAITING_ACTUAL_CASH",
@@ -494,15 +585,25 @@ def test_payout_skip_actual_cash():
 
 def test_ocr_null_fields_gives_specific_guidance():
     """When OCR can't read specific fields, error gives specific tips."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[930] = {"state": "REGISTERED", "store": "Carimas #1", "username": "ana", "retry_count": 0}
     replies = []
     partial_ocr = {
-        "register": 2, "date": "2026-02-22",
-        "cash": None, "ath": 50.0, "athm": 0.0, "visa": None,
-        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
-        "sss": 0.0, "variance": -1.5,
+        "register": 2,
+        "date": "2026-02-22",
+        "cash": None,
+        "ath": 50.0,
+        "athm": 0.0,
+        "visa": None,
+        "mc": 0.0,
+        "amex": 0.0,
+        "disc": 0.0,
+        "wic": 0.0,
+        "mcs": 0.0,
+        "sss": 0.0,
+        "variance": -1.5,
     }
 
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
@@ -517,9 +618,11 @@ def test_ocr_null_fields_gives_specific_guidance():
 
 # ── broadcast command tests ──────────────────────────────────────────────────
 
+
 def test_broadcast_by_admin():
     """Admin can /broadcast a message; enters BROADCAST_CONFIRM state."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[950] = {"state": "REGISTERED", "store": "All", "username": "admin1", "retry_count": 0}
     replies = []
@@ -529,11 +632,14 @@ def test_broadcast_by_admin():
         {"telegram_id": 101, "store": "Carimas #1"},
         {"telegram_id": 102, "store": "Carimas #2"},
     ]
+    mock_role = MagicMock()
+    mock_role.data = [{"role": "admin"}]
     mock_db = MagicMock()
     mock_db.table.return_value.select.return_value.execute.return_value = mock_users
+    mock_db.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_role
 
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
-        with patch("telegram_bot.get_bot_user", return_value={"role": "admin"}):
+        with patch("telegram_bot.get_bot_user", return_value={"role": "admin", "username": "admin1"}):
             with patch("telegram_bot.extensions") as mock_ext:
                 mock_ext.get_db.return_value = mock_db
                 handle_update(make_text_update(950, "/broadcast Cierre temprano hoy"))
@@ -545,7 +651,8 @@ def test_broadcast_by_admin():
 
 def test_broadcast_denied_for_staff():
     """Non-admin users cannot use /broadcast."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[951] = {"state": "REGISTERED", "store": "Carimas #1", "username": "staff1", "retry_count": 0}
     replies = []
@@ -560,7 +667,8 @@ def test_broadcast_denied_for_staff():
 
 def test_broadcast_confirm_sends_to_users():
     """Confirming broadcast sends message to all bot users except self."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[952] = {
         "state": "BROADCAST_CONFIRM",
@@ -597,10 +705,11 @@ def test_broadcast_confirm_sends_to_users():
 
 # ── _tg() resilience tests ──────────────────────────────────────────────────
 
+
 def test_tg_retries_on_network_error():
     """_tg retries once on network error before raising TelegramAPIError."""
-    from telegram_bot import _tg, TelegramAPIError
     import requests
+    from telegram_bot import TelegramAPIError, _tg
 
     with patch("telegram.client._token", return_value="fake-token"):
         with patch("telegram.client.http.post", side_effect=requests.ConnectionError("timeout")):
@@ -624,7 +733,7 @@ def test_tg_returns_result_on_success():
 
 def test_tg_raises_on_telegram_error_response():
     """_tg raises TelegramAPIError when Telegram returns ok=false."""
-    from telegram_bot import _tg, TelegramAPIError
+    from telegram_bot import TelegramAPIError, _tg
 
     mock_resp = MagicMock()
     mock_resp.json.return_value = {"ok": False, "description": "Bad Request: query is too old"}
@@ -638,22 +747,26 @@ def test_tg_raises_on_telegram_error_response():
 
 def test_tg_succeeds_on_second_attempt():
     """_tg retries and succeeds on the second attempt after a network error."""
-    from telegram_bot import _tg
     import requests
+    from telegram_bot import _tg
 
     mock_resp = MagicMock()
     mock_resp.json.return_value = {"ok": True, "result": {"message_id": 1}}
 
     with patch("telegram.client._token", return_value="fake-token"):
-        with patch("telegram.client.http.post", side_effect=[
-            requests.ConnectionError("first attempt"),
-            mock_resp,
-        ]):
+        with patch(
+            "telegram.client.http.post",
+            side_effect=[
+                requests.ConnectionError("first attempt"),
+                mock_resp,
+            ],
+        ):
             result = _tg("sendMessage", chat_id=123, text="hi")
     assert result == {"message_id": 1}
 
 
 # ── send_message_safe tests ──────────────────────────────────────────────────
+
 
 def test_send_message_safe_returns_true_on_success():
     from telegram_bot import send_message_safe
@@ -671,8 +784,10 @@ def test_send_message_safe_returns_false_on_error():
 
 # ── bilingual msg() helper tests ─────────────────────────────────────────────
 
+
 def test_msg_returns_spanish_by_default():
-    from telegram_bot import msg, bot_state
+    from telegram_bot import bot_state, msg
+
     bot_state.clear()
     bot_state[999] = {"lang": "es"}
     result = msg(999, "processing")
@@ -680,7 +795,8 @@ def test_msg_returns_spanish_by_default():
 
 
 def test_msg_returns_english_when_set():
-    from telegram_bot import msg, bot_state
+    from telegram_bot import bot_state, msg
+
     bot_state.clear()
     bot_state[999] = {"lang": "en"}
     result = msg(999, "processing")
@@ -688,7 +804,8 @@ def test_msg_returns_english_when_set():
 
 
 def test_msg_formats_placeholders():
-    from telegram_bot import msg, bot_state
+    from telegram_bot import bot_state, msg
+
     bot_state.clear()
     bot_state[999] = {"lang": "en"}
     result = msg(999, "registered", store="Test Store")
@@ -696,7 +813,8 @@ def test_msg_formats_placeholders():
 
 
 def test_msg_defaults_to_spanish_for_unknown_user():
-    from telegram_bot import msg, bot_state
+    from telegram_bot import bot_state, msg
+
     bot_state.clear()
     result = msg(0, "processing")
     assert "espera" in result.lower()
@@ -704,12 +822,13 @@ def test_msg_defaults_to_spanish_for_unknown_user():
 
 # ── callback resilience tests ────────────────────────────────────────────────
 
-import time as time_module
+import time as time_module  # noqa: E402 — intentional late import for test isolation
 
 
 def test_callback_guarantees_answer_on_crash():
     """answerCallbackQuery is called even when the handler crashes."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[901] = {"state": "AWAITING_DATE", "lang": "es"}
     tg_calls = []
@@ -739,7 +858,8 @@ def test_callback_guarantees_answer_on_crash():
 
 def test_callback_expired_button_shows_alert():
     """Expired buttons get answered with show_alert=True and no processing."""
-    from telegram_bot import handle_update, bot_state, BUTTON_TIMEOUT_SECONDS
+    from telegram_bot import BUTTON_TIMEOUT_SECONDS, bot_state, handle_update
+
     bot_state.clear()
     bot_state[901] = {"state": "AWAITING_DATE", "lang": "es"}
     tg_calls = []
@@ -769,7 +889,8 @@ def test_callback_expired_button_shows_alert():
 
 def test_callback_state_mismatch_sends_expired_message():
     """When state doesn't match any route, user gets an expiry message."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[901] = {"state": "REGISTERED", "lang": "en"}
     messages = []
@@ -792,15 +913,19 @@ def test_callback_state_mismatch_sends_expired_message():
 
 # ── /lang command tests ──────────────────────────────────────────────────────
 
+
 def test_lang_command_shows_language_keyboard():
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[901] = {"state": "REGISTERED", "store": "Test", "username": "u", "lang": "es"}
     messages = []
 
     with patch("telegram_bot._tg", return_value=True):
         with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: messages.append((txt, kw))):
-            handle_update({"message": {"from": {"id": 901, "username": "testuser"}, "chat": {"id": 901}, "text": "/lang"}})
+            handle_update(
+                {"message": {"from": {"id": 901, "username": "testuser"}, "chat": {"id": 901}, "text": "/lang"}}
+            )
 
     assert len(messages) >= 1
     # Should have inline keyboard with language options

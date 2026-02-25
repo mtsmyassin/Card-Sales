@@ -1,23 +1,25 @@
 """Diagnostics Blueprint — /api/diagnostics health and status endpoint."""
-import os
+
 import logging
-from flask import Blueprint, current_app, jsonify, session
-from audit_log import get_audit_logger
+import os
+
 import extensions
+from audit_log import get_audit_logger
+from config import Config
+from flask import Blueprint, current_app, jsonify, session
 from helpers.auth_utils import require_auth
 from helpers.offline_queue import load_queue
-from config import Config
 
 _BUCKET = Config.STORAGE_BUCKET
 
 logger = logging.getLogger(__name__)
-bp = Blueprint('diagnostics', __name__)
+bp = Blueprint("diagnostics", __name__)
 
-_PORT = int(os.getenv('PORT', str(Config.PORT)))
+_PORT = int(os.getenv("PORT", str(Config.PORT)))
 
 
-@bp.route('/api/diagnostics')
-@require_auth(['admin', 'super_admin'])
+@bp.route("/api/diagnostics")
+@require_auth(["admin", "super_admin"])
 @extensions.limiter.limit(Config.RATELIMIT_READ)
 def diagnostics():
     """
@@ -43,10 +45,10 @@ def diagnostics():
 
         # Get session info
         session_info = {
-            "user": session.get('user'),
-            "role": session.get('role'),
-            "store": session.get('store'),
-            "login_time": session.get('login_time'),
+            "user": session.get("user"),
+            "role": session.get("role"),
+            "store": session.get("store"),
+            "login_time": session.get("login_time"),
         }
 
         supabase_url = Config.SUPABASE_URL
@@ -56,7 +58,9 @@ def diagnostics():
             "database": {
                 "status": db_status,
                 "url": supabase_url[:30] + "..." if len(supabase_url) > 30 else supabase_url,
-                "admin_client": "configured" if extensions.has_admin_client() else "NOT SET — bot inserts will fail RLS",
+                "admin_client": "configured"
+                if extensions.has_admin_client()
+                else "NOT SET — bot inserts will fail RLS",
             },
             "audit_log": {
                 "integrity": "valid" if audit_valid else "FAILED",
@@ -84,14 +88,14 @@ def diagnostics():
         # Scheduler status
         scheduler_info = {"status": "not_available"}
         try:
-            sched = getattr(current_app._get_current_object(), '_scheduler', None)
+            sched = getattr(current_app._get_current_object(), "_scheduler", None)
             if sched:
                 jobs = sched.get_jobs()
                 scheduler_info = {
                     "status": "running" if sched.running else "stopped",
                     "jobs": [{"id": j.id, "next_run": str(j.next_run_time)} for j in jobs],
                 }
-        except Exception:
+        except Exception:  # noqa: S110 — scheduler info is optional diagnostic
             pass
         diagnostics_data["scheduler"] = scheduler_info
 
@@ -110,14 +114,25 @@ def diagnostics():
             storage_info["z_reports_bucket"] = "error: bucket check failed"
 
         try:
-            count_resp = _db.table("z_report_photos").select(
-                "id", count="exact"  # type: ignore[arg-type]
-            ).execute()
+            count_resp = (
+                _db.table("z_report_photos")
+                .select(
+                    "id",
+                    count="exact",  # type: ignore[arg-type]
+                )
+                .execute()
+            )
             storage_info["photos_total"] = count_resp.count or 0
 
-            no_path_resp = _db.table("z_report_photos").select(
-                "id", count="exact"  # type: ignore[arg-type]
-            ).eq("storage_path", "").execute()
+            no_path_resp = (
+                _db.table("z_report_photos")
+                .select(
+                    "id",
+                    count="exact",  # type: ignore[arg-type]
+                )
+                .eq("storage_path", "")
+                .execute()
+            )
             storage_info["photos_missing_path"] = no_path_resp.count or 0
         except Exception as diag_err:
             logger.warning(f"diagnostics storage query failed: {diag_err}")

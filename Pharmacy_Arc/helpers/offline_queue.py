@@ -3,16 +3,19 @@ Offline queue: persists audit entries to a local JSON file when Supabase is
 unavailable. Path helpers and logo loader live in helpers/paths.py and are
 re-exported here for backward compatibility.
 """
-import os
+
 import json
 import logging
+import os
 import threading
+
 from config import Config
+
 from helpers.paths import get_base_path, get_logo  # noqa: F401 — re-exported
 
 logger = logging.getLogger(__name__)
 
-OFFLINE_QUEUE_MAX_SIZE = int(os.getenv('OFFLINE_QUEUE_MAX_SIZE', '2000'))
+OFFLINE_QUEUE_MAX_SIZE = int(os.getenv("OFFLINE_QUEUE_MAX_SIZE", "2000"))
 OFFLINE_FILE = Config.OFFLINE_FILE
 _queue_lock = threading.Lock()
 
@@ -20,10 +23,11 @@ _queue_lock = threading.Lock()
 def _atomic_write_json(path: str, data) -> None:
     """Write JSON atomically using temp file + os.replace."""
     import tempfile
-    dir_name = os.path.dirname(path) or '.'
-    fd, tmp = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+
+    dir_name = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
     try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         os.replace(tmp, path)
     except BaseException:
@@ -33,10 +37,11 @@ def _atomic_write_json(path: str, data) -> None:
             pass
         raise
 
+
 # Railway (and similar cloud platforms) use ephemeral filesystems — data written
 # to disk is silently lost on every deploy. Detect this so save_to_queue can
 # refuse to pretend data is safe when it isn't.
-_IS_EPHEMERAL_FS = bool(os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('RAILWAY_PUBLIC_DOMAIN'))
+_IS_EPHEMERAL_FS = bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_PUBLIC_DOMAIN"))
 
 
 def get_queue_path() -> str:
@@ -67,21 +72,24 @@ def save_to_queue(payload: dict) -> bool:
         queue = []
         if os.path.exists(q_path):
             try:
-                with open(q_path, encoding='utf-8') as fh:
+                with open(q_path, encoding="utf-8") as fh:
                     queue = json.load(fh)
             except Exception as load_err:
                 logger.warning(f"Corrupt offline queue at {q_path}, backing up and starting fresh: {load_err}")
                 try:
                     import shutil
-                    shutil.copy2(q_path, q_path + '.corrupt')
+
+                    shutil.copy2(q_path, q_path + ".corrupt")
                 except OSError:
                     pass
                 queue = []
         if len(queue) >= OFFLINE_QUEUE_MAX_SIZE:
             logger.error(
                 "Offline queue FULL (%d/%d) — record dropped: date=%s store=%s",
-                len(queue), OFFLINE_QUEUE_MAX_SIZE,
-                payload.get('date'), payload.get('store'),
+                len(queue),
+                OFFLINE_QUEUE_MAX_SIZE,
+                payload.get("date"),
+                payload.get("store"),
             )
             return False
         queue.append(payload)
@@ -95,7 +103,7 @@ def load_queue() -> list:
         q_path = get_queue_path()
         if os.path.exists(q_path):
             try:
-                with open(q_path, encoding='utf-8') as fh:
+                with open(q_path, encoding="utf-8") as fh:
                     data = json.load(fh)
                 if not isinstance(data, list):
                     logger.warning(f"Offline queue is not a list ({type(data).__name__}), discarding")

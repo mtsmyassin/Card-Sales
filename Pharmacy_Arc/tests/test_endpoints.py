@@ -1,6 +1,6 @@
 """Endpoint integration tests — validates routes, RBAC, error codes, and edge cases."""
+
 import importlib
-import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -23,6 +23,7 @@ def _load_app():
         with patch("supabase.create_client", return_value=MagicMock()):
             with patch("config.Config.startup_check"):
                 import app as app_module
+
                 importlib.reload(app_module)
                 app_module.app.config["TESTING"] = True
                 app_module.app.config["WTF_CSRF_ENABLED"] = False
@@ -73,10 +74,12 @@ class TestMainBlueprint:
 
     def test_health_returns_json(self, client, flask_app):
         import extensions
+
         db = MagicMock()
-        db.table.return_value.select.return_value.limit.return_value.execute.return_value = MagicMock(data=[{"username": "x"}])
-        with patch.object(extensions, "supabase_admin", db), \
-             patch.object(extensions, "supabase", db):
+        db.table.return_value.select.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{"username": "x"}]
+        )
+        with patch.object(extensions, "supabase_admin", db), patch.object(extensions, "supabase", db):
             r = client.get("/health")
         data = r.get_json()
         assert "status" in data
@@ -143,15 +146,25 @@ class TestAuditsBlueprintSave:
     def test_save_duplicate_returns_409(self, client, flask_app):
         _set_session(client)
         import extensions
+
         db = _mock_db()
         # Duplicate check returns existing record
-        db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.execute.return_value = MagicMock(data=[{"id": 1}])
-        with patch.object(extensions, "supabase_admin", db), \
-             patch.object(extensions, "supabase", db):
-            r = client.post("/api/save", json={
-                "date": "2025-01-01", "reg": "R1", "staff": "Alice",
-                "gross": 100, "net": 90, "variance": 0, "store": "Main",
-            })
+        db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.execute.return_value = MagicMock(
+            data=[{"id": 1}]
+        )
+        with patch.object(extensions, "supabase_admin", db), patch.object(extensions, "supabase", db):
+            r = client.post(
+                "/api/save",
+                json={
+                    "date": "2025-01-01",
+                    "reg": "R1",
+                    "staff": "Alice",
+                    "gross": 100,
+                    "net": 90,
+                    "variance": 0,
+                    "store": "Main",
+                },
+            )
         assert r.status_code == 409
         assert r.get_json().get("code") == "DUPLICATE"
 
@@ -188,11 +201,13 @@ class TestAuditsBlueprintDelete:
     def test_delete_not_found(self, client, flask_app):
         _set_session(client, role="admin")
         import extensions
+
         db = _mock_db()
         # Fetch for before-state returns nothing
-        db.table.return_value.select.return_value.eq.return_value.is_.return_value.execute.return_value = MagicMock(data=[])
-        with patch.object(extensions, "supabase_admin", db), \
-             patch.object(extensions, "supabase", db):
+        db.table.return_value.select.return_value.eq.return_value.is_.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+        with patch.object(extensions, "supabase_admin", db), patch.object(extensions, "supabase", db):
             r = client.post("/api/delete", json={"id": 9999})
         assert r.status_code == 404
         assert r.get_json().get("code") == "NOT_FOUND"
@@ -206,11 +221,13 @@ class TestAuditsBlueprintList:
     def test_list_success(self, client, flask_app):
         _set_session(client, role="admin")
         import extensions
+
         db = _mock_db()
-        db.table.return_value.select.return_value.is_.return_value.order.return_value.range.return_value.execute.return_value = MagicMock(data=[])
+        db.table.return_value.select.return_value.is_.return_value.order.return_value.range.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
         db.table.return_value.select.return_value.in_.return_value.execute.return_value = MagicMock(data=[])
-        with patch.object(extensions, "supabase_admin", db), \
-             patch.object(extensions, "supabase", db):
+        with patch.object(extensions, "supabase_admin", db), patch.object(extensions, "supabase", db):
             r = client.get("/api/list")
         assert r.status_code == 200
 
@@ -234,19 +251,29 @@ class TestAuditsBlueprintSync:
     def test_sync_success(self, client, flask_app):
         _set_session(client, role="admin")
         import extensions
+
         db = _mock_db()
         # Duplicate check returns no match
-        db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+        db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
         db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": 1}])
         queue_item = {
-            "date": "2025-01-01", "reg": "R1", "staff": "Alice",
-            "gross": 100, "net": 90, "variance": 0, "store": "Main",
+            "date": "2025-01-01",
+            "reg": "R1",
+            "staff": "Alice",
+            "gross": 100,
+            "net": 90,
+            "variance": 0,
+            "store": "Main",
         }
-        with patch.object(extensions, "supabase_admin", db), \
-             patch.object(extensions, "supabase", db), \
-             patch("routes.audits.load_queue", return_value=[queue_item]), \
-             patch("routes.audits.clear_queue"), \
-             patch("routes.audits.audit_log"):
+        with (
+            patch.object(extensions, "supabase_admin", db),
+            patch.object(extensions, "supabase", db),
+            patch("routes.audits.load_queue", return_value=[queue_item]),
+            patch("routes.audits.clear_queue"),
+            patch("routes.audits.audit_log"),
+        ):
             r = client.post("/api/sync")
         data = r.get_json()
         assert r.status_code == 200
@@ -256,19 +283,29 @@ class TestAuditsBlueprintSync:
         """Non-admin users should have their store overridden from session."""
         _set_session(client, role="manager", store="Carimas #1", user="mgr1")
         import extensions
+
         db = _mock_db()
-        db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+        db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
         db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": 1}])
         # Queue item has a different store — should be overridden
         queue_item = {
-            "date": "2025-01-01", "reg": "R1", "staff": "Alice",
-            "gross": 100, "net": 90, "variance": 0, "store": "Carimas #2",
+            "date": "2025-01-01",
+            "reg": "R1",
+            "staff": "Alice",
+            "gross": 100,
+            "net": 90,
+            "variance": 0,
+            "store": "Carimas #2",
         }
-        with patch.object(extensions, "supabase_admin", db), \
-             patch.object(extensions, "supabase", db), \
-             patch("routes.audits.load_queue", return_value=[queue_item]), \
-             patch("routes.audits.clear_queue"), \
-             patch("routes.audits.audit_log"):
+        with (
+            patch.object(extensions, "supabase_admin", db),
+            patch.object(extensions, "supabase", db),
+            patch("routes.audits.load_queue", return_value=[queue_item]),
+            patch("routes.audits.clear_queue"),
+            patch("routes.audits.audit_log"),
+        ):
             r = client.post("/api/sync")
         assert r.status_code == 200
 
@@ -319,9 +356,9 @@ class TestUsersBlueprint:
     def test_delete_user_self_forbidden(self, client, flask_app):
         _set_session(client, role="admin", user="testadmin")
         import extensions
+
         db = _mock_db()
-        with patch.object(extensions, "supabase_admin", db), \
-             patch.object(extensions, "supabase", db):
+        with patch.object(extensions, "supabase_admin", db), patch.object(extensions, "supabase", db):
             r = client.post("/api/users/delete", json={"username": "testadmin"})
         assert r.status_code == 403
         assert r.get_json().get("code") == "FORBIDDEN"
@@ -329,10 +366,10 @@ class TestUsersBlueprint:
     def test_delete_user_not_found(self, client, flask_app):
         _set_session(client, role="admin", user="admin1")
         import extensions
+
         db = _mock_db()
         db.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
-        with patch.object(extensions, "supabase_admin", db), \
-             patch.object(extensions, "supabase", db):
+        with patch.object(extensions, "supabase_admin", db), patch.object(extensions, "supabase", db):
             r = client.post("/api/users/delete", json={"username": "ghost"})
         assert r.status_code == 404
         assert r.get_json().get("code") == "NOT_FOUND"
@@ -343,16 +380,21 @@ class TestUsersBlueprint:
 
 class TestTelegramBlueprint:
     def test_webhook_missing_secret(self, client):
-        r = client.post("/api/telegram/webhook", json={"update_id": 1},
-                        headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"})
+        r = client.post(
+            "/api/telegram/webhook", json={"update_id": 1}, headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"}
+        )
         assert r.status_code == 403
 
     def test_webhook_empty_body(self, client):
         from config import Config
+
         with patch.object(Config, "TELEGRAM_WEBHOOK_SECRET", "test-secret"):
-            r = client.post("/api/telegram/webhook",
-                            content_type="application/json", data="null",
-                            headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"})
+            r = client.post(
+                "/api/telegram/webhook",
+                content_type="application/json",
+                data="null",
+                headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
+            )
         assert r.status_code == 400
 
     def test_photos_missing_entry_id(self, client):
@@ -375,10 +417,12 @@ class TestTelegramBlueprint:
     def test_delete_photo_not_found(self, client, flask_app):
         _set_session(client, role="admin")
         import extensions
+
         db = _mock_db()
-        db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data=None)
-        with patch.object(extensions, "supabase_admin", db), \
-             patch.object(extensions, "supabase", db):
+        db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
+            MagicMock(data=None)
+        )
+        with patch.object(extensions, "supabase_admin", db), patch.object(extensions, "supabase", db):
             r = client.delete("/api/zreport/photo/999")
         assert r.status_code == 404
         assert r.get_json().get("code") == "NOT_FOUND"
@@ -396,10 +440,11 @@ class TestDiagnosticsBlueprint:
     def test_diagnostics_admin_ok(self, client, flask_app):
         _set_session(client, role="admin")
         import extensions
-        from audit_log import get_audit_logger
 
         db = _mock_db()
-        db.table.return_value.select.return_value.limit.return_value.execute.return_value = MagicMock(data=[{"username": "x"}])
+        db.table.return_value.select.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{"username": "x"}]
+        )
         db.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[], count=0)
         db.storage.from_.return_value.list.return_value = []
 
@@ -407,9 +452,11 @@ class TestDiagnosticsBlueprint:
         audit_logger.verify_integrity.return_value = (True, [])
         audit_logger.get_entries.return_value = []
 
-        with patch.object(extensions, "supabase_admin", db), \
-             patch.object(extensions, "supabase", db), \
-             patch("routes.diagnostics.get_audit_logger", return_value=audit_logger):
+        with (
+            patch.object(extensions, "supabase_admin", db),
+            patch.object(extensions, "supabase", db),
+            patch("routes.diagnostics.get_audit_logger", return_value=audit_logger),
+        ):
             r = client.get("/api/diagnostics")
         assert r.status_code == 200
         data = r.get_json()

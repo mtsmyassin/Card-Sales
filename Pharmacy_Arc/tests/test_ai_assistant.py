@@ -1,9 +1,9 @@
 """Tests for AI assistant module and AI_CHAT bot state."""
-import pytest
-from unittest.mock import patch, MagicMock
 
+from unittest.mock import MagicMock, patch
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def make_text_update(telegram_id: int, text: str) -> dict:
     return {
@@ -30,11 +30,13 @@ def make_photo_update(telegram_id: int) -> dict:
 
 # ── _fetch_store_context tests ───────────────────────────────────────────────
 
+
 def test_fetch_store_context_no_db():
     """Returns empty context when DB is unavailable."""
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = None
         from ai_assistant import _fetch_store_context
+
         result = _fetch_store_context("Carimas #1")
     assert result["entries"] == []
     assert result["total_gross"] == 0
@@ -55,6 +57,7 @@ def test_fetch_store_context_with_data():
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = mock_db
         from ai_assistant import _fetch_store_context
+
         result = _fetch_store_context("Carimas #1")
 
     assert result["total_gross"] == 1800.0
@@ -71,6 +74,7 @@ def test_fetch_store_context_db_error():
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = mock_db
         from ai_assistant import _fetch_store_context
+
         result = _fetch_store_context("Carimas #1")
 
     assert result["entries"] == []
@@ -78,12 +82,14 @@ def test_fetch_store_context_db_error():
 
 # ── ask_ai tests ─────────────────────────────────────────────────────────────
 
+
 def test_ask_ai_returns_response():
     """ask_ai returns Gemini's response text."""
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = None
         with patch("ai_assistant.generate_text", return_value="El bruto de ayer fue $1,200.00"):
             from ai_assistant import ask_ai
+
             result = ask_ai("cuanto fue el bruto de ayer?", "Carimas #1", "staff", "maria")
 
     assert "1,200" in result
@@ -95,11 +101,13 @@ def test_ask_ai_includes_pharmacy_context():
         mock_ext.get_db.return_value = None
         with patch("ai_assistant.generate_text", return_value="Carimas #1 abre a las 8 AM.") as mock_gen:
             from ai_assistant import ask_ai
+
             ask_ai("que hora abre carimas 1?", "Carimas #1", "staff", "maria")
 
     call_kwargs = mock_gen.call_args.kwargs
     system_text = call_kwargs["system_instruction"]
     from ai_assistant import SYSTEM_PROMPT
+
     assert len(system_text) > len(SYSTEM_PROMPT)
     assert "Carimas #1" in system_text
     assert "Hours" in system_text or "hours" in system_text
@@ -111,6 +119,7 @@ def test_ask_ai_error_returns_friendly_message():
         mock_ext.get_db.return_value = None
         with patch("ai_assistant.generate_text", side_effect=Exception("API down")):
             from ai_assistant import ask_ai
+
             result = ask_ai("test", "Carimas #1", "staff", "user")
 
     assert "error" in result.lower() or "intenta" in result.lower()
@@ -126,6 +135,7 @@ def test_ask_ai_uses_config_model():
                 mock_cfg.AI_MAX_TOKENS = 500
                 mock_cfg.VARIANCE_ALERT_THRESHOLD = 5.0
                 from ai_assistant import ask_ai
+
                 ask_ai("test", "Carimas #1", "staff", "user")
 
     call_kwargs = mock_gen.call_args.kwargs
@@ -134,11 +144,13 @@ def test_ask_ai_uses_config_model():
 
 # ── analyze_variance_trend tests ─────────────────────────────────────────────
 
+
 def test_analyze_variance_trend_insufficient_data():
     """Returns None when fewer than 2 entries."""
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = None
         from ai_assistant import analyze_variance_trend
+
         result = analyze_variance_trend("Carimas #1", days=3)
     assert result is None
 
@@ -157,6 +169,7 @@ def test_analyze_variance_trend_no_high_variance():
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = mock_db
         from ai_assistant import analyze_variance_trend
+
         result = analyze_variance_trend("Carimas #1", days=3)
     assert result is None
 
@@ -174,9 +187,11 @@ def test_analyze_variance_trend_detects_pattern():
 
     with patch("ai_assistant.extensions") as mock_ext:
         mock_ext.get_db.return_value = mock_db
-        with patch("ai_assistant.generate_text",
-                    return_value="Alerta: Caja 1 muestra varianza alta por 2 días consecutivos."):
+        with patch(
+            "ai_assistant.generate_text", return_value="Alerta: Caja 1 muestra varianza alta por 2 días consecutivos."
+        ):
             from ai_assistant import analyze_variance_trend
+
             result = analyze_variance_trend("Carimas #1", days=3)
 
     assert result is not None
@@ -185,9 +200,11 @@ def test_analyze_variance_trend_detects_pattern():
 
 # ── AI_CHAT state transitions in telegram_bot ────────────────────────────────
 
+
 def test_preguntar_ai_button_enters_ai_chat():
     """Tapping 'Preguntar AI' button transitions to AI_CHAT."""
-    from telegram_bot import handle_update, bot_state, MESSAGES
+    from telegram_bot import MESSAGES, bot_state, handle_update
+
     bot_state.clear()
     bot_state[800] = {"state": "REGISTERED", "store": "Carimas #1", "username": "maria", "retry_count": 0}
     replies = []
@@ -201,7 +218,8 @@ def test_preguntar_ai_button_enters_ai_chat():
 
 def test_cancel_button_exits_ai_chat():
     """Tapping 'Cancelar' button from AI_CHAT returns to REGISTERED."""
-    from telegram_bot import handle_update, bot_state, MESSAGES
+    from telegram_bot import MESSAGES, bot_state, handle_update
+
     bot_state.clear()
     bot_state[801] = {"state": "AI_CHAT", "store": "Carimas #1", "username": "maria", "retry_count": 0}
     replies = []
@@ -215,7 +233,8 @@ def test_cancel_button_exits_ai_chat():
 
 def test_slash_cancel_exits_ai_chat():
     """/cancel from AI_CHAT returns to REGISTERED."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[802] = {"state": "AI_CHAT", "store": "Carimas #1", "username": "maria", "retry_count": 0}
     replies = []
@@ -228,7 +247,8 @@ def test_slash_cancel_exits_ai_chat():
 
 def test_ai_chat_routes_text_to_ai():
     """Text in AI_CHAT state calls ask_ai and returns response."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[803] = {"state": "AI_CHAT", "store": "Carimas #1", "username": "maria", "retry_count": 0}
     replies = []
@@ -244,15 +264,25 @@ def test_ai_chat_routes_text_to_ai():
 
 def test_photo_in_ai_chat_still_triggers_ocr():
     """Photos sent while in AI_CHAT state still go through OCR flow."""
-    from telegram_bot import handle_update, bot_state
+    from telegram_bot import bot_state, handle_update
+
     bot_state.clear()
     bot_state[804] = {"state": "AI_CHAT", "store": "Carimas #1", "username": "pedro", "retry_count": 0}
     replies = []
     good_ocr = {
-        "register": 2, "date": "2026-02-22",
-        "cash": 100.0, "ath": 50.0, "athm": 0.0, "visa": 25.0,
-        "mc": 0.0, "amex": 0.0, "disc": 0.0, "wic": 0.0, "mcs": 0.0,
-        "sss": 0.0, "variance": -1.5,
+        "register": 2,
+        "date": "2026-02-22",
+        "cash": 100.0,
+        "ath": 50.0,
+        "athm": 0.0,
+        "visa": 25.0,
+        "mc": 0.0,
+        "amex": 0.0,
+        "disc": 0.0,
+        "wic": 0.0,
+        "mcs": 0.0,
+        "sss": 0.0,
+        "variance": -1.5,
     }
 
     with patch("telegram_bot.send_message", side_effect=lambda cid, txt, **kw: replies.append(txt)):
@@ -267,6 +297,7 @@ def test_photo_in_ai_chat_still_triggers_ocr():
 
 # ── ask_ai with history test ─────────────────────────────────────────────────
 
+
 def test_ask_ai_with_history():
     """ask_ai sends conversation history as multi-turn messages."""
     history = [
@@ -278,6 +309,7 @@ def test_ask_ai_with_history():
         mock_ext.get_db.return_value = None
         with patch("ai_assistant.generate_text", return_value="El martes fue $900.") as mock_gen:
             from ai_assistant import ask_ai
+
             ask_ai("y el martes?", "Carimas #1", "staff", "maria", history=history)
 
     call_kwargs = mock_gen.call_args.kwargs

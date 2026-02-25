@@ -1,10 +1,13 @@
 """Audit service — encapsulates DB operations for audit entries."""
+
 import logging
+from datetime import UTC
+
 import extensions
 from helpers.auth_utils import is_admin_role
-from helpers.supabase_types import rows
 from helpers.db import db_retry, is_unique_violation
 from helpers.exceptions import AuditNotFoundError, DuplicateEntryError, StoreMismatchError
+from helpers.supabase_types import rows
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +31,7 @@ def check_store_access(audit_data: dict, user_role: str, user_store: str) -> Non
     """
     if is_admin_role(user_role):
         return
-    entry_store = audit_data.get('store')
+    entry_store = audit_data.get("store")
     if entry_store != user_store:
         raise StoreMismatchError(user_store=user_store, target_store=entry_store)
 
@@ -36,12 +39,15 @@ def check_store_access(audit_data: dict, user_role: str, user_store: str) -> Non
 def check_duplicate(date: str, store: str, reg: str) -> None:
     """Check for duplicate audit entry. Raises DuplicateEntryError if found."""
     db = extensions.get_db()
-    dup_rows = rows(db.table("audits").select("id")
+    dup_rows = rows(
+        db.table("audits")
+        .select("id")
         .eq("date", date)
         .eq("store", store)
         .eq("reg", reg)
         .is_("deleted_at", "null")
-        .execute())
+        .execute()
+    )
     if dup_rows:
         raise DuplicateEntryError(date=date, store=store, reg=reg)
 
@@ -61,9 +67,9 @@ def insert_audit(record: dict) -> dict:
     except Exception as e:
         if is_unique_violation(e):
             raise DuplicateEntryError(
-                date=record.get('date', ''),
-                store=record.get('store', ''),
-                reg=record.get('reg', ''),
+                date=record.get("date", ""),
+                store=record.get("store", ""),
+                reg=record.get("reg", ""),
             ) from e
         raise
 
@@ -78,10 +84,15 @@ def update_audit(audit_id: int, record: dict) -> None:
 
 def soft_delete_audit(audit_id: int) -> None:
     """Soft-delete an audit entry by setting deleted_at."""
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     db_retry(
-        lambda: extensions.get_db().table("audits").update(
-            {"deleted_at": datetime.now(timezone.utc).isoformat()}
-        ).eq("id", audit_id).execute(),
+        lambda: (
+            extensions.get_db()
+            .table("audits")
+            .update({"deleted_at": datetime.now(UTC).isoformat()})
+            .eq("id", audit_id)
+            .execute()
+        ),
         label="soft_delete_audit",
     )

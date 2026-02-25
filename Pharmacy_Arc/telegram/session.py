@@ -1,9 +1,9 @@
 """Bot session state management — in-memory cache + Supabase persistence."""
+
 import logging
 import threading
 
 import extensions
-from config import Config
 from helpers.supabase_types import rows
 
 logger = logging.getLogger(__name__)
@@ -19,15 +19,17 @@ def persist_session(telegram_id: int, state: dict) -> None:
         client = extensions.get_db()
         if client is None:
             return
-        client.table("bot_sessions").upsert({
-            "telegram_id": telegram_id,
-            "state": state.get("state", "AWAITING_USERNAME"),
-            "username": state.get("username"),
-            "store": state.get("store"),
-            "retry_count": state.get("retry_count", 0),
-            "pending_data": state.get("pending_data"),
-            "lang": state.get("lang", "es"),
-        }).execute()
+        client.table("bot_sessions").upsert(
+            {
+                "telegram_id": telegram_id,
+                "state": state.get("state", "AWAITING_USERNAME"),
+                "username": state.get("username"),
+                "store": state.get("store"),
+                "retry_count": state.get("retry_count", 0),
+                "pending_data": state.get("pending_data"),
+                "lang": state.get("lang", "es"),
+            }
+        ).execute()
     except Exception as e:
         logger.warning(f"persist_session failed for {telegram_id}: {e}")
 
@@ -68,9 +70,7 @@ def is_registered(telegram_id: int) -> bool:
     if client is None:
         return False
     try:
-        result_rows = rows(client.table("bot_users").select("telegram_id").eq(
-            "telegram_id", telegram_id
-        ).execute())
+        result_rows = rows(client.table("bot_users").select("telegram_id").eq("telegram_id", telegram_id).execute())
         return len(result_rows) > 0
     except Exception as e:
         logger.error(f"bot_users lookup failed: {e}")
@@ -83,9 +83,7 @@ def get_bot_user(telegram_id: int) -> dict | None:
     if client is None:
         return None
     try:
-        result_rows = rows(client.table("bot_users").select("*").eq(
-            "telegram_id", telegram_id
-        ).execute())
+        result_rows = rows(client.table("bot_users").select("*").eq("telegram_id", telegram_id).execute())
         return result_rows[0] if result_rows else None
     except Exception as e:
         logger.error(f"get_bot_user failed: {e}")
@@ -134,8 +132,10 @@ def save_bot_user(telegram_id: int, username: str, tg_username: str, store: str)
     client = extensions.get_db()
     if client is None:
         return
-    client.table("bot_users").upsert({
-        "telegram_id": telegram_id,
-        "username": username,
-        "store": store,
-    }).execute()
+    client.table("bot_users").upsert(
+        {
+            "telegram_id": telegram_id,
+            "username": username,
+            "store": store,
+        }
+    ).execute()

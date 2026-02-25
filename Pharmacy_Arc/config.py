@@ -2,11 +2,13 @@
 Configuration management with environment variable loading.
 Provides secure defaults and validation.
 """
+
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+
 from dotenv import load_dotenv
+
 
 # Load environment variables from .env file.
 # Search order (first found wins):
@@ -16,18 +18,19 @@ from dotenv import load_dotenv
 #   4. Same folder as config.py (development)
 def _find_env() -> Path:
     # Always check %LOCALAPPDATA% first — credentials stay off cloud-synced dirs
-    appdata = os.environ.get('LOCALAPPDATA')
+    appdata = os.environ.get("LOCALAPPDATA")
     if appdata:
-        secure_env = Path(appdata) / 'PharmacyDirector' / '.env'
+        secure_env = Path(appdata) / "PharmacyDirector" / ".env"
         if secure_env.exists():
             return secure_env
-    if getattr(sys, 'frozen', False):
-        beside_exe = Path(sys.executable).parent / '.env'
+    if getattr(sys, "frozen", False):
+        beside_exe = Path(sys.executable).parent / ".env"
         if beside_exe.exists():
             return beside_exe
-        return Path(sys._MEIPASS) / '.env'
+        return Path(sys._MEIPASS) / ".env"
     # Development: .env lives in the same folder as config.py
-    return Path(__file__).parent / '.env'
+    return Path(__file__).parent / ".env"
+
 
 env_path = _find_env()
 load_dotenv(dotenv_path=env_path)
@@ -39,114 +42,120 @@ class Config:
     # ── Canonical Store List ──────────────────────────────────────────────────
     # Single source of truth for all store names. Every validation, whitelist,
     # and dropdown in the app MUST reference this list.
-    STORES = ['Carimas #1', 'Carimas #2', 'Carimas #3', 'Carimas #4', 'Carthage']
+    STORES = ["Carimas #1", "Carimas #2", "Carimas #3", "Carimas #4", "Carthage"]
 
     # Flask Configuration
-    SECRET_KEY: str = os.getenv('FLASK_SECRET_KEY', '')
-    PORT: int = int(os.getenv('FLASK_PORT', '5013'))
-    DEBUG: bool = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
-    
+    SECRET_KEY: str = os.getenv("FLASK_SECRET_KEY", "")
+    PORT: int = int(os.getenv("FLASK_PORT", "5013"))
+    DEBUG: bool = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+
     # Supabase Configuration
-    SUPABASE_URL: str = os.getenv('SUPABASE_URL', '')
-    SUPABASE_KEY: str = os.getenv('SUPABASE_KEY', '')
-    SUPABASE_SERVICE_KEY: str = os.getenv('SUPABASE_SERVICE_KEY', '')
-    
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
+    SUPABASE_SERVICE_KEY: str = os.getenv("SUPABASE_SERVICE_KEY", "")
+
     # Emergency Admin Accounts (format: username:bcrypt_hash)
-    EMERGENCY_ADMIN_SUPER: str = os.getenv('EMERGENCY_ADMIN_SUPER', '')
-    EMERGENCY_ADMIN_BASIC: str = os.getenv('EMERGENCY_ADMIN_BASIC', '')
-    
+    EMERGENCY_ADMIN_SUPER: str = os.getenv("EMERGENCY_ADMIN_SUPER", "")
+    EMERGENCY_ADMIN_BASIC: str = os.getenv("EMERGENCY_ADMIN_BASIC", "")
+
     # Telegram Bot
-    TELEGRAM_WEBHOOK_SECRET: str = os.getenv('TELEGRAM_WEBHOOK_SECRET', '')
+    TELEGRAM_WEBHOOK_SECRET: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
 
     # Security Settings
-    SESSION_TIMEOUT_MINUTES: int = int(os.getenv('SESSION_TIMEOUT_MINUTES', '30'))
-    SESSION_ABSOLUTE_TIMEOUT_MINUTES: int = int(os.getenv('SESSION_ABSOLUTE_TIMEOUT_MINUTES', '480'))
-    MAX_LOGIN_ATTEMPTS: int = int(os.getenv('MAX_LOGIN_ATTEMPTS', '5'))
-    LOCKOUT_DURATION_MINUTES: int = int(os.getenv('LOCKOUT_DURATION_MINUTES', '15'))
-    REQUIRE_HTTPS: bool = os.getenv('REQUIRE_HTTPS', 'false').lower() == 'true'
-    
+    SESSION_TIMEOUT_MINUTES: int = int(os.getenv("SESSION_TIMEOUT_MINUTES", "30"))
+    SESSION_ABSOLUTE_TIMEOUT_MINUTES: int = int(os.getenv("SESSION_ABSOLUTE_TIMEOUT_MINUTES", "480"))
+    MAX_LOGIN_ATTEMPTS: int = int(os.getenv("MAX_LOGIN_ATTEMPTS", "5"))
+    LOCKOUT_DURATION_MINUTES: int = int(os.getenv("LOCKOUT_DURATION_MINUTES", "15"))
+    REQUIRE_HTTPS: bool = os.getenv("REQUIRE_HTTPS", "false").lower() == "true"
+
     # Logging Configuration
-    LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
-    LOG_FILE: str = os.getenv('LOG_FILE', 'pharmacy_app.log')
-    
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    LOG_FILE: str = os.getenv("LOG_FILE", "pharmacy_app.log")
+
     # Offline queue file
-    OFFLINE_FILE: str = 'offline_queue.json'
+    OFFLINE_FILE: str = "offline_queue.json"
 
     # ── Business / Operational Constants ───────────────────────────────────────
-    VARIANCE_ALERT_THRESHOLD: float = float(os.getenv('VARIANCE_ALERT_THRESHOLD', '5.0'))
-    DEFAULT_OPENING_FLOAT: float = float(os.getenv('DEFAULT_OPENING_FLOAT', '100.0'))
-    ZREPORT_LOCK_TIMEOUT_MINUTES: int = int(os.getenv('ZREPORT_LOCK_TIMEOUT_MINUTES', '30'))
+    VARIANCE_ALERT_THRESHOLD: float = float(os.getenv("VARIANCE_ALERT_THRESHOLD", "5.0"))
+    DEFAULT_OPENING_FLOAT: float = float(os.getenv("DEFAULT_OPENING_FLOAT", "100.0"))
+    ZREPORT_LOCK_TIMEOUT_MINUTES: int = int(os.getenv("ZREPORT_LOCK_TIMEOUT_MINUTES", "30"))
 
     # ── Storage ───────────────────────────────────────────────────────────────
-    STORAGE_BUCKET: str = os.getenv('STORAGE_BUCKET', 'z-reports')
-    STORAGE_URL_EXPIRY_SECONDS: int = int(os.getenv('STORAGE_URL_EXPIRY_SECONDS', '3600'))
-    MAX_UPLOAD_SIZE: int = int(os.getenv('MAX_UPLOAD_SIZE', str(5 * 1024 * 1024)))
+    STORAGE_BUCKET: str = os.getenv("STORAGE_BUCKET", "z-reports")
+    STORAGE_URL_EXPIRY_SECONDS: int = int(os.getenv("STORAGE_URL_EXPIRY_SECONDS", "3600"))
+    MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", str(5 * 1024 * 1024)))
 
     # ── Rate Limiting ──────────────────────────────────────────────────────────
-    RATELIMIT_LOGIN: str = '5 per minute'
-    RATELIMIT_WRITE: str = '30 per minute'
-    RATELIMIT_READ: str = '60 per minute'
-    RATELIMIT_STORAGE_URI: str = os.getenv('RATELIMIT_STORAGE_URI', os.getenv('REDIS_URL', 'memory://'))
+    RATELIMIT_LOGIN: str = "5 per minute"
+    RATELIMIT_WRITE: str = "30 per minute"
+    RATELIMIT_READ: str = "60 per minute"
+    RATELIMIT_STORAGE_URI: str = os.getenv("RATELIMIT_STORAGE_URI", os.getenv("REDIS_URL", "memory://"))
 
     # ── Resilience / Retry ────────────────────────────────────────────────────
-    MATH_TOLERANCE: float = 0.02          # 2-cent floating-point tolerance
-    DB_RETRY_MAX_ATTEMPTS: int = 3        # db_retry() default max attempts
-    SUPABASE_CONNECT_RETRIES: int = 3     # _init_supabase() startup retries
+    MATH_TOLERANCE: float = 0.02  # 2-cent floating-point tolerance
+    DB_RETRY_MAX_ATTEMPTS: int = 3  # db_retry() default max attempts
+    SUPABASE_CONNECT_RETRIES: int = 3  # _init_supabase() startup retries
 
     # ── AI Assistant ─────────────────────────────────────────────────────────
-    AI_MODEL: str = os.getenv('AI_MODEL', 'gemini-3-pro-preview')
-    AI_ASSISTANT_MODEL: str = os.getenv('AI_ASSISTANT_MODEL', 'gemini-2.5-flash')
-    AI_MAX_TOKENS: int = int(os.getenv('AI_MAX_TOKENS', '500'))
+    AI_MODEL: str = os.getenv("AI_MODEL", "gemini-3-pro-preview")
+    AI_ASSISTANT_MODEL: str = os.getenv("AI_ASSISTANT_MODEL", "gemini-2.5-flash")
+    AI_MAX_TOKENS: int = int(os.getenv("AI_MAX_TOKENS", "500"))
 
     # ── Crypto ────────────────────────────────────────────────────────────────
-    BCRYPT_ROUNDS: int = int(os.getenv('BCRYPT_ROUNDS', '12'))
-    
+    BCRYPT_ROUNDS: int = int(os.getenv("BCRYPT_ROUNDS", "12"))
+
     @classmethod
     def validate(cls) -> list[str]:
         """
         Validate configuration and return list of errors.
-        
+
         Returns:
             List of error messages. Empty list if valid.
         """
         errors = []
-        
+
         # Check required fields
         if not cls.SECRET_KEY or len(cls.SECRET_KEY) < 32:
             errors.append(
                 "FLASK_SECRET_KEY is missing or too short (minimum 32 characters). "
                 "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
             )
-        
+
         if not cls.SUPABASE_URL:
             errors.append("SUPABASE_URL is required")
-        
+
         if not cls.SUPABASE_KEY:
             errors.append("SUPABASE_KEY is required")
-        
+
         # Validate numeric ranges
         if cls.PORT < 1024 or cls.PORT > 65535:
             errors.append(f"FLASK_PORT must be between 1024-65535, got {cls.PORT}")
-        
+
         if cls.SESSION_TIMEOUT_MINUTES < 5:
             errors.append("SESSION_TIMEOUT_MINUTES must be at least 5")
-        
+
         if cls.MAX_LOGIN_ATTEMPTS < 1:
             errors.append("MAX_LOGIN_ATTEMPTS must be at least 1")
-        
+
         if cls.LOCKOUT_DURATION_MINUTES < 1:
             errors.append("LOCKOUT_DURATION_MINUTES must be at least 1")
 
         # Production warnings (non-blocking)
-        if cls.REQUIRE_HTTPS and cls.RATELIMIT_STORAGE_URI == 'memory://':
-            print("  [WARN] RATELIMIT_STORAGE_URI=memory:// — rate limits are per-worker. "
-                  "Set REDIS_URL for shared rate limiting across gunicorn workers.", file=sys.stderr)
+        if cls.REQUIRE_HTTPS and cls.RATELIMIT_STORAGE_URI == "memory://":
+            print(
+                "  [WARN] RATELIMIT_STORAGE_URI=memory:// — rate limits are per-worker. "
+                "Set REDIS_URL for shared rate limiting across gunicorn workers.",
+                file=sys.stderr,
+            )
 
         if cls.REQUIRE_HTTPS and not cls.TELEGRAM_WEBHOOK_SECRET:
-            print("  [WARN] TELEGRAM_WEBHOOK_SECRET is empty — Telegram webhook will reject all requests.", file=sys.stderr)
+            print(
+                "  [WARN] TELEGRAM_WEBHOOK_SECRET is empty — Telegram webhook will reject all requests.",
+                file=sys.stderr,
+            )
 
         return errors
-    
+
     @classmethod
     def load_emergency_accounts(cls) -> dict[str, tuple[str, str]]:
         """
@@ -159,34 +168,34 @@ class Config:
 
         if cls.EMERGENCY_ADMIN_SUPER:
             try:
-                username, hash_val = cls.EMERGENCY_ADMIN_SUPER.split(':', 1)
-                accounts[username.strip()] = (hash_val.strip(), 'super_admin')
+                username, hash_val = cls.EMERGENCY_ADMIN_SUPER.split(":", 1)
+                accounts[username.strip()] = (hash_val.strip(), "super_admin")
             except ValueError:
-                print(f"WARNING: Invalid format for EMERGENCY_ADMIN_SUPER", file=sys.stderr)
+                print("WARNING: Invalid format for EMERGENCY_ADMIN_SUPER", file=sys.stderr)
 
         if cls.EMERGENCY_ADMIN_BASIC:
             try:
-                username, hash_val = cls.EMERGENCY_ADMIN_BASIC.split(':', 1)
-                accounts[username.strip()] = (hash_val.strip(), 'admin')
+                username, hash_val = cls.EMERGENCY_ADMIN_BASIC.split(":", 1)
+                accounts[username.strip()] = (hash_val.strip(), "admin")
             except ValueError:
-                print(f"WARNING: Invalid format for EMERGENCY_ADMIN_BASIC", file=sys.stderr)
+                print("WARNING: Invalid format for EMERGENCY_ADMIN_BASIC", file=sys.stderr)
 
         return accounts
-    
+
     @classmethod
     def startup_check(cls) -> None:
         """
         Perform startup validation and exit if critical errors found.
         """
         errors = cls.validate()
-        
+
         if errors:
-            print("\n" + "="*70, file=sys.stderr)
+            print("\n" + "=" * 70, file=sys.stderr)
             print("CONFIGURATION ERRORS DETECTED:", file=sys.stderr)
-            print("="*70, file=sys.stderr)
+            print("=" * 70, file=sys.stderr)
             for error in errors:
                 print(f"  [ERROR] {error}", file=sys.stderr)
-            print("="*70, file=sys.stderr)
+            print("=" * 70, file=sys.stderr)
             print("\nPlease fix the above errors in your .env file.", file=sys.stderr)
             print("Copy .env.example to .env and fill in the correct values.\n", file=sys.stderr)
             sys.exit(1)

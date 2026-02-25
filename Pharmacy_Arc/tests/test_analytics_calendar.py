@@ -8,9 +8,10 @@ These tests guard against regressions in:
   - Calendar store filter by role
   - list_audits error response format
 """
-import sys
+
 import os
-import json
+import sys
+
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -20,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Pure Python logic tests (no Flask app required)
 # ---------------------------------------------------------------------------
 
+
 class TestAnalyticsAggregation:
     """Verify the JS aggregation logic in Python equivalents."""
 
@@ -27,9 +29,9 @@ class TestAnalyticsAggregation:
         """Two registers on the same date for the same store."""
         return [
             {"date": "2026-02-01", "store": "Carimas #1", "reg": "Reg 1", "gross": 1000.0, "net": 900.0},
-            {"date": "2026-02-01", "store": "Carimas #1", "reg": "Reg 2", "gross": 500.0,  "net": 450.0},
-            {"date": "2026-02-02", "store": "Carimas #1", "reg": "Reg 1", "gross": 800.0,  "net": 720.0},
-            {"date": "2026-02-01", "store": "Carimas #2", "reg": "Reg 1", "gross": 300.0,  "net": 270.0},
+            {"date": "2026-02-01", "store": "Carimas #1", "reg": "Reg 2", "gross": 500.0, "net": 450.0},
+            {"date": "2026-02-02", "store": "Carimas #1", "reg": "Reg 1", "gross": 800.0, "net": 720.0},
+            {"date": "2026-02-01", "store": "Carimas #2", "reg": "Reg 1", "gross": 300.0, "net": 270.0},
         ]
 
     def _sum_for_label(self, entries, label, store=None):
@@ -79,6 +81,7 @@ class TestAnalyticsAggregation:
     def test_dow_chart_local_date_parsing(self):
         """Date string 'YYYY-MM-DD' parsed with T12:00:00 avoids UTC midnight rollback."""
         import datetime
+
         # 2026-02-01 is a Sunday (weekday 6 in Python, 0 in JS)
         d = datetime.date(2026, 2, 1)
         assert d.weekday() == 6  # Python: Mon=0, Sun=6
@@ -106,9 +109,7 @@ class TestCalendarStoreFilter:
     def test_manager_always_sees_own_store(self):
         """Manager should see only their store even if calStoreFilter defaulted to 'All'."""
         result = self._calendar_store("manager", "Carimas #1", cal_filter_value="All")
-        assert result == "Carimas #1", (
-            "Manager must be scoped to their store — old bug returned 'All'"
-        )
+        assert result == "Carimas #1", "Manager must be scoped to their store — old bug returned 'All'"
 
     def test_staff_always_sees_own_store(self):
         result = self._calendar_store("staff", "Carimas #2", cal_filter_value="All")
@@ -121,8 +122,8 @@ class TestCalendarDayAggregation:
     def test_calendar_day_gross_sums_multiple_registers(self):
         entries = [
             {"date": "2026-02-15", "store": "Carimas #1", "gross": 1200.0, "variance": -5.0},
-            {"date": "2026-02-15", "store": "Carimas #1", "gross": 800.0,  "variance": 3.0},
-            {"date": "2026-02-16", "store": "Carimas #1", "gross": 950.0,  "variance": 0.0},
+            {"date": "2026-02-15", "store": "Carimas #1", "gross": 800.0, "variance": 3.0},
+            {"date": "2026-02-16", "store": "Carimas #1", "gross": 950.0, "variance": 0.0},
         ]
         store = "Carimas #1"
         date_str = "2026-02-15"
@@ -142,13 +143,15 @@ class TestCalendarDayAggregation:
 # Flask integration tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def client():
     """Create a test Flask client."""
     try:
         import app as flask_app
+
         flask_app.app.config["TESTING"] = True
-        flask_app.app.config["SECRET_KEY"] = "test-secret"
+        flask_app.app.config["SECRET_KEY"] = "test-secret"  # noqa: S105 — test fixture
         with flask_app.app.test_client() as c:
             yield c
     except Exception as e:
@@ -157,7 +160,6 @@ def client():
 
 def _login(client, username="admin", password=None):
     """Helper to log in and return response."""
-    import app as flask_app
     if password is None:
         # Try to get from emergency accounts
         password = os.environ.get("ADMIN_PASSWORD", "admin")

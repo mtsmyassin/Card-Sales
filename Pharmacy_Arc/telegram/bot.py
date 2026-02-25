@@ -1,33 +1,46 @@
 """Bot update dispatcher, handlers, and keyboard builders."""
+
+import logging
 import os
 import re
-import time
-import uuid
-import logging
 import threading
+import time
 import unicodedata
+import uuid
 
-import requests as http
-from ocr import extract_z_report, has_null_fields, null_field_names, OCRParseError
-from ai_assistant import ask_ai
 import extensions
+import requests as http
+from ai_assistant import ask_ai
 from config import Config
 from helpers.supabase_types import rows
+from ocr import OCRParseError, extract_z_report, has_null_fields, null_field_names
 
 from telegram.client import (
-    TelegramAPIError, _tg, _token,
-    send_message, send_message_safe,
-    download_photo, _log_dead_letter, _notify_admin_if_needed,
+    TelegramAPIError,
+    _log_dead_letter,
+    _notify_admin_if_needed,
+    _tg,
+    _token,
+    download_photo,
+    send_message,
+    send_message_safe,
 )
+from telegram.i18n import _STORE_CHOICE, KNOWN_STORES, MESSAGES, msg
 from telegram.session import (
-    bot_state, _bot_state_lock,
-    persist_session, load_session, _set_state,
-    is_registered, get_bot_user, verify_web_credentials, save_bot_user,
+    _bot_state_lock,
+    _set_state,
+    bot_state,
+    get_bot_user,
+    is_registered,
+    load_session,
+    save_bot_user,
+    verify_web_credentials,
 )
-from telegram.i18n import MESSAGES, msg, KNOWN_STORES, _STORE_CHOICE
 from telegram.storage import (
-    StorageUploadError, upload_image_to_storage,
-    save_audit_entry, save_photo_record, _format_register_id,
+    _format_register_id,
+    save_audit_entry,
+    save_photo_record,
+    upload_image_to_storage,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,12 +64,14 @@ def _is_button_expired(cb: dict) -> bool:
 
 # ── Keyboard helpers ──────────────────────────────────────────────────────
 
+
 def _kb_registered(tid: int) -> dict:
     return {
         "keyboard": [[msg(tid, "btn_ask_ai")]],
         "resize_keyboard": True,
         "one_time_keyboard": False,
     }
+
 
 def _kb_ai_chat(tid: int) -> dict:
     return {
@@ -65,68 +80,86 @@ def _kb_ai_chat(tid: int) -> dict:
         "one_time_keyboard": False,
     }
 
+
 def _kb_remove() -> dict:
     return {"remove_keyboard": True}
+
 
 def _inline_kb(buttons: list[list[dict]]) -> dict:
     return {"inline_keyboard": buttons}
 
+
 def _inline_btn(text: str, callback_data: str) -> dict:
     return {"text": text, "callback_data": callback_data}
 
-INLINE_STORES = _inline_kb([
-    [_inline_btn(s, f"store:{i}") for i, s in enumerate(KNOWN_STORES, 1)
-     if i <= 3],
-    [_inline_btn(s, f"store:{i}") for i, s in enumerate(KNOWN_STORES, 1)
-     if i > 3],
-])
+
+INLINE_STORES = _inline_kb(
+    [
+        [_inline_btn(s, f"store:{i}") for i, s in enumerate(KNOWN_STORES, 1) if i <= 3],
+        [_inline_btn(s, f"store:{i}") for i, s in enumerate(KNOWN_STORES, 1) if i > 3],
+    ]
+)
+
 
 def _build_inline_confirm_date(tid: int) -> dict:
-    return _inline_kb([
-        [_inline_btn(msg(tid, "btn_ok"), "date:ok"),
-         _inline_btn(msg(tid, "btn_edit"), "date:edit")],
-    ])
+    return _inline_kb(
+        [
+            [_inline_btn(msg(tid, "btn_ok"), "date:ok"), _inline_btn(msg(tid, "btn_edit"), "date:edit")],
+        ]
+    )
+
 
 def _build_inline_confirm_reg(tid: int) -> dict:
-    return _inline_kb([
-        [_inline_btn(msg(tid, "btn_ok"), "reg:ok"),
-         _inline_btn(msg(tid, "btn_edit"), "reg:edit")],
-    ])
+    return _inline_kb(
+        [
+            [_inline_btn(msg(tid, "btn_ok"), "reg:ok"), _inline_btn(msg(tid, "btn_edit"), "reg:edit")],
+        ]
+    )
+
 
 def _build_inline_save(tid: int) -> dict:
-    return _inline_kb([
-        [_inline_btn(msg(tid, "btn_save_yes"), "save:yes"),
-         _inline_btn(msg(tid, "btn_save_no"), "save:no")],
-    ])
+    return _inline_kb(
+        [
+            [_inline_btn(msg(tid, "btn_save_yes"), "save:yes"), _inline_btn(msg(tid, "btn_save_no"), "save:no")],
+        ]
+    )
+
 
 def _build_inline_payouts_zero(tid: int) -> dict:
-    return _inline_kb([
-        [_inline_btn(msg(tid, "btn_no_payouts"), "payouts:0")],
-    ])
+    return _inline_kb(
+        [
+            [_inline_btn(msg(tid, "btn_no_payouts"), "payouts:0")],
+        ]
+    )
+
 
 def _build_inline_skip_cash(tid: int) -> dict:
-    return _inline_kb([
-        [_inline_btn(msg(tid, "btn_skip"), "actual_cash:skip")],
-    ])
+    return _inline_kb(
+        [
+            [_inline_btn(msg(tid, "btn_skip"), "actual_cash:skip")],
+        ]
+    )
+
 
 def _build_inline_broadcast(tid: int) -> dict:
-    return _inline_kb([
-        [_inline_btn(msg(tid, "btn_send"), "broadcast:yes"),
-         _inline_btn(msg(tid, "btn_cancel"), "broadcast:no")],
-    ])
+    return _inline_kb(
+        [
+            [_inline_btn(msg(tid, "btn_send"), "broadcast:yes"), _inline_btn(msg(tid, "btn_cancel"), "broadcast:no")],
+        ]
+    )
 
 
 # ── Preview formatter ─────────────────────────────────────────────────────
 
+
 def _format_preview(data: dict, telegram_id: int = 0) -> str:
     """Format OCR result as a bilingual confirmation message."""
+
     def fmt(v):
         return f"${v:.2f}" if v is not None else "?"
 
     header = msg(telegram_id, "preview_header")
-    reg_line = msg(telegram_id, "preview_register",
-                   register=data.get("register", "?"),
-                   date=data.get("date", "?"))
+    reg_line = msg(telegram_id, "preview_register", register=data.get("register", "?"), date=data.get("date", "?"))
     prompt = msg(telegram_id, "preview_save_prompt")
 
     return (
@@ -151,6 +184,7 @@ def _format_preview(data: dict, telegram_id: int = 0) -> str:
 
 # ── Utility ───────────────────────────────────────────────────────────────
 
+
 def _ascii_upper(text: str) -> str:
     """Uppercase and strip accents so 'Si' == 'SI', etc."""
     nfkd = unicodedata.normalize("NFKD", text)
@@ -170,6 +204,7 @@ def _parse_date(text: str) -> str | None:
 
 
 # ── State-specific handlers ──────────────────────────────────────────────
+
 
 def _handle_ai_message(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
     """Handle a text message while in AI_CHAT state."""
@@ -212,8 +247,8 @@ def _handle_payouts(telegram_id, chat_id, text, state):
     state["pending_payouts"] = round(payouts, 2)
     state["state"] = "AWAITING_ACTUAL_CASH"
     _set_state(telegram_id, state)
-    send_message(chat_id, msg(telegram_id, "actual_cash"),
-                 reply_markup=_build_inline_skip_cash(telegram_id))
+    send_message(chat_id, msg(telegram_id, "actual_cash"), reply_markup=_build_inline_skip_cash(telegram_id))
+
 
 def _handle_actual_cash(telegram_id, chat_id, text, state):
     """Handle AWAITING_ACTUAL_CASH — parse cash amount or skip."""
@@ -236,8 +271,10 @@ def _handle_actual_cash(telegram_id, chat_id, text, state):
 
     state["state"] = "AWAITING_CONFIRMATION"
     _set_state(telegram_id, state)
-    send_message(chat_id, _format_preview(state["pending_data"], telegram_id),
-                 reply_markup=_build_inline_save(telegram_id))
+    send_message(
+        chat_id, _format_preview(state["pending_data"], telegram_id), reply_markup=_build_inline_save(telegram_id)
+    )
+
 
 def _handle_broadcast_confirm(telegram_id, chat_id, text, state):
     """Handle BROADCAST_CONFIRM — send or cancel the broadcast."""
@@ -315,8 +352,9 @@ def _handle_password(telegram_id, chat_id, tg_username, password, state):
         "retry_count": 0,
     }
     _set_state(telegram_id, new_state)
-    send_message(chat_id, msg(telegram_id, "registered", store=user_row["store"]),
-                 reply_markup=_kb_registered(telegram_id))
+    send_message(
+        chat_id, msg(telegram_id, "registered", store=user_row["store"]), reply_markup=_kb_registered(telegram_id)
+    )
 
 
 def _handle_photo(telegram_id, chat_id, tg_username, photo_msg, state):
@@ -324,8 +362,7 @@ def _handle_photo(telegram_id, chat_id, tg_username, photo_msg, state):
         state["pending_photo_msg"] = photo_msg
         state["state"] = "AWAITING_STORE"
         _set_state(telegram_id, state)
-        send_message(chat_id, msg(telegram_id, "store_prompt"),
-                     reply_markup=INLINE_STORES)
+        send_message(chat_id, msg(telegram_id, "store_prompt"), reply_markup=INLINE_STORES)
         return
 
     send_message(chat_id, msg(telegram_id, "processing"))
@@ -366,8 +403,7 @@ def _handle_photo(telegram_id, chat_id, tg_username, photo_msg, state):
             return
         state["retry_count"] = retry_count + 1
         _set_state(telegram_id, state)
-        send_message(chat_id, msg(telegram_id, "null_retry",
-                                  fields=null_names, attempt=retry_count + 1))
+        send_message(chat_id, msg(telegram_id, "null_retry", fields=null_names, attempt=retry_count + 1))
         return
 
     state["state"] = "AWAITING_DATE"
@@ -376,8 +412,9 @@ def _handle_photo(telegram_id, chat_id, tg_username, photo_msg, state):
     state["retry_count"] = 0
     _set_state(telegram_id, state)
     ocr_date = ocr_data.get("date") or "desconocida"
-    send_message(chat_id, msg(telegram_id, "ocr_date", date=ocr_date),
-                 reply_markup=_build_inline_confirm_date(telegram_id))
+    send_message(
+        chat_id, msg(telegram_id, "ocr_date", date=ocr_date), reply_markup=_build_inline_confirm_date(telegram_id)
+    )
 
 
 def _handle_ocr_failure(telegram_id, chat_id, state, retry_count):
@@ -406,8 +443,7 @@ def _handle_date(telegram_id: int, chat_id: int, text: str, state: dict) -> None
     ocr_reg = state["pending_data"].get("register") or "desconocido"
     state["state"] = "AWAITING_REGISTER"
     _set_state(telegram_id, state)
-    send_message(chat_id, msg(telegram_id, "ocr_reg", reg=ocr_reg),
-                 reply_markup=_build_inline_confirm_reg(telegram_id))
+    send_message(chat_id, msg(telegram_id, "ocr_reg", reg=ocr_reg), reply_markup=_build_inline_confirm_reg(telegram_id))
 
 
 def _handle_register(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
@@ -423,8 +459,7 @@ def _handle_register(telegram_id: int, chat_id: int, text: str, state: dict) -> 
 
     state["state"] = "AWAITING_PAYOUTS"
     _set_state(telegram_id, state)
-    send_message(chat_id, msg(telegram_id, "payouts"),
-                 reply_markup=_build_inline_payouts_zero(telegram_id))
+    send_message(chat_id, msg(telegram_id, "payouts"), reply_markup=_build_inline_payouts_zero(telegram_id))
 
 
 def _handle_confirmation(telegram_id, chat_id, text, state):
@@ -444,7 +479,8 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
         if image_bytes:
             try:
                 storage_path = upload_image_to_storage(
-                    image_bytes, store,
+                    image_bytes,
+                    store,
                     ocr_data.get("date", "unknown"),
                     ocr_data.get("register", 0),
                 )
@@ -459,7 +495,9 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
 
         try:
             entry_id = save_audit_entry(
-                ocr_data, store, username,
+                ocr_data,
+                store,
+                username,
                 payouts=payouts,
                 actual_cash=actual_cash,
                 variance=calc_variance,
@@ -493,11 +531,12 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
             except Exception as e:
                 logger.error(f"[BOT sid={sid}] save_photo_record failed (entry still saved): {e}")
 
-        gross = sum(ocr_data.get(f) or 0 for f in
-                    ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss"])
+        gross = sum(
+            ocr_data.get(f) or 0 for f in ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss"]
+        )
         logger.info(
             f"[BOT sid={sid}] Submission complete: entry_id={entry_id} "
-            f"photo={'yes path='+storage_path if storage_path else 'no'} gross={gross:.2f}"
+            f"photo={'yes path=' + storage_path if storage_path else 'no'} gross={gross:.2f}"
         )
         new_state = {
             "state": "REGISTERED",
@@ -507,7 +546,9 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
         }
         _set_state(telegram_id, new_state)
         photo_note = " (foto adjunta)" if storage_path and entry_id else ""
-        saved_text = msg(telegram_id, "saved",
+        saved_text = msg(
+            telegram_id,
+            "saved",
             photo_note=photo_note,
             reg=ocr_data.get("register", "?"),
             gross=gross,
@@ -519,7 +560,9 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
                 insight = ask_ai(
                     f"Varianza de ${variance:.2f} en Caja #{ocr_data.get('register', '?')}. "
                     f"Es normal o preocupante? Una oracion.",
-                    store, "system", username,
+                    store,
+                    "system",
+                    username,
                 )
                 saved_text += f"\n\n{insight}"
             except Exception as e:
@@ -542,6 +585,7 @@ def _handle_confirmation(telegram_id, chat_id, text, state):
 
 # ── Callback query handler ────────────────────────────────────────────────
 
+
 def _handle_callback(cb: dict) -> None:
     """Handle an inline keyboard button press with guaranteed spinner dismissal."""
     cb_id = cb["id"]
@@ -552,8 +596,12 @@ def _handle_callback(cb: dict) -> None:
 
     try:
         if _is_button_expired(cb):
-            _tg("answerCallbackQuery", callback_query_id=cb_id,
-                text=msg(telegram_id, "error_button_expired"), show_alert=True)
+            _tg(
+                "answerCallbackQuery",
+                callback_query_id=cb_id,
+                text=msg(telegram_id, "error_button_expired"),
+                show_alert=True,
+            )
             answered = True
             return
 
@@ -629,11 +677,12 @@ def _handle_callback(cb: dict) -> None:
         if not answered:
             try:
                 _tg("answerCallbackQuery", callback_query_id=cb_id, retries=1)
-            except Exception:
+            except Exception:  # noqa: S110 — best-effort callback ack
                 pass
 
 
 # ── Main dispatcher ───────────────────────────────────────────────────────
+
 
 def handle_update(update: dict) -> None:
     """Main entry point: dispatch an incoming Telegram update."""
@@ -694,8 +743,7 @@ def handle_update(update: dict) -> None:
     if text in (MESSAGES["en"]["btn_ask_ai"], MESSAGES["es"]["btn_ask_ai"]) and current_state == "REGISTERED":
         state["state"] = "AI_CHAT"
         _set_state(telegram_id, state)
-        send_message(chat_id, msg(telegram_id, "ai_welcome"),
-                     reply_markup=_kb_ai_chat(telegram_id))
+        send_message(chat_id, msg(telegram_id, "ai_welcome"), reply_markup=_kb_ai_chat(telegram_id))
         return
 
     if text in (MESSAGES["en"]["btn_cancel"], MESSAGES["es"]["btn_cancel"]) and current_state == "AI_CHAT":
@@ -704,8 +752,7 @@ def handle_update(update: dict) -> None:
             _ai_history_ts.pop(telegram_id, None)
         state["state"] = "REGISTERED"
         _set_state(telegram_id, state)
-        send_message(chat_id, msg(telegram_id, "ai_exit"),
-                     reply_markup=_kb_registered(telegram_id))
+        send_message(chat_id, msg(telegram_id, "ai_exit"), reply_markup=_kb_registered(telegram_id))
         return
 
     if current_state == "AI_CHAT":
@@ -751,7 +798,7 @@ def handle_update(update: dict) -> None:
         return
     if current_state == "AWAITING_USERNAME":
         username = text.strip()[:50]
-        if not re.match(r'^[a-zA-Z0-9_-]+$', username):
+        if not re.match(r"^[a-zA-Z0-9_-]+$", username):
             send_message(chat_id, "Nombre de usuario invalido. Solo letras, numeros, _ y -.")
             return
         state["username"] = username
@@ -772,8 +819,9 @@ def handle_update(update: dict) -> None:
             "retry_count": 0,
         }
         _set_state(telegram_id, new_state)
-        send_message(chat_id, msg(telegram_id, "welcome_back", store=user_row["store"]),
-                     reply_markup=_kb_registered(telegram_id))
+        send_message(
+            chat_id, msg(telegram_id, "welcome_back", store=user_row["store"]), reply_markup=_kb_registered(telegram_id)
+        )
     else:
         new_state = {"state": "AWAITING_USERNAME", "retry_count": 0}
         _set_state(telegram_id, new_state)
@@ -781,6 +829,7 @@ def handle_update(update: dict) -> None:
 
 
 # ── Slash command handler ─────────────────────────────────────────────────
+
 
 def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> None:
     """Handle /help, /status, /cancel, /last, /broadcast, /lang commands."""
@@ -798,8 +847,11 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
                 }
                 _set_state(telegram_id, new_state)
                 if cmd == "/start":
-                    send_message(chat_id, msg(telegram_id, "welcome_back", store=user_row["store"]),
-                                 reply_markup=_kb_registered(telegram_id))
+                    send_message(
+                        chat_id,
+                        msg(telegram_id, "welcome_back", store=user_row["store"]),
+                        reply_markup=_kb_registered(telegram_id),
+                    )
                     return
         send_message(chat_id, msg(telegram_id, "help"))
 
@@ -808,15 +860,25 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
         if not current or current == "AWAITING_USERNAME":
             send_message(chat_id, msg(telegram_id, "status_unregistered"))
         elif current == "REGISTERED":
-            send_message(chat_id, msg(telegram_id, "status_registered",
-                store=state.get("store", "?"),
-                username=state.get("username", "?"),
-            ))
+            send_message(
+                chat_id,
+                msg(
+                    telegram_id,
+                    "status_registered",
+                    store=state.get("store", "?"),
+                    username=state.get("username", "?"),
+                ),
+            )
         else:
-            send_message(chat_id, msg(telegram_id, "status_midflow",
-                state=current,
-                username=state.get("username", "?"),
-            ))
+            send_message(
+                chat_id,
+                msg(
+                    telegram_id,
+                    "status_midflow",
+                    state=current,
+                    username=state.get("username", "?"),
+                ),
+            )
 
     elif cmd == "/cancel":
         current = state.get("state")
@@ -831,8 +893,11 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
                         "retry_count": 0,
                     }
                     _set_state(telegram_id, new_state)
-                    send_message(chat_id, msg(telegram_id, "welcome_back", store=user_row["store"]),
-                                 reply_markup=_kb_registered(telegram_id))
+                    send_message(
+                        chat_id,
+                        msg(telegram_id, "welcome_back", store=user_row["store"]),
+                        reply_markup=_kb_registered(telegram_id),
+                    )
             else:
                 send_message(chat_id, msg(telegram_id, "cancel_nothing"))
         elif current == "AI_CHAT":
@@ -846,8 +911,7 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
                 "retry_count": 0,
             }
             _set_state(telegram_id, new_state)
-            send_message(chat_id, msg(telegram_id, "ai_exit"),
-                         reply_markup=_kb_registered(telegram_id))
+            send_message(chat_id, msg(telegram_id, "ai_exit"), reply_markup=_kb_registered(telegram_id))
         else:
             if state.get("username") and state.get("store") and current != "AWAITING_USERNAME":
                 new_state = {
@@ -871,21 +935,30 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
             if db is None:
                 send_message(chat_id, "\u274c Base de datos no disponible.")
                 return
-            result_rows = rows(db.table("audits").select(
-                "date, reg, gross, variance, staff"
-            ).eq("store", store).is_("deleted_at", "null").order("date", desc=True).limit(1).execute())
+            result_rows = rows(
+                db.table("audits")
+                .select("date, reg, gross, variance, staff")
+                .eq("store", store)
+                .is_("deleted_at", "null")
+                .order("date", desc=True)
+                .limit(1)
+                .execute()
+            )
             if not result_rows:
                 send_message(chat_id, f"No hay reportes recientes para {store}.")
                 return
             e = result_rows[0]
-            send_message(chat_id, (
-                f"\U0001f4cb \u00daltimo reporte \u2014 {store}\n"
-                f"Fecha: {e.get('date', '?')}\n"
-                f"Caja: {e.get('reg', '?')}\n"
-                f"Bruto: ${e.get('gross', 0):,.2f}\n"
-                f"Varianza: ${e.get('variance', 0):,.2f}\n"
-                f"Enviado por: {e.get('staff', '?')}"
-            ))
+            send_message(
+                chat_id,
+                (
+                    f"\U0001f4cb \u00daltimo reporte \u2014 {store}\n"
+                    f"Fecha: {e.get('date', '?')}\n"
+                    f"Caja: {e.get('reg', '?')}\n"
+                    f"Bruto: ${e.get('gross', 0):,.2f}\n"
+                    f"Varianza: ${e.get('variance', 0):,.2f}\n"
+                    f"Enviado por: {e.get('staff', '?')}"
+                ),
+            )
         except Exception as ex:
             logger.error(f"/last failed: {ex}")
             send_message(chat_id, "\u274c Error consultando el \u00faltimo reporte.")
@@ -903,7 +976,7 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
             if db and username:
                 user_data = rows(db.table("users").select("role").eq("username", username).execute())
                 role = user_data[0]["role"] if user_data else "staff"
-        except Exception:
+        except Exception:  # noqa: S110 — fallback to staff role if DB unavailable
             pass
         if role not in ("admin", "super_admin"):
             send_message(chat_id, msg(telegram_id, "broadcast_no_permission"))
@@ -924,15 +997,18 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
         state["state"] = "BROADCAST_CONFIRM"
         state["pending_broadcast"] = broadcast_text
         _set_state(telegram_id, state)
-        send_message(chat_id,
+        send_message(
+            chat_id,
             msg(telegram_id, "broadcast_confirm", count=count, message=broadcast_text),
             reply_markup=_build_inline_broadcast(telegram_id),
         )
 
     elif cmd == "/lang":
-        lang_kb = _inline_kb([
-            [_inline_btn("English", "lang:en"), _inline_btn("Espanol", "lang:es")],
-        ])
+        lang_kb = _inline_kb(
+            [
+                [_inline_btn("English", "lang:en"), _inline_btn("Espanol", "lang:es")],
+            ]
+        )
         send_message(chat_id, msg(telegram_id, "lang_prompt"), reply_markup=lang_kb)
 
     else:
@@ -940,6 +1016,7 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
 
 
 # ── Webhook registration ─────────────────────────────────────────────────
+
 
 def register_webhook() -> None:
     """Register the Telegram webhook with Telegram's servers."""

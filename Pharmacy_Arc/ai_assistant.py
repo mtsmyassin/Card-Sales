@@ -3,14 +3,13 @@ AI Assistant module for Carimas Telegram bot.
 Provides natural-language querying of sales data and variance analysis.
 Uses Google Gemini via REST API (no SDK dependencies).
 """
-import os
-import logging
-from datetime import datetime, timedelta, timezone
 
-from gemini_client import generate_text
+import logging
+from datetime import UTC, datetime, timedelta
 
 import extensions
 from config import Config
+from gemini_client import generate_text
 
 logger = logging.getLogger(__name__)
 
@@ -58,25 +57,30 @@ def _fetch_store_context(store: str, days: int = 7) -> dict:
     """
     db = extensions.get_db()
     if db is None:
-        return {"entries": [], "total_gross": 0, "avg_variance": 0,
-                "registers": [], "day_count": 0}
+        return {"entries": [], "total_gross": 0, "avg_variance": 0, "registers": [], "day_count": 0}
 
     try:
         from zoneinfo import ZoneInfo
+
         pr_tz = ZoneInfo("America/Puerto_Rico")
         today = datetime.now(pr_tz).date()
     except Exception:
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
 
     since = (today - timedelta(days=days)).isoformat()
 
     try:
-        result = db.table("audits").select(
-            "date, reg, gross, variance, store"
-        ).eq("store", store).is_("deleted_at", "null").gte("date", since).order(
-            "date", desc=True
-        ).execute()
+        result = (
+            db.table("audits")
+            .select("date, reg, gross, variance, store")
+            .eq("store", store)
+            .is_("deleted_at", "null")
+            .gte("date", since)
+            .order("date", desc=True)
+            .execute()
+        )
         from helpers.supabase_types import rows as _rows
+
         rows = _rows(result)
     except Exception as e:
         logger.warning(f"_fetch_store_context query failed: {e}")
@@ -96,8 +100,7 @@ def _fetch_store_context(store: str, days: int = 7) -> dict:
     }
 
 
-def ask_ai(question: str, store: str, role: str, username: str,
-           history: list[dict] | None = None) -> str:
+def ask_ai(question: str, store: str, role: str, username: str, history: list[dict] | None = None) -> str:
     """Send a question to Gemini with store context and return the response.
 
     Args:
@@ -162,19 +165,13 @@ def analyze_variance_trend(store: str, days: int = 3) -> str | None:
         return None
 
     threshold = Config.VARIANCE_ALERT_THRESHOLD
-    high_variance = [
-        e for e in entries
-        if abs(e.get("variance", 0) or 0) > threshold
-    ]
+    high_variance = [e for e in entries if abs(e.get("variance", 0) or 0) > threshold]
 
     if len(high_variance) < 2:
         return None
 
     # Build a mini-prompt for AI analysis
-    detail = "\n".join(
-        f"  {e.get('date')} {e.get('reg')}: variance ${e.get('variance', 0):.2f}"
-        for e in high_variance
-    )
+    detail = "\n".join(f"  {e.get('date')} {e.get('reg')}: variance ${e.get('variance', 0):.2f}" for e in high_variance)
     prompt = (
         f"Store: {store}\n"
         f"The following entries have high variance (threshold ${threshold:.2f}):\n"

@@ -1,12 +1,12 @@
 """Supabase storage and audit entry persistence for Telegram bot."""
-import time
+
 import logging
+import time
 
 import extensions
-from config import Config
-from helpers.supabase_types import rows
-from helpers.db import is_unique_violation
 from audit_log import audit_log
+from helpers.db import is_unique_violation
+from helpers.supabase_types import rows
 from helpers.validation import validate_audit_entry
 
 logger = logging.getLogger(__name__)
@@ -40,9 +40,7 @@ def _ensure_bucket(admin_client) -> None:
 def upload_image_to_storage(image_bytes: bytes, store: str, date: str, register) -> str:
     """Upload photo to Supabase Storage z-reports bucket. Returns storage path string."""
     if extensions.supabase_admin is None:
-        raise StorageUploadError(
-            "SUPABASE_SERVICE_KEY not configured — photo upload disabled"
-        )
+        raise StorageUploadError("SUPABASE_SERVICE_KEY not configured — photo upload disabled")
     _ensure_bucket(extensions.supabase_admin)
     store_slug = store.replace(" ", "_").replace("#", "")
     reg_num = int(register) if register else 0
@@ -72,8 +70,7 @@ def save_audit_entry(
         return None
 
     reg_str = _format_register_id(data.get("register"))
-    gross = sum(data.get(f) or 0 for f in
-                ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss"])
+    gross = sum(data.get(f) or 0 for f in ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss"])
     net = gross - payouts
 
     if variance is None:
@@ -134,8 +131,7 @@ def save_audit_entry(
         result_rows = rows(client.table("audits").insert(record).execute())
         entry_id = result_rows[0]["id"]
         logger.info(
-            f"[BOT] audit saved: entry_id={entry_id} store={store!r} "
-            f"date={record['date']!r} staff={username!r}"
+            f"[BOT] audit saved: entry_id={entry_id} store={store!r} date={record['date']!r} staff={username!r}"
         )
         audit_log(
             action="CREATE",
@@ -162,9 +158,7 @@ def save_audit_entry(
                 error="Duplicate entry rejected by DB constraint",
                 context={"source": "telegram_bot", "store": store, "date": record["date"], "reg": reg_str},
             )
-            raise ValueError(
-                f"Ya existe un reporte para {record['date']} / {store} / {record['reg']}"
-            ) from e
+            raise ValueError(f"Ya existe un reporte para {record['date']} / {store} / {record['reg']}") from e
         logger.error(
             f"[BOT] FATAL: DB insert failed — store={store!r} date={record['date']!r}: {e}",
             exc_info=True,
@@ -196,19 +190,24 @@ def save_photo_record(
         logger.warning("save_photo_record: no supabase client available")
         return
     try:
-        result_rows = rows(client.table("z_report_photos").insert({
-            "entry_id": entry_id,
-            "store": store,
-            "business_date": business_date,
-            "register_id": register_id,
-            "uploaded_by": uploaded_by,
-            "storage_path": storage_path,
-            "content_type": content_type,
-        }).execute())
+        result_rows = rows(
+            client.table("z_report_photos")
+            .insert(
+                {
+                    "entry_id": entry_id,
+                    "store": store,
+                    "business_date": business_date,
+                    "register_id": register_id,
+                    "uploaded_by": uploaded_by,
+                    "storage_path": storage_path,
+                    "content_type": content_type,
+                }
+            )
+            .execute()
+        )
         photo_id = result_rows[0]["id"] if result_rows else None
         logger.info(
-            f"[BOT] photo record saved: photo_id={photo_id} entry_id={entry_id} "
-            f"store={store!r} path={storage_path!r}"
+            f"[BOT] photo record saved: photo_id={photo_id} entry_id={entry_id} store={store!r} path={storage_path!r}"
         )
     except Exception as e:
         logger.error(

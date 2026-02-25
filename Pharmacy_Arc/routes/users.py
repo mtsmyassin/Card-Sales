@@ -1,20 +1,22 @@
 """Users Blueprint — user management (admin only)."""
+
 import logging
-from flask import Blueprint, request, jsonify, session
-from audit_log import audit_log
+
 import extensions
+from audit_log import audit_log
 from config import Config
+from flask import Blueprint, jsonify, request, session
 from helpers.auth_utils import require_auth
-from helpers.validation import validate_user_data
-from helpers.supabase_types import rows
 from helpers.db import db_retry
+from helpers.supabase_types import rows
+from helpers.validation import validate_user_data
 
 logger = logging.getLogger(__name__)
-bp = Blueprint('users', __name__)
+bp = Blueprint("users", __name__)
 
 
-@bp.route('/api/users/list')
-@require_auth(['admin', 'super_admin'])
+@bp.route("/api/users/list")
+@require_auth(["admin", "super_admin"])
 @extensions.limiter.limit(Config.RATELIMIT_READ)
 def list_users():
     """List all users (admin only)."""
@@ -27,13 +29,13 @@ def list_users():
         return jsonify(error="Failed to list users", code="LIST_ERROR"), 500
 
 
-@bp.route('/api/users/save', methods=['POST'])
-@require_auth(['admin', 'super_admin'])
+@bp.route("/api/users/save", methods=["POST"])
+@require_auth(["admin", "super_admin"])
 @extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def save_user():
     """Create or update a user (admin only) with password hashing and input validation."""
-    username = session.get('user')
-    role = session.get('role')
+    username = session.get("user")
+    role = session.get("role")
 
     try:
         u = request.json
@@ -41,7 +43,7 @@ def save_user():
             return jsonify(error="No data provided", code="BAD_REQUEST"), 400
 
         # Check if user exists to determine if this is create or update
-        user_to_save = u.get('username')
+        user_to_save = u.get("username")
         if not user_to_save:
             return jsonify(error="Username is required", code="MISSING_PARAM"), 400
 
@@ -60,9 +62,9 @@ def save_user():
             logger.warning(f"Invalid user data from {username}: {error_msg}")
             return jsonify(error=error_msg, code="INVALID_INPUT"), 400
 
-        password = u.get('password', '')
-        new_role = u['role']
-        new_store = u['store']
+        password = u.get("password", "")
+        new_role = u["role"]
+        new_store = u["store"]
 
         # Always hash incoming passwords — never accept pre-hashed values from client
         if password:
@@ -71,16 +73,11 @@ def save_user():
         else:
             # For updates, keep existing password if none provided
             if is_update and before_state:
-                hashed_password = before_state['password']
+                hashed_password = before_state["password"]
             else:
                 return jsonify(error="Password is required for new users", code="MISSING_PARAM"), 400
 
-        user_data = {
-            "username": user_to_save,
-            "password": hashed_password,
-            "role": new_role,
-            "store": new_store
-        }
+        user_data = {"username": user_to_save, "password": hashed_password, "role": new_role, "store": new_store}
 
         db_retry(
             lambda: extensions.get_db().table("users").upsert(user_data).execute(),
@@ -95,10 +92,10 @@ def save_user():
             role=role,
             entity_type="USER",
             entity_id=user_to_save,
-            before={"role": before_state['role'], "store": before_state['store']} if before_state else None,
+            before={"role": before_state["role"], "store": before_state["store"]} if before_state else None,
             after={"role": new_role, "store": new_store},
             success=True,
-            context={"ip": request.remote_addr}
+            context={"ip": request.remote_addr},
         )
 
         logger.info(f"User {user_to_save} {'updated' if is_update else 'created'} by {username}")
@@ -112,28 +109,28 @@ def save_user():
             actor=username,
             role=role,
             entity_type="USER",
-            entity_id=u.get('username') if 'u' in locals() and u else None,  # type: ignore[possibly-undefined]
+            entity_id=u.get("username") if "u" in locals() and u else None,  # type: ignore[possibly-undefined]
             success=False,
             error="User save operation failed",
-            context={"ip": request.remote_addr}
+            context={"ip": request.remote_addr},
         )
 
         return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
-@bp.route('/api/users/delete', methods=['POST'])
-@require_auth(['admin', 'super_admin'])
+@bp.route("/api/users/delete", methods=["POST"])
+@require_auth(["admin", "super_admin"])
 @extensions.limiter.limit(Config.RATELIMIT_WRITE)
 def delete_user():
     """Delete a user (admin only) with audit logging and input validation."""
-    username = session.get('user')
-    role = session.get('role')
+    username = session.get("user")
+    role = session.get("role")
 
     try:
-        if not request.json or 'username' not in request.json:
+        if not request.json or "username" not in request.json:
             return jsonify(error="Username is required", code="MISSING_PARAM"), 400
 
-        user_to_delete = request.json['username']
+        user_to_delete = request.json["username"]
 
         # Validate username format
         if not user_to_delete or not isinstance(user_to_delete, str):
@@ -147,7 +144,9 @@ def delete_user():
 
         # Get user details before deletion
         try:
-            existing_rows = rows(extensions.get_db().table("users").select("*").eq("username", user_to_delete).execute())
+            existing_rows = rows(
+                extensions.get_db().table("users").select("*").eq("username", user_to_delete).execute()
+            )
             before_state = existing_rows[0] if existing_rows else None
             if not before_state:
                 return jsonify(error="User not found", code="NOT_FOUND"), 404
@@ -167,9 +166,9 @@ def delete_user():
             role=role,
             entity_type="USER",
             entity_id=user_to_delete,
-            before={"role": before_state['role'], "store": before_state['store']} if before_state else None,
+            before={"role": before_state["role"], "store": before_state["store"]} if before_state else None,
             success=True,
-            context={"ip": request.remote_addr}
+            context={"ip": request.remote_addr},
         )
 
         logger.info(f"User {user_to_delete} deleted by {username}")
@@ -183,10 +182,10 @@ def delete_user():
             actor=username,
             role=role,
             entity_type="USER",
-            entity_id=request.json.get('username') if request.json else None,
+            entity_id=request.json.get("username") if request.json else None,
             success=False,
             error="User deletion failed",
-            context={"ip": request.remote_addr}
+            context={"ip": request.remote_addr},
         )
 
         return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500

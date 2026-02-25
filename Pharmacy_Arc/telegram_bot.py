@@ -4,6 +4,9 @@ This ensures ``from telegram_bot import X`` and ``patch("telegram_bot.X", ...)``
 work identically to before the package split, because the telegram_bot module
 object IS telegram.bot.
 """
-import telegram.bot as _bot  # triggers full package import chain
+
 import sys
+
+import telegram.bot as _bot  # triggers full package import chain
+
 sys.modules[__name__] = _bot

@@ -1,4 +1,5 @@
 """Bilingual message system and store constants."""
+
 from config import Config
 
 KNOWN_STORES = Config.STORES
@@ -14,15 +15,9 @@ MESSAGES: dict[str, dict[str, str]] = {
         "photo_send": "Envia la foto del Reporte Z.",
         "processing": "Procesando... por favor espera.",
         "ocr_date": (
-            "Cual es la fecha del reporte Z?\n"
-            "OCR: {date}\n"
-            "Escribe la fecha (MM/DD/AAAA) o responde OK para confirmar."
+            "Cual es la fecha del reporte Z?\nOCR: {date}\nEscribe la fecha (MM/DD/AAAA) o responde OK para confirmar."
         ),
-        "ocr_reg": (
-            "Numero de caja registradora?\n"
-            "OCR: {reg}\n"
-            "Escribe el numero o responde OK para confirmar."
-        ),
+        "ocr_reg": ("Numero de caja registradora?\nOCR: {reg}\nEscribe el numero o responde OK para confirmar."),
         "bad_date": "No se pudo leer la fecha. Usa MM/DD/AAAA (ej. 02/20/2026) o responde OK.",
         "bad_reg": "Ingresa un numero de caja (ej. 1) o responde OK para mantener el valor del OCR.",
         "yes_no": "Responde SI para guardar o NO para cancelar.",
@@ -90,20 +85,10 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  Toca 'Preguntar AI' para consultar datos de ventas y varianzas."
         ),
         "status_registered": (
-            "Estado: Registrado\n"
-            "Tienda: {store}\n"
-            "Usuario: {username}\n"
-            "Listo para recibir fotos de Reporte Z."
+            "Estado: Registrado\nTienda: {store}\nUsuario: {username}\nListo para recibir fotos de Reporte Z."
         ),
-        "status_unregistered": (
-            "Estado: No registrado\n"
-            "Envia cualquier mensaje para comenzar el registro."
-        ),
-        "status_midflow": (
-            "Estado: En proceso ({state})\n"
-            "Usuario: {username}\n"
-            "Usa /cancel para reiniciar."
-        ),
+        "status_unregistered": ("Estado: No registrado\nEnvia cualquier mensaje para comenzar el registro."),
+        "status_midflow": ("Estado: En proceso ({state})\nUsuario: {username}\nUsa /cancel para reiniciar."),
         "cancel_ok": "Operacion cancelada. Envia una foto del Reporte Z cuando estes listo.",
         "cancel_nothing": "No hay ninguna operacion activa en este momento.",
         "ai_welcome": (
@@ -118,19 +103,13 @@ MESSAGES: dict[str, dict[str, str]] = {
         ),
         "ai_exit": "Modo AI desactivado. Envia una foto del Reporte Z cuando estes listo.",
         "payouts": (
-            "Cuanto fue el total de payouts/desembolsos?\n"
-            "Escribe el monto (ej. 50.00) o toca el boton si no hubo."
+            "Cuanto fue el total de payouts/desembolsos?\nEscribe el monto (ej. 50.00) o toca el boton si no hubo."
         ),
         "actual_cash": (
-            "Cuanto efectivo hay en la caja?\n"
-            "Escribe el monto contado, o toca Omitir para usar la varianza del OCR."
+            "Cuanto efectivo hay en la caja?\nEscribe el monto contado, o toca Omitir para usar la varianza del OCR."
         ),
         "bad_amount": "Ingresa un monto valido (ej. 50.00 o 0).",
-        "broadcast_confirm": (
-            "Mensaje a enviar a {count} usuarios:\n\n"
-            "{message}\n\n"
-            "Confirmar envio?"
-        ),
+        "broadcast_confirm": ("Mensaje a enviar a {count} usuarios:\n\n{message}\n\nConfirmar envio?"),
         "broadcast_sent": "Mensaje enviado a {sent} de {total} usuarios.",
         "broadcast_cancelled": "Envio cancelado.",
         "broadcast_no_permission": "Solo administradores pueden usar /broadcast.",
@@ -162,16 +141,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "welcome_back": "Registered at {store}. Send the Z Report photo.",
         "photo_send": "Send the Z Report photo.",
         "processing": "Processing... please wait.",
-        "ocr_date": (
-            "What is the Z report date?\n"
-            "OCR: {date}\n"
-            "Type the date (MM/DD/YYYY) or reply OK to confirm."
-        ),
-        "ocr_reg": (
-            "Register number?\n"
-            "OCR: {reg}\n"
-            "Type the number or reply OK to confirm."
-        ),
+        "ocr_date": ("What is the Z report date?\nOCR: {date}\nType the date (MM/DD/YYYY) or reply OK to confirm."),
+        "ocr_reg": ("Register number?\nOCR: {reg}\nType the number or reply OK to confirm."),
         "bad_date": "Could not read the date. Use MM/DD/YYYY (e.g. 02/20/2026) or reply OK.",
         "bad_reg": "Enter a register number (e.g. 1) or reply OK to keep the OCR value.",
         "yes_no": "Reply YES to save or NO to cancel.",
@@ -218,10 +189,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "photo_dl_error": "Could not download the photo. Please try again.",
         "photo_too_large": "Photo is too large (max 5 MB). Please send a smaller photo.",
         "ocr_error": "Error processing the image. Please try again.",
-        "session_reset": (
-            "Your session was restored after a system restart.\n"
-            "Please send the Z Report photo again."
-        ),
+        "session_reset": ("Your session was restored after a system restart.\nPlease send the Z Report photo again."),
         "help": (
             "Carimas Bot -- Help\n\n"
             "Available commands:\n"
@@ -239,20 +207,10 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  Tap 'Ask AI' to query sales data and variances."
         ),
         "status_registered": (
-            "Status: Registered\n"
-            "Store: {store}\n"
-            "User: {username}\n"
-            "Ready to receive Z Report photos."
+            "Status: Registered\nStore: {store}\nUser: {username}\nReady to receive Z Report photos."
         ),
-        "status_unregistered": (
-            "Status: Not registered\n"
-            "Send any message to start registration."
-        ),
-        "status_midflow": (
-            "Status: In progress ({state})\n"
-            "User: {username}\n"
-            "Use /cancel to reset."
-        ),
+        "status_unregistered": ("Status: Not registered\nSend any message to start registration."),
+        "status_midflow": ("Status: In progress ({state})\nUser: {username}\nUse /cancel to reset."),
         "cancel_ok": "Operation cancelled. Send a Z Report photo when ready.",
         "cancel_nothing": "No active operation at this time.",
         "ai_welcome": (
@@ -267,19 +225,13 @@ MESSAGES: dict[str, dict[str, str]] = {
         ),
         "ai_exit": "AI mode deactivated. Send a Z Report photo when ready.",
         "payouts": (
-            "What was the total payouts amount?\n"
-            "Type the amount (e.g. 50.00) or tap the button if there were none."
+            "What was the total payouts amount?\nType the amount (e.g. 50.00) or tap the button if there were none."
         ),
         "actual_cash": (
-            "How much cash is in the drawer?\n"
-            "Type the counted amount, or tap Skip to use the OCR variance."
+            "How much cash is in the drawer?\nType the counted amount, or tap Skip to use the OCR variance."
         ),
         "bad_amount": "Enter a valid amount (e.g. 50.00 or 0).",
-        "broadcast_confirm": (
-            "Message to send to {count} users:\n\n"
-            "{message}\n\n"
-            "Confirm send?"
-        ),
+        "broadcast_confirm": ("Message to send to {count} users:\n\n{message}\n\nConfirm send?"),
         "broadcast_sent": "Message sent to {sent} of {total} users.",
         "broadcast_cancelled": "Broadcast cancelled.",
         "broadcast_no_permission": "Only administrators can use /broadcast.",
@@ -308,7 +260,8 @@ MESSAGES: dict[str, dict[str, str]] = {
 
 def msg(telegram_id: int, key: str, **fmt) -> str:
     """Return a message string in the user's preferred language."""
-    from telegram.session import bot_state, _bot_state_lock
+    from telegram.session import _bot_state_lock, bot_state
+
     with _bot_state_lock:
         state = bot_state.get(telegram_id, {})
     lang = state.get("lang", "es")

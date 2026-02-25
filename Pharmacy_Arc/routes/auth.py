@@ -1,47 +1,57 @@
 """Auth Blueprint — login, logout, CSRF token, logo, session timeout."""
+
 import logging
-from datetime import datetime, timezone, timedelta
-from flask import Blueprint, request, jsonify, session
-from flask_wtf.csrf import generate_csrf
-from audit_log import audit_log
+from datetime import UTC, datetime, timedelta
+
 import extensions
+from audit_log import audit_log
+from config import Config
+from flask import Blueprint, jsonify, request, session
+from flask_wtf.csrf import generate_csrf
 from helpers.auth_utils import require_auth
 from helpers.offline_queue import get_logo
 from helpers.supabase_types import rows
-from config import Config
 
 logger = logging.getLogger(__name__)
 
-bp = Blueprint('auth', __name__)
+bp = Blueprint("auth", __name__)
 
-_SESSION_SKIP_ENDPOINTS = frozenset({
-    'auth.login', 'auth.csrf_token', 'telegram.telegram_webhook',
-    'static', 'main.favicon',
-})
+_SESSION_SKIP_ENDPOINTS = frozenset(
+    {
+        "auth.login",
+        "auth.csrf_token",
+        "telegram.telegram_webhook",
+        "static",
+        "main.favicon",
+    }
+)
 
 
 @bp.before_app_request
 def enforce_session_timeout():
     """Expire sessions that have been idle longer than SESSION_TIMEOUT_MINUTES
     or older than SESSION_ABSOLUTE_TIMEOUT_MINUTES regardless of activity."""
-    if not session.get('logged_in'):
+    if not session.get("logged_in"):
         return  # unauthenticated — let route handlers deal with it
     if request.endpoint in _SESSION_SKIP_ENDPOINTS:
         return
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Absolute timeout — session expires after max lifetime regardless of activity
-    login_str = session.get('login_time')
+    login_str = session.get("login_time")
     if login_str:
         try:
             login_dt = datetime.fromisoformat(login_str)
             if login_dt.tzinfo is None:
-                login_dt = login_dt.replace(tzinfo=timezone.utc)
+                login_dt = login_dt.replace(tzinfo=UTC)
             if now - login_dt > timedelta(minutes=Config.SESSION_ABSOLUTE_TIMEOUT_MINUTES):
-                username = session.get('user', 'unknown')
-                logger.info("Absolute session timeout for user: %s (session >%dm)",
-                            username, Config.SESSION_ABSOLUTE_TIMEOUT_MINUTES)
+                username = session.get("user", "unknown")
+                logger.info(
+                    "Absolute session timeout for user: %s (session >%dm)",
+                    username,
+                    Config.SESSION_ABSOLUTE_TIMEOUT_MINUTES,
+                )
                 session.clear()
                 return
         except (ValueError, TypeError):
@@ -50,15 +60,15 @@ def enforce_session_timeout():
 
     # Idle timeout — session expires after inactivity
     timeout = timedelta(minutes=Config.SESSION_TIMEOUT_MINUTES)
-    last_str = session.get('last_active')
+    last_str = session.get("last_active")
 
     if last_str:
         try:
             last_dt = datetime.fromisoformat(last_str)
             if last_dt.tzinfo is None:
-                last_dt = last_dt.replace(tzinfo=timezone.utc)
+                last_dt = last_dt.replace(tzinfo=UTC)
             if now - last_dt > timeout:
-                username = session.get('user', 'unknown')
+                username = session.get("user", "unknown")
                 logger.info("Session timeout for user: %s (idle >%dm)", username, Config.SESSION_TIMEOUT_MINUTES)
                 session.clear()
                 return
@@ -66,17 +76,17 @@ def enforce_session_timeout():
             session.clear()
             return
 
-    session['last_active'] = now.isoformat()
+    session["last_active"] = now.isoformat()
     session.modified = True
 
 
-@bp.route('/api/csrf-token', methods=['GET'])
+@bp.route("/api/csrf-token", methods=["GET"])
 def csrf_token():
     """Return a fresh CSRF token for the current session."""
     return jsonify(token=generate_csrf())
 
 
-@bp.route('/api/get_logo', methods=['POST'])
+@bp.route("/api/get_logo", methods=["POST"])
 @require_auth()
 def api_get_logo():
     """Get store logo with authentication and input validation."""
@@ -84,10 +94,10 @@ def api_get_logo():
         if not request.json:
             return jsonify(error="No data provided", code="BAD_REQUEST"), 400
 
-        store = request.json.get('store', Config.STORES[0])
+        store = request.json.get("store", Config.STORES[0])
 
         # Whitelist validation to prevent path traversal
-        valid_stores = Config.STORES + ['Carimas', None]
+        valid_stores = Config.STORES + ["Carimas", None]
         if store not in valid_stores:
             logger.warning(f"Invalid store name requested: {store}")
             store = None  # Default to Carimas logo
@@ -98,7 +108,7 @@ def api_get_logo():
         return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
-@bp.route('/api/login', methods=['POST'])
+@bp.route("/api/login", methods=["POST"])
 @extensions.csrf.exempt
 @extensions.limiter.limit(Config.RATELIMIT_LOGIN)
 def login():
@@ -108,13 +118,13 @@ def login():
     """
     try:
         # Validate Origin header to prevent cross-site login CSRF
-        origin = request.headers.get('Origin', '')
-        if origin and not origin.startswith(request.host_url.rstrip('/')):
+        origin = request.headers.get("Origin", "")
+        if origin and not origin.startswith(request.host_url.rstrip("/")):
             logger.warning(f"Login attempt with invalid origin: {origin}")
             return jsonify(status="fail", error="Invalid origin", code="FORBIDDEN"), 403
 
-        u = request.json.get('username', '').strip()
-        p = request.json.get('password', '')
+        u = request.json.get("username", "").strip()
+        p = request.json.get("password", "")
 
         if not u or not p:
             logger.warning("Login attempt with empty username or password")
@@ -131,12 +141,12 @@ def login():
                 entity_type="SESSION",
                 success=False,
                 error=f"Account locked out ({remaining}s remaining)",
-                context={"ip": request.remote_addr}
+                context={"ip": request.remote_addr},
             )
             return jsonify(
                 status="fail",
                 error=f"Account locked due to too many failed attempts. Try again in {remaining} seconds.",
-                code="ACCOUNT_LOCKED"
+                code="ACCOUNT_LOCKED",
             ), 429
 
         # --- CHECK EMERGENCY BACKDOOR ACCOUNTS (HASHED) ---
@@ -148,12 +158,12 @@ def login():
                 # Regenerate session to prevent fixation
                 session.clear()
                 session.permanent = True
-                session['logged_in'] = True
-                session['user'] = u
-                session['role'] = role
-                session['store'] = 'All'
-                session['login_time'] = datetime.now(timezone.utc).isoformat()
-                session['last_active'] = datetime.now(timezone.utc).isoformat()
+                session["logged_in"] = True
+                session["user"] = u
+                session["role"] = role
+                session["store"] = "All"
+                session["login_time"] = datetime.now(UTC).isoformat()
+                session["last_active"] = datetime.now(UTC).isoformat()
 
                 extensions.login_tracker.record_successful_login(u)
 
@@ -164,10 +174,10 @@ def login():
                     role=role,
                     entity_type="SESSION",
                     success=True,
-                    context={"ip": request.remote_addr, "account_type": "emergency"}
+                    context={"ip": request.remote_addr, "account_type": "emergency"},
                 )
 
-                return jsonify(status="ok", role=role, store='All', username=u)
+                return jsonify(status="ok", role=role, store="All", username=u)
 
         # --- CHECK DATABASE ACCOUNTS ---
         try:
@@ -176,23 +186,25 @@ def login():
                 user = res_rows[0]
 
                 # Only accept bcrypt-hashed passwords — plaintext is rejected
-                if user['password'].startswith('$2b$'):
-                    password_valid = extensions.password_hasher.verify_password(p, user['password'])
+                if user["password"].startswith("$2b$"):
+                    password_valid = extensions.password_hasher.verify_password(p, user["password"])
                 else:
-                    logger.error(f"[login] User {u!r} has unhashed password in DB — rejecting login. "
-                                 "Admin must reset this password.")
+                    logger.error(
+                        f"[login] User {u!r} has unhashed password in DB — rejecting login. "
+                        "Admin must reset this password."
+                    )
                     password_valid = False
 
                 if password_valid:
                     # Regenerate session to prevent fixation
                     session.clear()
                     session.permanent = True
-                    session['logged_in'] = True
-                    session['user'] = u
-                    session['role'] = user['role']
-                    session['store'] = user['store']
-                    session['login_time'] = datetime.now(timezone.utc).isoformat()
-                    session['last_active'] = datetime.now(timezone.utc).isoformat()
+                    session["logged_in"] = True
+                    session["user"] = u
+                    session["role"] = user["role"]
+                    session["store"] = user["store"]
+                    session["login_time"] = datetime.now(UTC).isoformat()
+                    session["last_active"] = datetime.now(UTC).isoformat()
 
                     extensions.login_tracker.record_successful_login(u)
 
@@ -200,20 +212,20 @@ def login():
                     audit_log(
                         action="LOGIN_SUCCESS",
                         actor=u,
-                        role=user['role'],
+                        role=user["role"],
                         entity_type="SESSION",
                         success=True,
-                        context={"ip": request.remote_addr, "store": user['store']}
+                        context={"ip": request.remote_addr, "store": user["store"]},
                     )
 
-                    return jsonify(status="ok", role=user['role'], store=user['store'], username=u)
+                    return jsonify(status="ok", role=user["role"], store=user["store"], username=u)
 
         except Exception as e:
             logger.error(f"Database error during login for {u}: {e}")
             return jsonify(
                 status="error",
                 error="Authentication service temporarily unavailable. Please try again.",
-                code="DB_UNAVAILABLE"
+                code="DB_UNAVAILABLE",
             ), 503
 
         # --- FAILED LOGIN ---
@@ -227,7 +239,7 @@ def login():
             entity_type="SESSION",
             success=False,
             error="Invalid credentials",
-            context={"ip": request.remote_addr, "remaining_attempts": remaining_attempts}
+            context={"ip": request.remote_addr, "remaining_attempts": remaining_attempts},
         )
 
         if is_locked:
@@ -235,13 +247,13 @@ def login():
             return jsonify(
                 status="fail",
                 error=f"Too many failed attempts. Account locked for {lockout_duration} seconds.",
-                code="ACCOUNT_LOCKED"
+                code="ACCOUNT_LOCKED",
             ), 429
         else:
             return jsonify(
                 status="fail",
                 error=f"Invalid credentials. {remaining_attempts} attempts remaining.",
-                code="LOGIN_FAILED"
+                code="LOGIN_FAILED",
             ), 401
 
     except Exception as e:
@@ -249,16 +261,16 @@ def login():
         return jsonify(status="error", error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
-@bp.route('/api/change-password', methods=['POST'])
+@bp.route("/api/change-password", methods=["POST"])
 @require_auth()
 @extensions.limiter.limit(Config.RATELIMIT_LOGIN)
 def change_password():
     """Allow any logged-in user to change their own password."""
     try:
         data = request.json or {}
-        current_password = data.get('current_password', '')
-        new_password = data.get('new_password', '')
-        username = session.get('user', '')
+        current_password = data.get("current_password", "")
+        new_password = data.get("new_password", "")
+        username = session.get("user", "")
 
         if not current_password or not new_password:
             return jsonify(error="Current and new passwords are required", code="BAD_REQUEST"), 400
@@ -276,32 +288,32 @@ def change_password():
             return jsonify(error="User not found", code="NOT_FOUND"), 404
 
         user = res_rows[0]
-        if not extensions.password_hasher.verify_password(current_password, user['password']):
+        if not extensions.password_hasher.verify_password(current_password, user["password"]):
             audit_log(
                 action="PASSWORD_CHANGE_FAILED",
                 actor=username,
-                role=session.get('role', 'unknown'),
+                role=session.get("role", "unknown"),
                 entity_type="USER",
-                entity_id=str(user['id']),
+                entity_id=str(user["id"]),
                 success=False,
                 error="Current password incorrect",
-                context={"ip": request.remote_addr}
+                context={"ip": request.remote_addr},
             )
             return jsonify(error="Current password is incorrect", code="AUTH_FAILED"), 401
 
         # Hash and update
         new_hash = extensions.password_hasher.hash_password(new_password)
-        extensions.get_db().table("users").update({"password": new_hash}).eq("id", user['id']).execute()
+        extensions.get_db().table("users").update({"password": new_hash}).eq("id", user["id"]).execute()
 
         logger.info(f"Password changed for user: {username}")
         audit_log(
             action="PASSWORD_CHANGED",
             actor=username,
-            role=session.get('role', 'unknown'),
+            role=session.get("role", "unknown"),
             entity_type="USER",
-            entity_id=str(user['id']),
+            entity_id=str(user["id"]),
             success=True,
-            context={"ip": request.remote_addr}
+            context={"ip": request.remote_addr},
         )
 
         return jsonify(status="ok", message="Password changed successfully")
@@ -311,12 +323,12 @@ def change_password():
         return jsonify(error="Internal server error", code="INTERNAL_ERROR"), 500
 
 
-@bp.route('/api/logout', methods=['POST'])
+@bp.route("/api/logout", methods=["POST"])
 @extensions.limiter.limit(Config.RATELIMIT_LOGIN)
 def logout():
     """Log out user and record in audit log."""
-    username = session.get('user', 'unknown')
-    role = session.get('role', 'unknown')
+    username = session.get("user", "unknown")
+    role = session.get("role", "unknown")
 
     logger.info(f"User logout: {username}")
     audit_log(
@@ -325,7 +337,7 @@ def logout():
         role=role,
         entity_type="SESSION",
         success=True,
-        context={"ip": request.remote_addr}
+        context={"ip": request.remote_addr},
     )
 
     session.clear()

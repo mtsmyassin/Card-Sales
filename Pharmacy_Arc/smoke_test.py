@@ -17,13 +17,14 @@ Tests:
 
 Exit code 0 = all passed. Non-zero = failures.
 """
-import sys
-import json
+
 import os
+import sys
+
 import requests
 
 RAILWAY_URL = "https://carimas.up.railway.app"
-DEFAULT_URL  = "http://localhost:5000"
+DEFAULT_URL = "http://localhost:5000"
 
 
 def check(label, condition, detail=""):
@@ -79,7 +80,11 @@ def run_smoke(base_url: str) -> int:
         r = session.get(f"{base_url}/api/list", timeout=15)
         data = r.json()
         ok = r.status_code == 200 and isinstance(data, list)
-        if not check("/api/list → JSON array", ok, f"status={r.status_code} type={type(data).__name__} len={len(data) if isinstance(data, list) else '?'}"):
+        if not check(
+            "/api/list → JSON array",
+            ok,
+            f"status={r.status_code} type={type(data).__name__} len={len(data) if isinstance(data, list) else '?'}",
+        ):
             failures += 1
     except Exception as e:
         check("/api/list → JSON array", False, str(e))
@@ -107,8 +112,11 @@ def run_smoke(base_url: str) -> int:
         r = session.get(f"{base_url}/api/zreport/photos?entry_id=999999999", timeout=10)
         is_json = "application/json" in r.headers.get("Content-Type", "")
         ok = r.status_code in (404, 403) and is_json
-        if not check("/api/zreport/photos?entry_id=999999999 → JSON 404", ok,
-                     f"status={r.status_code} ct={r.headers.get('Content-Type','')}"):
+        if not check(
+            "/api/zreport/photos?entry_id=999999999 → JSON 404",
+            ok,
+            f"status={r.status_code} ct={r.headers.get('Content-Type', '')}",
+        ):
             failures += 1
     except Exception as e:
         check("/api/zreport/photos (bad id)", False, str(e))
@@ -119,8 +127,11 @@ def run_smoke(base_url: str) -> int:
         r = session.get(f"{base_url}/api/zreport/signed_url?photo_id=999999999", timeout=10)
         is_json = "application/json" in r.headers.get("Content-Type", "")
         ok = r.status_code in (404, 403) and is_json
-        if not check("/api/zreport/signed_url?photo_id=999999999 → JSON 404", ok,
-                     f"status={r.status_code} ct={r.headers.get('Content-Type','')}"):
+        if not check(
+            "/api/zreport/signed_url?photo_id=999999999 → JSON 404",
+            ok,
+            f"status={r.status_code} ct={r.headers.get('Content-Type', '')}",
+        ):
             failures += 1
     except Exception as e:
         check("/api/zreport/signed_url (bad id)", False, str(e))
@@ -131,8 +142,7 @@ def run_smoke(base_url: str) -> int:
         r = session.get(f"{base_url}/api/audit/999999999/zreport_image", timeout=10)
         is_json = "application/json" in r.headers.get("Content-Type", "")
         ok = r.status_code in (404, 403) and is_json
-        if not check("/api/audit/999999999/zreport_image → JSON 404", ok,
-                     f"status={r.status_code}"):
+        if not check("/api/audit/999999999/zreport_image → JSON 404", ok, f"status={r.status_code}"):
             failures += 1
     except Exception as e:
         check("/api/audit/id/zreport_image (bad id)", False, str(e))

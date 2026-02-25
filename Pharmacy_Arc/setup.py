@@ -3,8 +3,8 @@
 Setup and initialization script for Pharmacy Management System.
 Helps configure the application for first-time use.
 """
+
 import sys
-import os
 from pathlib import Path
 
 try:
@@ -16,34 +16,31 @@ except ImportError:
 
 def create_env_file():
     """Create .env file from .env.example."""
-    env_example = Path('.env.example')
-    env_file = Path('.env')
-    
+    env_example = Path(".env.example")
+    env_file = Path(".env")
+
     if env_file.exists():
-        response = input('.env file already exists. Overwrite? (yes/no): ')
-        if response.lower() != 'yes':
+        response = input(".env file already exists. Overwrite? (yes/no): ")
+        if response.lower() != "yes":
             print("Keeping existing .env file.")
             return False
-    
+
     if not env_example.exists():
         print("Error: .env.example not found!")
         return False
-    
+
     # Copy example file
-    with open(env_example, 'r') as src:
+    with open(env_example) as src:
         content = src.read()
-    
+
     # Generate secure secret key
     secret_key = generate_secret_key()
-    content = content.replace(
-        'generate-a-strong-random-secret-key-here-minimum-32-characters',
-        secret_key
-    )
-    
-    with open(env_file, 'w') as dst:
+    content = content.replace("generate-a-strong-random-secret-key-here-minimum-32-characters", secret_key)
+
+    with open(env_file, "w") as dst:
         dst.write(content)
-    
-    print(f"✅ Created .env file with generated secret key")
+
+    print("✅ Created .env file with generated secret key")
     return True
 
 
@@ -56,50 +53,50 @@ def setup_emergency_admin():
     print("You need to set passwords for two accounts:")
     print("  1. super (Super Admin - full access)")
     print("  2. admin (Admin - cannot unlock days)")
-    
+
     # Super admin
     print("\n--- Super Admin Account ---")
     super_password = input("Enter password for 'super' account: ")
     if len(super_password) < 8:
         print("Warning: Password is shorter than 8 characters!")
-    
+
     super_hash = PasswordHasher.hash_password(super_password)
-    
+
     # Regular admin
     print("\n--- Admin Account ---")
     admin_password = input("Enter password for 'admin' account: ")
     if len(admin_password) < 8:
         print("Warning: Password is shorter than 8 characters!")
-    
+
     admin_hash = PasswordHasher.hash_password(admin_password)
-    
+
     # Update .env file
-    env_file = Path('.env')
+    env_file = Path(".env")
     if not env_file.exists():
         print("Error: .env file not found! Run setup first.")
         return False
-    
-    with open(env_file, 'r') as f:
+
+    with open(env_file) as f:
         lines = f.readlines()
-    
+
     # Replace the emergency account lines
     new_lines = []
     for line in lines:
-        if line.startswith('EMERGENCY_ADMIN_SUPER='):
-            new_lines.append(f'EMERGENCY_ADMIN_SUPER=super:{super_hash}\n')
-        elif line.startswith('EMERGENCY_ADMIN_BASIC='):
-            new_lines.append(f'EMERGENCY_ADMIN_BASIC=admin:{admin_hash}\n')
+        if line.startswith("EMERGENCY_ADMIN_SUPER="):
+            new_lines.append(f"EMERGENCY_ADMIN_SUPER=super:{super_hash}\n")
+        elif line.startswith("EMERGENCY_ADMIN_BASIC="):
+            new_lines.append(f"EMERGENCY_ADMIN_BASIC=admin:{admin_hash}\n")
         else:
             new_lines.append(line)
-    
-    with open(env_file, 'w') as f:
+
+    with open(env_file, "w") as f:
         f.writelines(new_lines)
-    
+
     print("\n✅ Emergency admin accounts configured!")
     print("\nYou can now login with:")
-    print(f"  Username: super")
-    print(f"  Username: admin")
-    
+    print("  Username: super")
+    print("  Username: admin")
+
     return True
 
 
@@ -110,35 +107,35 @@ def setup_supabase():
     print("=" * 60)
     print("\nYou need your Supabase project credentials.")
     print("Get these from: https://supabase.com/dashboard/project/_/settings/api")
-    
+
     url = input("\nEnter Supabase URL (e.g., https://xxx.supabase.co): ").strip()
     key = input("Enter Supabase Anon/Public Key: ").strip()
-    
+
     if not url or not key:
         print("Error: Both URL and Key are required!")
         return False
-    
+
     # Update .env file
-    env_file = Path('.env')
+    env_file = Path(".env")
     if not env_file.exists():
         print("Error: .env file not found! Run setup first.")
         return False
-    
-    with open(env_file, 'r') as f:
+
+    with open(env_file) as f:
         lines = f.readlines()
-    
+
     new_lines = []
     for line in lines:
-        if line.startswith('SUPABASE_URL='):
-            new_lines.append(f'SUPABASE_URL={url}\n')
-        elif line.startswith('SUPABASE_KEY='):
-            new_lines.append(f'SUPABASE_KEY={key}\n')
+        if line.startswith("SUPABASE_URL="):
+            new_lines.append(f"SUPABASE_URL={url}\n")
+        elif line.startswith("SUPABASE_KEY="):
+            new_lines.append(f"SUPABASE_KEY={key}\n")
         else:
             new_lines.append(line)
-    
-    with open(env_file, 'w') as f:
+
+    with open(env_file, "w") as f:
         f.writelines(new_lines)
-    
+
     print("\n✅ Supabase configuration saved!")
     return True
 
@@ -148,11 +145,12 @@ def verify_setup():
     print("\n" + "=" * 60)
     print("VERIFYING SETUP")
     print("=" * 60)
-    
+
     try:
         from config import Config
+
         errors = Config.validate()
-        
+
         if errors:
             print("\n❌ Configuration has errors:")
             for error in errors:
@@ -160,13 +158,13 @@ def verify_setup():
             return False
         else:
             print("\n✅ Configuration is valid!")
-            print(f"\nSettings:")
+            print("\nSettings:")
             print(f"  Port: {Config.PORT}")
             print(f"  Session Timeout: {Config.SESSION_TIMEOUT_MINUTES} minutes")
             print(f"  Max Login Attempts: {Config.MAX_LOGIN_ATTEMPTS}")
             print(f"  Lockout Duration: {Config.LOCKOUT_DURATION_MINUTES} minutes")
             return True
-    
+
     except Exception as e:
         print(f"\n❌ Error verifying setup: {e}")
         return False
@@ -181,32 +179,32 @@ def main():
     print("You'll need:")
     print("  - Supabase project credentials")
     print("  - Passwords for emergency admin accounts")
-    
+
     input("\nPress Enter to continue...")
-    
+
     # Step 1: Create .env file
     print("\n[Step 1/4] Creating configuration file...")
     if not create_env_file():
         print("Skipped .env creation")
-    
+
     # Step 2: Configure Supabase
     print("\n[Step 2/4] Configuring database connection...")
     setup = input("Configure Supabase now? (yes/no): ")
-    if setup.lower() == 'yes':
+    if setup.lower() == "yes":
         if not setup_supabase():
             print("Warning: Supabase configuration incomplete!")
     else:
         print("Skipped. You'll need to manually edit .env later.")
-    
+
     # Step 3: Setup admin accounts
     print("\n[Step 3/4] Setting up admin accounts...")
     setup_admin = input("Set up emergency admin accounts now? (yes/no): ")
-    if setup_admin.lower() == 'yes':
+    if setup_admin.lower() == "yes":
         if not setup_emergency_admin():
             print("Warning: Admin accounts not configured!")
     else:
         print("Skipped. You'll need to manually edit .env later.")
-    
+
     # Step 4: Verify
     print("\n[Step 4/4] Verifying setup...")
     if verify_setup():
@@ -219,7 +217,9 @@ def main():
         print("  2. Run: python app.py")
         print("  3. The application will open in your browser")
         print("\nTo build a Windows executable:")
-        print("  pyinstaller --noconsole --onefile --add-data \"logo.png;.\" --add-data \"carthage.png;.\" --add-data \".env;.\" app.py")
+        print(
+            '  pyinstaller --noconsole --onefile --add-data "logo.png;." --add-data "carthage.png;." --add-data ".env;." app.py'
+        )
     else:
         print("\n" + "=" * 60)
         print("⚠️  SETUP INCOMPLETE")
@@ -228,7 +228,7 @@ def main():
         print("Or manually edit the .env file.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
@@ -237,5 +237,6 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"\n\nUnexpected error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

@@ -6,12 +6,11 @@ Covers:
 - BUG-02: bot_state protected by threading.Lock; persist_session is fire-and-forget
 - BUG-03: gunicorn.conf.py exists with post_fork; EOD loop isolates per-recipient failures
 """
+
 import os
 import sys
-import hmac
 import threading
-import pytest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -28,12 +27,15 @@ def _load_app():
         with patch("supabase.create_client", return_value=MagicMock()):
             with patch("config.Config.startup_check"):
                 import importlib
+
                 import app as app_module
+
                 importlib.reload(app_module)
                 return app_module
 
 
 # ── BUG-01: Webhook secret — dedicated var + constant-time compare ─────────────
+
 
 class TestWebhookSecretValidation:
     def test_webhook_rejects_missing_secret_header(self):
@@ -94,9 +96,7 @@ class TestWebhookSecretValidation:
         wh_start = src.index("def telegram_webhook():")
         wh_end = src.index("\ndef ", wh_start + 1)
         webhook_block = src[wh_start:wh_end]
-        assert "TELEGRAM_WEBHOOK_SECRET" in webhook_block, (
-            "telegram_webhook() must use Config.TELEGRAM_WEBHOOK_SECRET"
-        )
+        assert "TELEGRAM_WEBHOOK_SECRET" in webhook_block, "telegram_webhook() must use Config.TELEGRAM_WEBHOOK_SECRET"
         # Must NOT fall back to Flask SECRET_KEY for the token
         assert "SECRET_KEY" not in webhook_block or "TELEGRAM_WEBHOOK_SECRET" in webhook_block
 
@@ -106,20 +106,18 @@ class TestWebhookSecretValidation:
             os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.py"),
             encoding="utf-8",
         ).read()
-        assert "TELEGRAM_WEBHOOK_SECRET" in src, (
-            "config.py must define TELEGRAM_WEBHOOK_SECRET from os.getenv"
-        )
+        assert "TELEGRAM_WEBHOOK_SECRET" in src, "config.py must define TELEGRAM_WEBHOOK_SECRET from os.getenv"
 
 
 # ── BUG-02: bot_state thread lock + async persist ─────────────────────────────
+
 
 class TestBotStateThreadSafety:
     def test_bot_state_lock_exists(self):
         """telegram_bot.py must declare _bot_state_lock as a threading.Lock."""
         import telegram_bot
-        assert hasattr(telegram_bot, "_bot_state_lock"), (
-            "telegram_bot must have _bot_state_lock"
-        )
+
+        assert hasattr(telegram_bot, "_bot_state_lock"), "telegram_bot must have _bot_state_lock"
         assert isinstance(telegram_bot._bot_state_lock, type(threading.Lock())), (
             "_bot_state_lock must be a threading.Lock"
         )
@@ -145,9 +143,7 @@ class TestBotStateThreadSafety:
         set_state_start = src.index("def _set_state(")
         set_state_end = src.index("\ndef ", set_state_start + 1)
         block = src[set_state_start:set_state_end]
-        assert "persist_session(" in block, (
-            "_set_state must call persist_session synchronously"
-        )
+        assert "persist_session(" in block, "_set_state must call persist_session synchronously"
         assert "threading.Thread" not in block, (
             "_set_state should NOT use threading.Thread — persist must be synchronous"
         )
@@ -162,12 +158,11 @@ class TestBotStateThreadSafety:
         handle_start = src.index("def handle_update(")
         handle_end = src.index("\ndef ", handle_start + 1)
         block = src[handle_start:handle_end]
-        assert "_bot_state_lock" in block, (
-            "handle_update must read bot_state under _bot_state_lock"
-        )
+        assert "_bot_state_lock" in block, "handle_update must read bot_state under _bot_state_lock"
 
 
 # ── BUG-03: APScheduler multi-worker safety ────────────────────────────────────
+
 
 class TestAPSchedulerWorkerSafety:
     def test_gunicorn_conf_exists(self):
@@ -210,9 +205,5 @@ class TestAPSchedulerWorkerSafety:
         assert "except Exception as exc" in block or "except Exception" in block, (
             "_send_eod_reminders must catch per-recipient send errors"
         )
-        assert "logger.error" in block, (
-            "_send_eod_reminders must log per-recipient failures"
-        )
-        assert "failed" in block, (
-            "_send_eod_reminders must track failed recipients"
-        )
+        assert "logger.error" in block, "_send_eod_reminders must log per-recipient failures"
+        assert "failed" in block, "_send_eod_reminders must track failed recipients"

@@ -1,6 +1,7 @@
 """Lightweight Gemini API client using REST (no SDK dependencies)."""
-import os
+
 import logging
+import os
 
 import requests as http
 
@@ -13,8 +14,9 @@ def _api_key() -> str:
     return os.getenv("GOOGLE_API_KEY", "")
 
 
-def generate_text(model: str, contents: list, system_instruction: str = "",
-                  max_output_tokens: int = 500, timeout: int = 30) -> str:
+def generate_text(
+    model: str, contents: list, system_instruction: str = "", max_output_tokens: int = 500, timeout: int = 30
+) -> str:
     """Call Gemini generateContent REST API and return the text response.
 
     Args:
@@ -59,9 +61,9 @@ def generate_text(model: str, contents: list, system_instruction: str = "",
     return parts[0].get("text", "")
 
 
-def generate_with_image(model: str, image_b64: str, mime_type: str,
-                        prompt: str, max_output_tokens: int = 1024,
-                        timeout: int = 30) -> str:
+def generate_with_image(
+    model: str, image_b64: str, mime_type: str, prompt: str, max_output_tokens: int = 1024, timeout: int = 30
+) -> str:
     """Call Gemini generateContent with an image + text prompt.
 
     Args:
@@ -75,12 +77,13 @@ def generate_with_image(model: str, image_b64: str, mime_type: str,
     Returns:
         The generated text string.
     """
-    contents = [{
-        "role": "user",
-        "parts": [
-            {"inline_data": {"mime_type": mime_type, "data": image_b64}},
-            {"text": prompt},
-        ],
-    }]
-    return generate_text(model, contents, max_output_tokens=max_output_tokens,
-                         timeout=timeout)
+    contents = [
+        {
+            "role": "user",
+            "parts": [
+                {"inline_data": {"mime_type": mime_type, "data": image_b64}},
+                {"text": prompt},
+            ],
+        }
+    ]
+    return generate_text(model, contents, max_output_tokens=max_output_tokens, timeout=timeout)

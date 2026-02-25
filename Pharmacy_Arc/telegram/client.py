@@ -1,17 +1,18 @@
 """Telegram Bot API transport — low-level HTTP calls and message helpers."""
-import os
-import time
-import logging
-import threading
-import requests as http
 
-from config import Config
+import logging
+import os
+import threading
+import time
+
+import requests as http
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramAPIError(Exception):
     """Raised when all retries to the Telegram Bot API are exhausted."""
+
     def __init__(self, method: str, error: str, attempts: int):
         self.method = method
         self.error = error
@@ -26,9 +27,7 @@ if not _BOT_TOKEN:
 
 def _token() -> str:
     if not _BOT_TOKEN:
-        raise RuntimeError(
-            "TELEGRAM_BOT_TOKEN is not set — add it to Railway Variables"
-        )
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set — add it to Railway Variables")
     return _BOT_TOKEN
 
 
@@ -97,12 +96,7 @@ def _notify_admin_if_needed(telegram_id: int, error_type: str, error_msg: str) -
         if now - _admin_last_notified < _ADMIN_NOTIFY_COOLDOWN:
             return
         _admin_last_notified = now
-    text = (
-        f"Bot error alert\n"
-        f"User: {telegram_id}\n"
-        f"Error: {error_type}\n"
-        f"Detail: {error_msg[:200]}"
-    )
+    text = f"Bot error alert\nUser: {telegram_id}\nError: {error_type}\nDetail: {error_msg[:200]}"
     send_message_safe(_ADMIN_CHAT_ID, text)
 
 

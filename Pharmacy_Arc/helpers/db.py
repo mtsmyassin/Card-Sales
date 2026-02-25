@@ -1,6 +1,8 @@
 """Database helpers: retry logic and PostgREST error classification."""
-import time
+
 import logging
+import time
+
 from config import Config
 from postgrest.exceptions import APIError
 
@@ -34,7 +36,11 @@ def db_retry(operation, label="db_call", max_attempts=None, backoff_factor=2):
                 wait = backoff_factor ** (attempt - 1)
                 logger.warning(
                     "%s failed (attempt %d/%d): %s — retrying in %ds",
-                    label, attempt, max_attempts, e, wait,
+                    label,
+                    attempt,
+                    max_attempts,
+                    e,
+                    wait,
                 )
                 time.sleep(wait)
             else:
@@ -46,4 +52,4 @@ def db_retry(operation, label="db_call", max_attempts=None, backoff_factor=2):
 
 def is_unique_violation(exc: Exception) -> bool:
     """Check if an exception is a PostgREST unique constraint violation (23505)."""
-    return isinstance(exc, APIError) and getattr(exc, 'code', None) == '23505'
+    return isinstance(exc, APIError) and getattr(exc, "code", None) == "23505"

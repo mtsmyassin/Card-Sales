@@ -2,10 +2,12 @@
 Authentication and authorization helpers.
 No dependency on app.py — import from flask and audit_log only.
 """
+
 import logging
 from functools import wraps
-from flask import session, request, jsonify
+
 from audit_log import audit_log
+from flask import jsonify, request, session
 
 logger = logging.getLogger(__name__)
 
@@ -18,16 +20,17 @@ def require_auth(allowed_roles=None):
         allowed_roles: List of roles allowed to access this endpoint.
                       If None, any authenticated user is allowed.
     """
+
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            if not session.get('logged_in'):
+            if not session.get("logged_in"):
                 logger.warning(f"Unauthorized access attempt to {request.endpoint}")
                 return jsonify(error="Authentication required", code="AUTH_REQUIRED"), 401
             if allowed_roles:
-                user_role = session.get('role')
+                user_role = session.get("role")
                 if user_role not in allowed_roles:
-                    username = session.get('user', 'unknown')
+                    username = session.get("user", "unknown")
                     logger.warning(
                         f"Access denied: {username} ({user_role}) "
                         f"attempted to access {request.endpoint} "
@@ -41,17 +44,19 @@ def require_auth(allowed_roles=None):
                         entity_id=request.endpoint,
                         success=False,
                         error=f"Insufficient permissions (requires: {allowed_roles})",
-                        context={"ip": request.remote_addr}
+                        context={"ip": request.remote_addr},
                     )
                     return jsonify(error="Insufficient permissions", code="FORBIDDEN"), 403
             return f(*args, **kwargs)
+
         return decorated_function
+
     return decorator
 
 
 def is_admin_role(role: str) -> bool:
     """Return True if the role has admin-level privileges."""
-    return role in ('admin', 'super_admin')
+    return role in ("admin", "super_admin")
 
 
 def can_access_photo(photo_store, user_role: str, user_store: str) -> bool:

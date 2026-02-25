@@ -3,6 +3,7 @@ APScheduler integration for EOD reminder job.
 init_scheduler(app) is called by the app factory.
 The scheduler is stored as app._scheduler for gunicorn.conf.py post_fork hook.
 """
+
 import atexit
 import logging
 from datetime import datetime
@@ -14,7 +15,9 @@ def _send_eod_reminders() -> None:
     """Send 9 PM reminder to bot users whose store hasn't submitted today."""
     try:
         from zoneinfo import ZoneInfo
+
         import extensions  # deferred — extensions is populated by the factory at startup
+
         pr_tz = ZoneInfo("America/Puerto_Rico")
         today = datetime.now(pr_tz).strftime("%Y-%m-%d")
         _db = extensions.get_db()
@@ -22,12 +25,14 @@ def _send_eod_reminders() -> None:
             logger.warning("_send_eod_reminders: DB unavailable at reminder time (%s) — skipping", today)
             return
         from helpers.supabase_types import rows
+
         subs = _db.table("audits").select("store").eq("date", today).is_("deleted_at", "null").execute()
         submitted_stores = {s["store"] for s in rows(subs)}
         bot_users = rows(_db.table("bot_users").select("telegram_id, store").execute())
         if not bot_users:
             return
         from telegram_bot import send_message
+
         notified = set()
         failed = []
         for bu in bot_users:
@@ -40,7 +45,7 @@ def _send_eod_reminders() -> None:
                     send_message(
                         tid,
                         f"⏰ Recordatorio: {store} no ha enviado el Reporte Z de hoy ({today}).\n"
-                        f"Envía una foto del Reporte Z para registrarlo."
+                        f"Envía una foto del Reporte Z para registrarlo.",
                     )
                     notified.add(tid)
                 except Exception as exc:
@@ -57,9 +62,9 @@ def _daily_ai_insights() -> None:
     """Run AI variance analysis for each store and alert admins/managers."""
     try:
         import extensions
-        from telegram_bot import send_message
         from ai_assistant import analyze_variance_trend
         from config import Config
+        from telegram_bot import send_message
 
         _db = extensions.get_db()
         if _db is None:
@@ -67,6 +72,7 @@ def _daily_ai_insights() -> None:
             return
 
         from helpers.supabase_types import rows as _rows
+
         bot_users = _rows(_db.table("bot_users").select("telegram_id, store").execute())
         if not bot_users:
             return
@@ -76,13 +82,12 @@ def _daily_ai_insights() -> None:
         for bu in bot_users:
             store = bu.get("store", "")
             tid = bu["telegram_id"]
-            if store in ("", ):
+            if store in ("",):
                 continue
             store_admins.setdefault(store, []).append(tid)
 
         # "All" store users get insights for every store
-        all_store_users = [bu["telegram_id"] for bu in bot_users
-                          if bu.get("store") == "All"]
+        all_store_users = [bu["telegram_id"] for bu in bot_users if bu.get("store") == "All"]
 
         notified = 0
         for store in Config.STORES:
@@ -110,6 +115,7 @@ def _audit_integrity_check() -> None:
     """Weekly integrity check of the audit log hash chain."""
     try:
         from audit_log import get_audit_logger
+
         al = get_audit_logger()
         is_valid, errors = al.verify_integrity()
         if not is_valid:
@@ -125,6 +131,7 @@ def init_scheduler(app) -> None:
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.cron import CronTrigger
+
         scheduler = BackgroundScheduler()
         scheduler.add_job(
             _send_eod_reminders,
@@ -142,7 +149,7 @@ def init_scheduler(app) -> None:
         )
         scheduler.add_job(
             _audit_integrity_check,
-            CronTrigger(day_of_week='sun', hour=6, minute=0, timezone="America/Puerto_Rico"),
+            CronTrigger(day_of_week="sun", hour=6, minute=0, timezone="America/Puerto_Rico"),
             id="audit_integrity_check",
             replace_existing=True,
             misfire_grace_time=3600,

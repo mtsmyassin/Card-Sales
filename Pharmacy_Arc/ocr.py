@@ -1,9 +1,10 @@
 """OCR extraction for pharmacy Z Reports using Gemini Vision API."""
-import os
-import json
+
 import base64
-from gemini_client import generate_with_image
+import json
+
 from config import Config
+from gemini_client import generate_with_image
 
 NUMERIC_FIELDS = ["cash", "ath", "athm", "visa", "mc", "amex", "disc", "wic", "mcs", "sss", "variance"]
 

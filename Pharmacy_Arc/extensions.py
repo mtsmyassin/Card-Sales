@@ -10,11 +10,12 @@ so they see the updated values after the factory runs:
     db = extensions.supabase_admin or extensions.supabase   # CORRECT (legacy)
     from extensions import supabase  # WRONG — gets None at import time
 """
-from flask_wtf.csrf import CSRFProtect
+
+from config import Config
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from security import PasswordHasher, LoginAttemptTracker
-from config import Config
+from flask_wtf.csrf import CSRFProtect
+from security import LoginAttemptTracker, PasswordHasher
 
 csrf = CSRFProtect()
 limiter = Limiter(
@@ -41,6 +42,7 @@ def get_db():
 def has_admin_client() -> bool:
     """Return True if the service-role admin client is configured."""
     return supabase_admin is not None
+
 
 # Emergency admin accounts — set by app factory from Config.
 EMERGENCY_ACCOUNTS: dict = {}
