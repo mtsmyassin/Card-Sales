@@ -6,10 +6,11 @@ The APScheduler (EOD reminders) starts in the master, so post_fork shuts
 it down in every worker to prevent N duplicate reminder sends per tick.
 """
 import logging
+import os
 
-workers = 1
+workers = int(os.environ.get('WEB_CONCURRENCY', '2'))
 worker_class = "sync"
-timeout = 120
+timeout = 30
 preload_app = True
 max_requests = 1000
 max_requests_jitter = 50
@@ -26,5 +27,9 @@ def post_fork(server, worker):
         if scheduler is not None and scheduler.running:
             scheduler.shutdown(wait=False)
             log.info("APScheduler shut down in worker pid=%s (master handles scheduling)", worker.pid)
+        elif scheduler is None:
+            log.warning("post_fork: no _scheduler attribute found on app — scheduler may run in worker pid=%s", worker.pid)
+    except ImportError as exc:
+        log.error("post_fork: cannot import app module: %s", exc)
     except Exception as exc:
         log.warning("post_fork: could not shut down scheduler: %s", exc)

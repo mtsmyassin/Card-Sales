@@ -64,12 +64,10 @@ def save_user():
         new_role = u['role']
         new_store = u['store']
 
-        # Hash the password if it's not already hashed
-        if password and not password.startswith('$2b$'):
+        # Always hash incoming passwords — never accept pre-hashed values from client
+        if password:
             hashed_password = extensions.password_hasher.hash_password(password)
             logger.info(f"Password hashed for user: {user_to_save}")
-        elif password:
-            hashed_password = password
         else:
             # For updates, keep existing password if none provided
             if is_update and before_state:
@@ -155,7 +153,7 @@ def delete_user():
                 return jsonify(error="User not found", code="NOT_FOUND"), 404
         except Exception as fetch_err:
             logger.warning(f"[delete_user] Failed to fetch user {user_to_delete!r}: {fetch_err}")
-            before_state = None
+            return jsonify(error="Failed to verify user exists", code="DB_ERROR"), 500
 
         db_retry(
             lambda: extensions.get_db().table("users").delete().eq("username", user_to_delete).execute(),

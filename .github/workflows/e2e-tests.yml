@@ -2,21 +2,24 @@ name: E2E Tests
 
 on:
   push:
-    branches: [ main, copilot/verify-security-and-fix-features ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
+
+permissions:
+  contents: read
 
 jobs:
   test:
     timeout-minutes: 15
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
@@ -38,21 +41,28 @@ jobs:
     - name: Create test .env file
       run: |
         cd Pharmacy_Arc
-        cat > .env << EOF
-        FLASK_SECRET_KEY=${{ secrets.TEST_FLASK_SECRET_KEY || 'test-secret-key-for-ci-minimum-32-chars-long' }}
+        SECRET_KEY="${TEST_FLASK_SECRET_KEY:-test-secret-key-for-ci-minimum-32-chars-long}"
+        cat > .env << ENVEOF
+        FLASK_SECRET_KEY=${SECRET_KEY}
         FLASK_PORT=5013
         FLASK_DEBUG=false
-        SUPABASE_URL=${{ secrets.TEST_SUPABASE_URL }}
-        SUPABASE_KEY=${{ secrets.TEST_SUPABASE_KEY }}
-        EMERGENCY_ADMIN_SUPER=super:\$2b\$12\$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7hlZiOXE4u
-        EMERGENCY_ADMIN_BASIC=admin:\$2b\$12\$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7hlZiOXE4u
+        SUPABASE_URL=${TEST_SUPABASE_URL}
+        SUPABASE_KEY=${TEST_SUPABASE_KEY}
+        EMERGENCY_ADMIN_SUPER=${EMERGENCY_ADMIN_SUPER}
+        EMERGENCY_ADMIN_BASIC=${EMERGENCY_ADMIN_BASIC}
         SESSION_TIMEOUT_MINUTES=30
         MAX_LOGIN_ATTEMPTS=5
         LOCKOUT_DURATION_MINUTES=15
         REQUIRE_HTTPS=false
         LOG_LEVEL=INFO
         LOG_FILE=pharmacy_app.log
-        EOF
+        ENVEOF
+      env:
+        TEST_FLASK_SECRET_KEY: ${{ secrets.TEST_FLASK_SECRET_KEY }}
+        TEST_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+        TEST_SUPABASE_KEY: ${{ secrets.TEST_SUPABASE_KEY }}
+        EMERGENCY_ADMIN_SUPER: "super:$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7hlZiOXE4u"
+        EMERGENCY_ADMIN_BASIC: "admin:$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7hlZiOXE4u"
     
     - name: Seed test data
       run: |

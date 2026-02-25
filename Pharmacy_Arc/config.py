@@ -148,29 +148,29 @@ class Config:
         return errors
     
     @classmethod
-    def load_emergency_accounts(cls) -> dict[str, str]:
+    def load_emergency_accounts(cls) -> dict[str, tuple[str, str]]:
         """
         Load emergency admin accounts from environment.
-        
+
         Returns:
-            Dictionary mapping username to bcrypt hash
+            Dictionary mapping username to (bcrypt_hash, role)
         """
-        accounts = {}
-        
+        accounts: dict[str, tuple[str, str]] = {}
+
         if cls.EMERGENCY_ADMIN_SUPER:
             try:
                 username, hash_val = cls.EMERGENCY_ADMIN_SUPER.split(':', 1)
-                accounts[username.strip()] = hash_val.strip()
+                accounts[username.strip()] = (hash_val.strip(), 'super_admin')
             except ValueError:
                 print(f"WARNING: Invalid format for EMERGENCY_ADMIN_SUPER", file=sys.stderr)
-        
+
         if cls.EMERGENCY_ADMIN_BASIC:
             try:
                 username, hash_val = cls.EMERGENCY_ADMIN_BASIC.split(':', 1)
-                accounts[username.strip()] = hash_val.strip()
+                accounts[username.strip()] = (hash_val.strip(), 'admin')
             except ValueError:
                 print(f"WARNING: Invalid format for EMERGENCY_ADMIN_BASIC", file=sys.stderr)
-        
+
         return accounts
     
     @classmethod

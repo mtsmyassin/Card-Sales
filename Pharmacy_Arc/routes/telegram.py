@@ -33,10 +33,14 @@ def telegram_webhook():
     if not update:
         return jsonify(ok=False), 400
 
+    from flask import current_app
+    app = current_app._get_current_object()
+
     def _dispatch():
         try:
-            from telegram_bot import handle_update
-            handle_update(update)
+            with app.app_context():
+                from telegram_bot import handle_update
+                handle_update(update)
         except Exception as e:
             logger.error(f"Telegram webhook handler error: {e}", exc_info=True)
 

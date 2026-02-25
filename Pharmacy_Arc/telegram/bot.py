@@ -2,6 +2,7 @@
 import os
 import re
 import time
+import uuid
 import logging
 import threading
 import unicodedata
@@ -184,7 +185,7 @@ def _handle_ai_message(telegram_id: int, chat_id: int, text: str, state: dict) -
             _ai_history.pop(tid, None)
             _ai_history_ts.pop(tid, None)
         _ai_history_ts[telegram_id] = now
-        history = _ai_history.get(telegram_id, [])
+        history = list(_ai_history.get(telegram_id, []))  # copy to avoid race
 
     try:
         response = ask_ai(text, store, role, username, history=history)
@@ -428,7 +429,7 @@ def _handle_register(telegram_id: int, chat_id: int, text: str, state: dict) -> 
 
 def _handle_confirmation(telegram_id, chat_id, text, state):
     if _ascii_upper(text) in ("YES", "SI", "S\u00cd"):
-        sid = f"{int(time.time()) % 100000}"
+        sid = uuid.uuid4().hex[:8]
         ocr_data = state["pending_data"]
         image_bytes = state.get("pending_image_bytes")
         store = state["store"]
@@ -749,7 +750,11 @@ def handle_update(update: dict) -> None:
         _handle_password(telegram_id, chat_id, tg_username, text, state)
         return
     if current_state == "AWAITING_USERNAME":
-        state["username"] = text
+        username = text.strip()[:50]
+        if not re.match(r'^[a-zA-Z0-9_-]+$', username):
+            send_message(chat_id, "Nombre de usuario invalido. Solo letras, numeros, _ y -.")
+            return
+        state["username"] = username
         state["state"] = "AWAITING_PASSWORD"
         _set_state(telegram_id, state)
         send_message(chat_id, msg(telegram_id, "enter_password"))
@@ -887,7 +892,19 @@ def _handle_slash(telegram_id: int, chat_id: int, text: str, state: dict) -> Non
 
     elif cmd == "/broadcast":
         user_row = get_bot_user(telegram_id)
-        role = user_row.get("role", "staff") if user_row else "staff"
+        if not user_row:
+            send_message(chat_id, msg(telegram_id, "broadcast_no_permission"))
+            return
+        username = user_row.get("username")
+        # Cross-reference the users table to get the actual role (bot_users has no role column)
+        role = "staff"
+        try:
+            db = extensions.get_db()
+            if db and username:
+                user_data = rows(db.table("users").select("role").eq("username", username).execute())
+                role = user_data[0]["role"] if user_data else "staff"
+        except Exception:
+            pass
         if role not in ("admin", "super_admin"):
             send_message(chat_id, msg(telegram_id, "broadcast_no_permission"))
             return

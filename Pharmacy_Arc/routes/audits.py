@@ -44,7 +44,7 @@ def _send_variance_alert(store: str, date: str, reg: str, variance: float, gross
         )
         for bu in bot_users:
             role, user_store = role_map.get(bu.get("username", ""), ("staff", ""))
-            if role in ("admin", "super_admin", "manager") or user_store == store:
+            if role in ("admin", "super_admin", "manager") or user_store == store or user_store == "All":
                 try:
                     send_message(bu["telegram_id"], msg)
                 except Exception as send_err:
@@ -82,7 +82,8 @@ def save():
                 code="DUPLICATE"
             ), 409
         except Exception as e:
-            logger.warning(f"[save] Duplicate check failed (proceeding): {e}")
+            logger.error(f"[save] Duplicate check failed — aborting to prevent potential duplicate: {e}")
+            return jsonify(error="Unable to verify uniqueness. Please retry.", code="DB_ERROR"), 503
 
         username = session.get('user')
         role = session.get('role')
@@ -224,7 +225,7 @@ def sync():
                 success_count += 1  # Don't keep retrying a duplicate — remove from queue
                 continue
 
-            db_retry(lambda: _db.table("audits").insert(item).execute(), label="sync_audit")
+            db_retry(lambda: extensions.get_db().table("audits").insert(item).execute(), label="sync_audit")
             success_count += 1
 
             # Log successful sync
@@ -523,7 +524,7 @@ def list_audits():
 
         clean_rows = []
         for r in allowed_rows:
-            merged = r['payload']
+            merged = dict(r['payload'])  # shallow copy to avoid mutating cached response
             merged['id'] = r['id']
             merged['store'] = r.get('store', 'Main')
             merged['photo_count'] = photo_counts.get(r['id'], 0)

@@ -174,7 +174,9 @@ def zr_detail(audit_id: int):
     if db is None:
         return jsonify(error="Z-report review service unavailable", code="SERVICE_UNAVAILABLE"), 503
     try:
-        audit = row0(db.table('audits').select('*').eq('id', audit_id).is_('deleted_at', 'null').single().execute())
+        audit = row0(db.table('audits').select('*').eq('id', audit_id).is_('deleted_at', 'null').maybe_single().execute())
+        if not audit:
+            return jsonify(error="Audit not found", code="NOT_FOUND"), 404
         ok, err = _check_manager_store(audit)
         if not ok:
             return jsonify(error=err, code="STORE_MISMATCH"), 403
@@ -313,6 +315,11 @@ def zr_approve(audit_id: int):
     cash_actual = float(body.get('cash_in_register_actual', 0))
     payouts_breakdown = body.get('payouts_breakdown')
     manager_notes = body.get('manager_notes', '')
+
+    if payouts_total < 0 or payouts_total > 1000000:
+        return jsonify(error="payouts_total out of range (0 - 1,000,000)", code="INVALID_INPUT"), 400
+    if cash_actual < 0 or cash_actual > 1000000:
+        return jsonify(error="cash_in_register_actual out of range (0 - 1,000,000)", code="INVALID_INPUT"), 400
 
     try:
         _zr_validate_breakdown(payouts_total, payouts_breakdown)
@@ -668,16 +675,17 @@ def zr_unlock_timed_out():
             'review_status', 'IN_REVIEW').is_('deleted_at', 'null').lt('review_locked_at', cutoff).execute())
         count = 0
         for row in stale_rows:
-            db.table('audits').update({
+            updated = _zr_guarded_update(db, row['id'], {
                 'review_status': 'PENDING_REVIEW',
                 'review_locked_by': None,
                 'review_locked_at': None,
-            }).eq('id', row['id']).execute()
-            _zr_log(db, row['id'], 'UNLOCK', actor, ip=ip,
-                    old_val={'locked_by': row['review_locked_by']},
-                    new_val={'review_status': 'PENDING_REVIEW'},
-                    reason='lock_timeout')
-            count += 1
+            }, expected_status='IN_REVIEW', expected_locked_by=row['review_locked_by'])
+            if updated:
+                _zr_log(db, row['id'], 'UNLOCK', actor, ip=ip,
+                        old_val={'locked_by': row['review_locked_by']},
+                        new_val={'review_status': 'PENDING_REVIEW'},
+                        reason='lock_timeout')
+                count += 1
         return jsonify(ok=True, unlocked=count)
     except Exception as e:
         logger.error(f"[zr_unlock_timed_out] {e}", exc_info=True)

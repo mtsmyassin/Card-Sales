@@ -11,6 +11,18 @@ import time
 import json
 from pathlib import Path
 
+# Resolve script directory so this works from any CWD
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def _read_source(filename: str) -> str:
+    """Read a source file relative to the script directory, or fail hard."""
+    path = SCRIPT_DIR / filename
+    if not path.exists():
+        print(f"FATAL: Required file not found: {path}")
+        sys.exit(2)
+    return path.read_text(encoding='utf-8')
+
 print("=" * 80)
 print("SECURITY AUDIT - Pharmacy Sales Tracker v40-SECURE")
 print("Independent External Security Assessment")
@@ -41,8 +53,7 @@ print("-" * 80)
 # Test 1.1: Missing RBAC on /api/sync endpoint
 print("\n[TEST 1.1] Checking /api/sync endpoint protection...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
     sync_pos = content.find("@app.route('/api/sync'")
     if sync_pos > 0:
@@ -65,8 +76,7 @@ except Exception as e:
 # Test 1.2: Missing RBAC on /api/get_logo endpoint
 print("\n[TEST 1.2] Checking /api/get_logo endpoint protection...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
     if '@app.route(\'/api/get_logo\'' in content:
         # Check if decorator exists
@@ -91,11 +101,10 @@ except Exception as e:
 # Test 1.3: Session fixation vulnerability
 print("\n[TEST 1.3] Checking for session fixation vulnerability...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
-    # Check if session is regenerated on login
-    if 'session.regenerate()' not in content and 'session.new()' not in content:
+    # Check if session is cleared on login (Flask's session fixation mitigation)
+    if 'session.clear()' not in content and 'login_user(' not in content:
         add_finding(
             "HIGH",
             "Session fixation vulnerability",
@@ -113,8 +122,7 @@ except Exception as e:
 # Test 1.4: Role stored in session (client-side)
 print("\n[TEST 1.4] Checking role storage security...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
     if "session['role'] = " in content:
         add_finding(
@@ -138,8 +146,7 @@ print("-" * 80)
 # Test 2.1: Lockout persistence across restarts
 print("\n[TEST 2.1] Checking lockout persistence...")
 try:
-    with open('security.py', 'r') as f:
-        content = f.read()
+    content = _read_source('security.py')
         
     if 'self._attempts:' in content and 'self._lockouts:' in content:
         # Check if these are in-memory only
@@ -163,8 +170,7 @@ except Exception as e:
 # Test 2.2: Lockout per account vs per IP
 print("\n[TEST 2.2] Checking lockout granularity...")
 try:
-    with open('security.py', 'r') as f:
-        content = f.read()
+    content = _read_source('security.py')
         
     if 'def is_locked_out(self, username:' in content:
         # Lockout is per username, not per IP
@@ -183,8 +189,7 @@ except Exception as e:
 # Test 2.3: Password timing attack
 print("\n[TEST 2.3] Checking for password timing leaks...")
 try:
-    with open('security.py', 'r') as f:
-        content = f.read()
+    content = _read_source('security.py')
         
     # bcrypt is constant-time, so this should be okay
     if 'bcrypt.checkpw' in content:
@@ -205,8 +210,7 @@ except Exception as e:
 # Test 2.4: bcrypt work factor
 print("\n[TEST 2.4] Checking bcrypt work factor...")
 try:
-    with open('security.py', 'r') as f:
-        content = f.read()
+    content = _read_source('security.py')
         
     if 'bcrypt.gensalt(rounds=12)' in content:
         print("✓ Using bcrypt rounds=12 (acceptable for 2026)")
@@ -232,7 +236,7 @@ print("-" * 80)
 
 # Test 3.1: File permissions on audit log
 print("\n[TEST 3.1] Checking audit log file permissions...")
-audit_log_file = Path('audit_log.jsonl')
+audit_log_file = SCRIPT_DIR / 'audit_log.jsonl'
 if audit_log_file.exists():
     import stat
     mode = audit_log_file.stat().st_mode
@@ -254,8 +258,7 @@ else:
 # Test 3.2: Automated integrity verification
 print("\n[TEST 3.2] Checking automated audit log verification...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
     # Check if audit log verification runs automatically
     if 'verify_integrity' not in content or 'startup' not in content.lower():
@@ -276,8 +279,7 @@ except Exception as e:
 # Test 3.3: Audit log rotation
 print("\n[TEST 3.3] Checking audit log rotation...")
 try:
-    with open('audit_log.py', 'r') as f:
-        content = f.read()
+    content = _read_source('audit_log.py')
         
     if 'rotate' not in content.lower() and 'max_size' not in content.lower():
         add_finding(
@@ -303,8 +305,7 @@ print("-" * 80)
 # Test 4.1: Transaction support
 print("\n[TEST 4.1] Checking database transaction support...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
     # Look for transaction handling
     if 'transaction' not in content.lower() and 'begin' not in content.lower():
@@ -325,8 +326,7 @@ except Exception as e:
 # Test 4.2: Offline queue file locking
 print("\n[TEST 4.2] Checking offline queue file locking...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
     # Check for file locking
     if 'fcntl' not in content and 'msvcrt' not in content and 'FileLock' not in content:
@@ -386,8 +386,7 @@ print("-" * 80)
 # Test 5.1: N+1 query in list endpoint
 print("\n[TEST 5.1] Checking for N+1 queries...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
     # Look for list endpoint
     if '.limit(2000)' in content:
@@ -408,8 +407,7 @@ except Exception as e:
 # Test 5.2: Memory leaks
 print("\n[TEST 5.2] Checking for potential memory leaks...")
 try:
-    with open('security.py', 'r') as f:
-        content = f.read()
+    content = _read_source('security.py')
         
     # Check if attempt tracking is cleaned up
     if 'self._attempts' in content and 'del self._attempts' not in content:
@@ -438,8 +436,7 @@ print("-" * 80)
 # Test 6.1: Missing environment variables
 print("\n[TEST 6.1] Testing missing environment variable handling...")
 try:
-    with open('config.py', 'r') as f:
-        content = f.read()
+    content = _read_source('config.py')
         
     if 'sys.exit(1)' in content:
         print("✓ Application exits on missing config (good)")
@@ -459,8 +456,7 @@ except Exception as e:
 # Test 6.2: Disk full handling
 print("\n[TEST 6.2] Checking disk full handling...")
 try:
-    with open('audit_log.py', 'r') as f:
-        content = f.read()
+    content = _read_source('audit_log.py')
         
     # Check if disk full is handled
     if 'IOError' not in content and 'OSError' not in content:
@@ -481,8 +477,7 @@ except Exception as e:
 # Test 6.3: Database connection error handling
 print("\n[TEST 6.3] Checking database error handling...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
     # Check if database errors are handled gracefully
     if 'except Exception as e:' in content:
@@ -512,8 +507,7 @@ print("-" * 80)
 # Test: CSRF protection
 print("\n[TEST A.1] Checking CSRF protection...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
     if 'csrf' not in content.lower():
         add_finding(
@@ -533,8 +527,7 @@ except Exception as e:
 # Test: Rate limiting
 print("\n[TEST A.2] Checking global rate limiting...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
     if 'Flask-Limiter' not in content and 'RateLimiter' not in content and '@limiter' not in content:
         add_finding(
@@ -554,8 +547,7 @@ except Exception as e:
 # Test: Input validation
 print("\n[TEST A.3] Checking input validation...")
 try:
-    with open('app.py', 'r') as f:
-        content = f.read()
+    content = _read_source('app.py')
         
     if 'pydantic' not in content.lower() and 'marshmallow' not in content.lower():
         add_finding(
@@ -575,14 +567,12 @@ except Exception as e:
 # Test: HTTPS enforcement
 print("\n[TEST A.4] Checking HTTPS enforcement...")
 try:
-    with open('config.py', 'r') as f:
-        content = f.read()
+    content = _read_source('config.py')
         
     if 'REQUIRE_HTTPS' in content:
         print("✓ HTTPS configuration option exists")
         
-        with open('app.py', 'r') as f2:
-            app_content = f2.read()
+        app_content = _read_source('app.py')
             
         if 'request.is_secure' not in app_content and 'SSLify' not in app_content:
             add_finding(

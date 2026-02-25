@@ -93,7 +93,7 @@ VERSION = extensions.VERSION
 PORT = int(os.getenv('PORT', str(Config.PORT)))
 
 
-def _init_supabase(url: str, key: str, label: str, max_attempts: int = None):
+def _init_supabase(url: str, key: str, label: str, max_attempts: int | None = None):
     """Create a Supabase client, retrying on failure (handles cold-start latency)."""
     if max_attempts is None:
         max_attempts = Config.SUPABASE_CONNECT_RETRIES
@@ -149,7 +149,7 @@ def create_app() -> Flask:
         @app.before_request
         def enforce_https():
             # Trust X-Forwarded-Proto from reverse proxies (Railway, Heroku, etc.)
-            if request.headers.get('X-Forwarded-Proto', 'https') == 'https':
+            if request.headers.get('X-Forwarded-Proto', '') == 'https':
                 return  # already secure via proxy
             if not request.is_secure and request.url.startswith('http://'):
                 if not (request.host.startswith('127.0.0.1') or
@@ -167,7 +167,7 @@ def create_app() -> Flask:
     @app.after_request
     def log_request_end(response):
         duration_ms = (time.time() - getattr(request, '_start_time', time.time())) * 1000
-        rid = getattr(request, '_request_id', '')
+        rid = getattr(request, '_request_id', 'no-rid')
         response.headers['X-Request-ID'] = rid
         if request.path != '/health':
             logger.info("[%s] %s %s -> %s (%.0fms)", rid, request.method, request.path, response.status_code, duration_ms)

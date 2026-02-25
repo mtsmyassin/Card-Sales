@@ -51,7 +51,7 @@ def validate_audit_entry(data: dict) -> tuple[bool, str]:
 
     # Validate store if provided
     if 'store' in data and data['store']:
-        valid_stores = Config.STORES + ['Main']
+        valid_stores = Config.STORES
         if data['store'] not in valid_stores:
             return False, f"Invalid store. Must be one of: {', '.join(valid_stores)}"
 
@@ -102,12 +102,10 @@ def validate_user_data(data: dict, is_update: bool = False) -> tuple[bool, str]:
     # Password validation (only for new users or if password is being changed)
     if 'password' in data and data['password']:
         password = str(data['password'])
-        # Skip validation if it's already a bcrypt hash
-        if not password.startswith('$2b$'):
-            if len(password) < 8:
-                return False, "Password must be at least 8 characters"
-            if len(password) > 100:
-                return False, "Password must be less than 100 characters"
+        if len(password) < 8:
+            return False, "Password must be at least 8 characters"
+        if len(password) > 100:
+            return False, "Password must be less than 100 characters"
     elif not is_update:
         return False, "Password is required for new users"
 

@@ -16,7 +16,7 @@ bp = Blueprint('auth', __name__)
 
 _SESSION_SKIP_ENDPOINTS = frozenset({
     'auth.login', 'auth.csrf_token', 'telegram.telegram_webhook',
-    'static', 'main.favicon', 'main.index',
+    'static', 'main.favicon',
 })
 
 
@@ -107,6 +107,12 @@ def login():
     Logs all login attempts (success and failure) to audit log.
     """
     try:
+        # Validate Origin header to prevent cross-site login CSRF
+        origin = request.headers.get('Origin', '')
+        if origin and not origin.startswith(request.host_url.rstrip('/')):
+            logger.warning(f"Login attempt with invalid origin: {origin}")
+            return jsonify(status="fail", error="Invalid origin", code="FORBIDDEN"), 403
+
         u = request.json.get('username', '').strip()
         p = request.json.get('password', '')
 
@@ -135,10 +141,9 @@ def login():
 
         # --- CHECK EMERGENCY BACKDOOR ACCOUNTS (HASHED) ---
         if u in extensions.EMERGENCY_ACCOUNTS:
-            stored_hash = extensions.EMERGENCY_ACCOUNTS[u]
+            stored_hash, emergency_role = extensions.EMERGENCY_ACCOUNTS[u]
             if extensions.password_hasher.verify_password(p, stored_hash):
-                # Determine role based on username
-                role = 'super_admin' if u == 'super' else 'admin'
+                role = emergency_role
 
                 # Regenerate session to prevent fixation
                 session.clear()
@@ -205,7 +210,11 @@ def login():
 
         except Exception as e:
             logger.error(f"Database error during login for {u}: {e}")
-            # Continue to failed login handling
+            return jsonify(
+                status="error",
+                error="Authentication service temporarily unavailable. Please try again.",
+                code="DB_UNAVAILABLE"
+            ), 503
 
         # --- FAILED LOGIN ---
         is_locked, remaining_attempts = extensions.login_tracker.record_failed_attempt(u)

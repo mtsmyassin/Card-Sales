@@ -4,11 +4,14 @@ Provides tamper-evident logging with hash chaining.
 """
 import json
 import hashlib
+import hmac
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from threading import Lock
 import os
+
+_AUDIT_HMAC_KEY: str = os.environ.get('AUDIT_HMAC_KEY', '')
 
 
 class AuditLogger:
@@ -67,10 +70,16 @@ class AuditLogger:
         except Exception as e:
             self._db_write_failures += 1
             import logging
-            logging.getLogger(__name__).warning(
+            _logger = logging.getLogger(__name__)
+            _logger.warning(
                 "[audit_log] Supabase write failed (total=%d): %s",
                 self._db_write_failures, e
             )
+            if self._db_write_failures >= 10 and self._db_write_failures % 10 == 0:
+                _logger.error(
+                    "[audit_log] Supabase write failures reached %d — audit events only going to local file",
+                    self._db_write_failures
+                )
     
     def _ensure_log_exists(self) -> None:
         """Create log file if it doesn't exist."""
@@ -88,18 +97,21 @@ class AuditLogger:
         if self._last_hash is not None:
             return self._last_hash
         try:
-            with open(self.log_file, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-                if not lines:
+            with open(self.log_file, 'rb') as f:
+                f.seek(0, 2)  # seek to end
+                size = f.tell()
+                if size == 0:
                     return 'GENESIS'
-
+                # Read last 4KB (more than enough for one JSONL entry)
+                f.seek(max(0, size - 4096))
+                chunk = f.read().decode('utf-8')
+                lines = chunk.strip().split('\n')
                 last_line = lines[-1].strip()
                 if last_line:
-                    last_entry = json.loads(last_line)
-                    return last_entry.get('entry_hash', 'GENESIS')
+                    return json.loads(last_line).get('entry_hash', 'GENESIS')
         except (FileNotFoundError, json.JSONDecodeError):
             pass
-        
+
         return 'GENESIS'
     
     def _compute_entry_hash(self, entry: Dict[str, Any]) -> str:
@@ -114,6 +126,10 @@ class AuditLogger:
         """
         # Create deterministic string representation
         content = json.dumps(entry, sort_keys=True, separators=(',', ':'))
+        if _AUDIT_HMAC_KEY:
+            return hmac.new(
+                _AUDIT_HMAC_KEY.encode(), content.encode('utf-8'), hashlib.sha256
+            ).hexdigest()
         return hashlib.sha256(content.encode('utf-8')).hexdigest()
     
     def log(
@@ -178,8 +194,14 @@ class AuditLogger:
 
             # Append to local file as fallback / tamper-evident backup.
             # 'a' mode + small writes are atomic on Linux; encoding='utf-8' for Windows.
-            with open(self.log_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(entry) + '\n')
+            try:
+                with open(self.log_file, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(entry) + '\n')
+            except OSError as e:
+                import logging
+                logging.getLogger(__name__).error(
+                    "[audit_log] Local file write failed: %s — entry exists in Supabase only", e
+                )
     
     def verify_integrity(self) -> tuple[bool, List[str]]:
         """
@@ -218,10 +240,10 @@ class AuditLogger:
                         f"got {entry.get('previous_hash')}"
                     )
                 
-                # Verify entry hash
-                stored_hash = entry.pop('entry_hash', None)
-                computed_hash = self._compute_entry_hash(entry)
-                entry['entry_hash'] = stored_hash  # Restore for next iteration
+                # Verify entry hash — use a copy to avoid mutating the entry
+                stored_hash = entry.get('entry_hash')
+                entry_copy = {k: v for k, v in entry.items() if k != 'entry_hash'}
+                computed_hash = self._compute_entry_hash(entry_copy)
                 
                 if stored_hash != computed_hash:
                     errors.append(

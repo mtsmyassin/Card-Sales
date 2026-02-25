@@ -2,6 +2,7 @@
 import os
 import time
 import logging
+import threading
 import requests as http
 
 from config import Config
@@ -83,6 +84,7 @@ def _log_dead_letter(telegram_id: int, callback_data: str, error: Exception) -> 
 _ADMIN_CHAT_ID = int(os.getenv("TELEGRAM_ADMIN_CHAT_ID", "0"))
 _admin_last_notified: float = 0.0
 _ADMIN_NOTIFY_COOLDOWN = 300  # seconds — max 1 alert per 5 minutes
+_admin_notify_lock = threading.Lock()
 
 
 def _notify_admin_if_needed(telegram_id: int, error_type: str, error_msg: str) -> None:
@@ -91,9 +93,10 @@ def _notify_admin_if_needed(telegram_id: int, error_type: str, error_msg: str) -
     if not _ADMIN_CHAT_ID:
         return
     now = time.time()
-    if now - _admin_last_notified < _ADMIN_NOTIFY_COOLDOWN:
-        return
-    _admin_last_notified = now
+    with _admin_notify_lock:
+        if now - _admin_last_notified < _ADMIN_NOTIFY_COOLDOWN:
+            return
+        _admin_last_notified = now
     text = (
         f"Bot error alert\n"
         f"User: {telegram_id}\n"
@@ -108,4 +111,6 @@ def download_photo(file_id: str) -> bytes:
     info = _tg("getFile", file_id=file_id)
     file_path = info["file_path"]
     url = f"https://api.telegram.org/file/bot{_token()}/{file_path}"
-    return http.get(url, timeout=30).content
+    resp = http.get(url, timeout=30)
+    resp.raise_for_status()
+    return resp.content

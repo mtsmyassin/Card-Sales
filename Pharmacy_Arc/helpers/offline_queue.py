@@ -70,7 +70,12 @@ def save_to_queue(payload: dict) -> bool:
                 with open(q_path, encoding='utf-8') as fh:
                     queue = json.load(fh)
             except Exception as load_err:
-                logger.warning(f"Corrupt offline queue at {q_path}, starting fresh: {load_err}")
+                logger.warning(f"Corrupt offline queue at {q_path}, backing up and starting fresh: {load_err}")
+                try:
+                    import shutil
+                    shutil.copy2(q_path, q_path + '.corrupt')
+                except OSError:
+                    pass
                 queue = []
         if len(queue) >= OFFLINE_QUEUE_MAX_SIZE:
             logger.error(
@@ -91,7 +96,11 @@ def load_queue() -> list:
         if os.path.exists(q_path):
             try:
                 with open(q_path, encoding='utf-8') as fh:
-                    return json.load(fh)
+                    data = json.load(fh)
+                if not isinstance(data, list):
+                    logger.warning(f"Offline queue is not a list ({type(data).__name__}), discarding")
+                    return []
+                return data
             except Exception as load_err:
                 logger.warning(f"Corrupt offline queue at {q_path}: {load_err}")
                 return []

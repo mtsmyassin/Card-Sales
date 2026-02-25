@@ -155,20 +155,28 @@ class LoginAttemptTracker:
         try:
             all_users = set(list(self._attempts.keys()) + list(self._lockouts.keys()))
             for username in all_users:
-                attempts_list = [
-                    ts.isoformat() for ts in self._attempts.get(username, [])
-                ]
-                locked_until = (
-                    self._lockouts[username].isoformat()
-                    if username in self._lockouts else None
-                )
-                self._supabase.table('login_lockouts').upsert({
-                    'username': username,
-                    'attempts': attempts_list,
-                    'locked_until': locked_until,
-                }).execute()
+                self._save_user_to_db(username)
         except Exception as e:
             logger.warning(f"Could not save lockout state to DB: {e}")
+
+    def _save_user_to_db(self, username: str) -> None:
+        """Persist state for a single user to Supabase (or file fallback)."""
+        if not self._supabase:
+            self._save_to_file()
+            return
+        try:
+            attempts_list = [ts.isoformat() for ts in self._attempts.get(username, [])]
+            locked_until = (
+                self._lockouts[username].isoformat()
+                if username in self._lockouts else None
+            )
+            self._supabase.table('login_lockouts').upsert({
+                'username': username,
+                'attempts': attempts_list,
+                'locked_until': locked_until,
+            }).execute()
+        except Exception as e:
+            logger.warning(f"Could not save lockout state for {username!r} to DB: {e}")
 
     def _load_from_file(self) -> None:
         """Load lockout state from local JSON file (dev / fallback)."""
@@ -245,9 +253,10 @@ class LoginAttemptTracker:
             _, locked_until = self._db_get_user_state(username)
             if locked_until and datetime.now(timezone.utc) < locked_until:
                 return True
-            # Lockout expired or doesn't exist — clean up in-memory
+            # Lockout expired or doesn't exist — clean up in-memory and persist
             self._lockouts.pop(username, None)
             self._attempts.pop(username, None)
+            self._save_user_to_db(username)
             return False
     
     def get_lockout_remaining(self, username: str) -> Optional[int]:
@@ -265,7 +274,8 @@ class LoginAttemptTracker:
             _, locked_until = self._db_get_user_state(username)
             if locked_until:
                 remaining = (locked_until - datetime.now(timezone.utc)).total_seconds()
-                return max(0, int(remaining))
+                if remaining > 0:
+                    return int(remaining)
             return None
     
     def record_failed_attempt(self, username: str) -> tuple[bool, Optional[int]]:
