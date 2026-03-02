@@ -9,10 +9,13 @@ from datetime import timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+import secrets
+
 import extensions
-from config import Config
-from flask import Flask, jsonify, redirect, request
+from flask import Flask, g, jsonify, redirect, request
 from supabase import create_client
+
+from config import Config
 
 # ── Crash logging for windowed exe ────────────────────────────────────────────
 # When running as a PyInstaller exe with console=False, unhandled exceptions
@@ -185,17 +188,33 @@ def create_app() -> Flask:
             )
         return response
 
+    # ── CSP nonce generation ─────────────────────────────────────────────────
+    @app.before_request
+    def generate_csp_nonce():
+        g.csp_nonce = secrets.token_urlsafe(32)
+
     # ── Security headers ─────────────────────────────────────────────────────
     @app.after_request
     def set_security_headers(response):
+        nonce = getattr(g, "csp_nonce", secrets.token_urlsafe(32))
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+        # Nonce used for <script> and <style> blocks in templates.
+        # 'unsafe-inline' kept for script-src only because 73 inline event
+        # handlers (onclick, onchange, etc.) still exist in templates.
+        # Per CSP spec: when both nonce and 'unsafe-inline' are present,
+        # 'unsafe-inline' is ignored for <script> blocks (nonce enforced)
+        # but inline event handlers require 'unsafe-inline'. Since we can't
+        # have both, we keep 'unsafe-inline' for now. The nonce on <script>
+        # tags still provides defense-in-depth for browsers that don't fully
+        # implement CSP L2. Style-src uses nonce (inline style="" attributes
+        # still need 'unsafe-inline').
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+            f"script-src 'self' 'unsafe-inline' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
+            f"style-src 'self' 'unsafe-inline' 'nonce-{nonce}' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
             "img-src 'self' data: blob: https://*.supabase.co; "
             "connect-src 'self' https://*.supabase.co; "

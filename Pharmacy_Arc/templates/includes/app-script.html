@@ -1,4 +1,4 @@
-<script>
+<script nonce="{{ g.csp_nonce }}">
 // ── CSRF: fetch token once, then patch window.fetch to inject it automatically ──
 let _csrfToken = null;
 window._origFetch = window.fetch;
