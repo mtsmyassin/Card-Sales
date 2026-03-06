@@ -201,19 +201,13 @@ def create_app() -> Flask:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
-        # Nonce used for <script> and <style> blocks in templates.
-        # 'unsafe-inline' kept for script-src only because 73 inline event
-        # handlers (onclick, onchange, etc.) still exist in templates.
-        # Per CSP spec: when both nonce and 'unsafe-inline' are present,
-        # 'unsafe-inline' is ignored for <script> blocks (nonce enforced)
-        # but inline event handlers require 'unsafe-inline'. Since we can't
-        # have both, we keep 'unsafe-inline' for now. The nonce on <script>
-        # tags still provides defense-in-depth for browsers that don't fully
-        # implement CSP L2. Style-src uses nonce (inline style="" attributes
-        # still need 'unsafe-inline').
+        # Nonce-based CSP: all inline event handlers have been moved to
+        # addEventListener in app-script.html. 'unsafe-inline' removed from
+        # script-src — nonce enforces script execution policy.
+        # Style-src keeps 'unsafe-inline' for inline style="" attributes.
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            f"script-src 'self' 'unsafe-inline' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
+            f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
             f"style-src 'self' 'unsafe-inline' 'nonce-{nonce}' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
             "img-src 'self' data: blob: https://*.supabase.co; "

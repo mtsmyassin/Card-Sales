@@ -539,4 +539,71 @@ app.zr = {
 
 _fetchCsrfToken().then(() => app.init());
 setInterval(_fetchCsrfToken, 45 * 60 * 1000); // refresh CSRF token every 45 min
+
+// ── CSP-SAFE EVENT BINDINGS (replaces inline onclick/onchange handlers) ──
+// Sidebar
+document.getElementById('menuToggle').addEventListener('click', () => app.toggleMenu());
+document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+    btn.addEventListener('click', () => app.tab(btn.dataset.tab));
+});
+document.getElementById('changePwBtn').addEventListener('click', () => app.openChangePassword());
+document.getElementById('logoutBtn').addEventListener('click', () => app.logout());
+
+// Dash view
+document.getElementById('storeLoc').addEventListener('change', () => app.checkStore());
+document.getElementById('calcTaxBtn').addEventListener('click', () => app.calcTax());
+document.getElementById('addPayoutBtn').addEventListener('click', () => app.addPayout());
+document.getElementById('actual').addEventListener('click', () => app.openCount());
+document.getElementById('saveBtn').addEventListener('click', () => app.save());
+document.getElementById('cancelBtn').addEventListener('click', () => app.resetForm());
+
+// Analytics view
+document.getElementById('anStoreFilter').addEventListener('change', () => app.renderAnalytics());
+document.getElementById('anFilter').addEventListener('change', () => app.toggleCustomRange());
+document.getElementById('updateAnalyticsBtn').addEventListener('click', () => app.renderAnalytics());
+
+// Logs view
+document.getElementById('histRange').addEventListener('change', () => app.filterHistory());
+document.getElementById('historyFilter').addEventListener('change', () => {
+    document.getElementById('histRange').value = 'custom';
+    app.filterHistory();
+});
+document.getElementById('histStoreFilter').addEventListener('change', () => app.filterHistory());
+document.getElementById('refreshLogsBtn').addEventListener('click', () => app.fetch());
+document.getElementById('exportCsvBtn').addEventListener('click', () => app.exportCSV());
+
+// Calendar view
+document.getElementById('calStoreFilter').addEventListener('change', () => app.updateCalView());
+document.getElementById('calMonthSelect').addEventListener('change', () => app.updateCalView());
+document.getElementById('calYearInput').addEventListener('change', () => app.updateCalView());
+
+// Users view
+document.getElementById('userSaveBtn').addEventListener('click', () => app.saveUser());
+
+// Z Reviews view
+document.getElementById('zrStatusFilter').addEventListener('change', () => app.zr.fetchList());
+
+// Modals — backdrop close
+document.querySelectorAll('[data-modal-close]').forEach(backdrop => {
+    backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) backdrop.style.display = 'none';
+    });
+});
+// Modals — close buttons
+document.querySelectorAll('[data-close-modal]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.getElementById(btn.dataset.closeModal).style.display = 'none';
+    });
+});
+// Modal-specific buttons
+document.getElementById('changePwSubmitBtn').addEventListener('click', () => app.changePassword());
+document.getElementById('applyCountBtn').addEventListener('click', () => app.applyCount());
+document.getElementById('cancelCountBtn').addEventListener('click', () => {
+    document.getElementById('modalCount').style.display = 'none';
+});
+
+// Z Report Image modal
+document.getElementById('zreportPrev').addEventListener('click', () => app.galleryNav(-1));
+document.getElementById('zreportNext').addEventListener('click', () => app.galleryNav(1));
+document.getElementById('zreportDeleteBtn').addEventListener('click', () => app.deleteCurrentPhoto());
 </script>

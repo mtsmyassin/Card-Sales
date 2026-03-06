@@ -85,8 +85,8 @@ class TestUXFixes:
 
     def test_refresh_button_has_btn_main_class(self, ui):
         """Refresh button in History tab must use the btn-main design class."""
-        assert "app.fetch()" in ui
-        idx = ui.find("app.fetch()")
+        assert 'id="refreshLogsBtn"' in ui, "Refresh button missing from History tab"
+        idx = ui.find('id="refreshLogsBtn"')
         snippet = ui[max(0, idx - 80) : idx + 80]
         assert "btn-main" in snippet, f"Refresh button missing btn-main class: {snippet!r}"
 

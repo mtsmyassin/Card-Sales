@@ -1,11 +1,11 @@
 <!-- Z Report Image Modal -->
-<div id="zreportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
+<div id="zreportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;" data-modal-close>
   <div style="position:relative;max-width:90vw;max-height:90vh">
-    <button onclick="document.getElementById('zreportModal').style.display='none'" style="position:absolute;top:-36px;right:0;background:none;border:none;color:white;font-size:28px;cursor:pointer">✕</button>
+    <button data-close-modal="zreportModal" style="position:absolute;top:-36px;right:0;background:none;border:none;color:white;font-size:28px;cursor:pointer">✕</button>
     <div style="position:relative;display:inline-block">
-      <button id="zreportPrev" onclick="app.galleryNav(-1)" style="display:none;position:absolute;left:-44px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.25);border:none;color:white;font-size:26px;cursor:pointer;border-radius:50%;width:36px;height:36px;line-height:36px">&#8249;</button>
+      <button id="zreportPrev" style="display:none;position:absolute;left:-44px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.25);border:none;color:white;font-size:26px;cursor:pointer;border-radius:50%;width:36px;height:36px;line-height:36px">&#8249;</button>
       <img id="zreportImg" src="" style="max-width:90vw;max-height:72vh;border-radius:8px 8px 0 0;display:block">
-      <button id="zreportNext" onclick="app.galleryNav(1)" style="display:none;position:absolute;right:-44px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.25);border:none;color:white;font-size:26px;cursor:pointer;border-radius:50%;width:36px;height:36px;line-height:36px">&#8250;</button>
+      <button id="zreportNext" style="display:none;position:absolute;right:-44px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.25);border:none;color:white;font-size:26px;cursor:pointer;border-radius:50%;width:36px;height:36px;line-height:36px">&#8250;</button>
     </div>
     <div id="zreportMeta" style="background:rgba(255,255,255,0.95);padding:8px 14px;border-radius:0 0 8px 8px;font-size:12px;display:flex;gap:14px;flex-wrap:wrap;color:#1e293b;align-items:center">
       <span id="zreportCounter" style="font-weight:bold;color:#0097b2;min-width:40px"></span>
@@ -14,7 +14,7 @@
       <span>📅 <span data-date></span></span>
       <span>👤 <span data-by></span></span>
       <span>🕐 <span data-at></span></span>
-      <button id="zreportDeleteBtn" onclick="app.deleteCurrentPhoto()" style="display:none;margin-left:auto;background:#fee2e2;border:1px solid #ef4444;color:#b91c1c;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-weight:700;">🗑 Delete</button>
+      <button id="zreportDeleteBtn" style="display:none;margin-left:auto;background:#fee2e2;border:1px solid #ef4444;color:#b91c1c;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-weight:700;">🗑 Delete</button>
     </div>
   </div>
 </div>

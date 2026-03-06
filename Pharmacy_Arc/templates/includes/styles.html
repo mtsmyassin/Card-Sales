@@ -326,6 +326,60 @@ tr:hover td { background: #f8fafc; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── INTERACTIVE BUTTON VARIANTS (CSP-safe hover — no inline JS) ── */
+.sidebar-footer .btn-sidebar {
+    padding: 10px 14px; cursor: pointer;
+    background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.8);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+    font-size: 12px; font-weight: 600; width: 100%;
+    transition: all 0.2s ease; min-height: 44px;
+}
+.sidebar-footer .btn-sidebar:hover { background: rgba(255,255,255,0.15); color: white; }
+
+.sidebar-footer .btn-logout {
+    padding: 10px 14px; cursor: pointer;
+    background: rgba(239,68,68,0.9); color: white;
+    border: none; border-radius: 8px;
+    font-size: 12px; font-weight: 800; width: 100%;
+    transition: all 0.15s ease; min-height: 44px;
+}
+.sidebar-footer .btn-logout:hover { background: #ef4444; }
+
+.sidebar-footer .btn-sync {
+    background: var(--warn); color: white; border: none;
+    padding: 8px 12px; border-radius: 8px; font-weight: 700; font-size: 12px;
+    display: none; cursor: pointer; width: 100%; transition: all 0.15s;
+}
+.sidebar-footer .btn-sync:hover { filter: brightness(1.1); }
+
+.btn-section-action {
+    cursor: pointer; font-size: 10px; padding: 4px 12px;
+    border: 1.5px solid var(--border); border-radius: 20px;
+    background: white; color: var(--sidebar); font-weight: 700;
+    transition: all 0.15s ease;
+}
+.btn-section-action:hover { border-color: var(--p); color: var(--p); }
+
+.modal-close {
+    position: absolute; top: 14px; right: 16px; background: none; border: none;
+    font-size: 20px; cursor: pointer; color: var(--muted); transition: color 0.15s;
+}
+.modal-close:hover { color: var(--txt); }
+
+.modal-backdrop {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6); z-index: 9998;
+    align-items: center; justify-content: center;
+    backdrop-filter: blur(3px);
+}
+
+.btn-cancel-modal {
+    margin-top: 10px; width: 100%; padding: 11px; border: none;
+    background: #fef2f2; color: #b91c1c; border-radius: var(--radius-sm);
+    cursor: pointer; font-weight: 700; font-size: 13px; transition: background 0.15s;
+}
+.btn-cancel-modal:hover { background: #fee2e2; }
+
 /* ── MODAL BACKDROP (shared) ── */
 [id$="Modal"][style*="position:fixed"] > div,
 #modalCount > div {

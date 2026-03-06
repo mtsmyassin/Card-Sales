@@ -1,8 +1,8 @@
 <div id="calendar" class="view">
     <div class="panel">
         <div class="cal-nav" style="display:flex;gap:10px;margin-bottom:10px">
-            <select id="calStoreFilter" onchange="app.updateCalView()" style="width:150px;margin:0"><option value="All">All Stores</option>{% for s in stores %}<option>{{ s }}</option>{% endfor %}</select>
-            <select id="calMonthSelect" onchange="app.updateCalView()" style="width:150px;margin:0"></select><input type="number" id="calYearInput" onchange="app.updateCalView()" style="width:100px;margin:0" placeholder="Year">
+            <select id="calStoreFilter" style="width:150px;margin:0"><option value="All">All Stores</option>{% for s in stores %}<option>{{ s }}</option>{% endfor %}</select>
+            <select id="calMonthSelect" style="width:150px;margin:0"></select><input type="number" id="calYearInput" style="width:100px;margin:0" placeholder="Year">
         </div>
         <div id="calGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;"></div>
     </div>

@@ -3,14 +3,14 @@
         <div class="control-bar">
             <div class="control-group">
                 <span class="control-label">Scope</span>
-                <select id="anStoreFilter" onchange="app.renderAnalytics()" style="width:200px;margin:0">
+                <select id="anStoreFilter" style="width:200px;margin:0">
                     <option value="All">All Locations</option>
                     {% for s in stores %}<option>{{ s }}</option>{% endfor %}
                 </select>
             </div>
             <div class="control-group">
                 <span class="control-label">Period</span>
-                <select id="anFilter" onchange="app.toggleCustomRange()" style="width:160px;margin:0">
+                <select id="anFilter" style="width:160px;margin:0">
                     <option value="all">All Time</option>
                     <option value="30">Last 30 Days</option>
                     <option value="7">Last 7 Days</option>
@@ -22,7 +22,7 @@
                     <input type="date" id="startRange" style="margin:0;padding:8px 12px;border:1.5px solid var(--border);border-radius:20px;font-size:13px">
                     <span style="color:#94a3b8;font-weight:bold">-</span>
                     <input type="date" id="endRange" style="margin:0;padding:8px 12px;border:1.5px solid var(--border);border-radius:20px;font-size:13px">
-                    <button onclick="app.renderAnalytics()" class="btn-main" style="padding:8px 18px; width:auto; font-size:12px; margin:0; border-radius:20px">Update</button>
+                    <button id="updateAnalyticsBtn" class="btn-main" style="padding:8px 18px; width:auto; font-size:12px; margin:0; border-radius:20px">Update</button>
                 </div>
             </div>
         </div>

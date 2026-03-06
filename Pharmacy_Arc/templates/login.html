@@ -5,7 +5,7 @@
 <div id="errorMsg" style="display:none;background:#fee2e2;color:#991b1b;padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;font-weight:600;"></div>
 <input type="text" id="u" placeholder="Username" style="width:90%;padding:12px;margin-bottom:10px;border-radius:8px;border:none;text-align:center;font-weight:bold;font-size:16px;">
 <input type="password" id="p" placeholder="Password" style="width:90%;padding:12px;margin-bottom:20px;border-radius:8px;border:none;text-align:center;font-weight:bold;font-size:16px;">
-<button onclick="l()" id="loginBtn" style="width:100%;padding:12px;background:#0097b2;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">Login</button>
+<button id="loginBtn" style="width:100%;padding:12px;background:#0097b2;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">Login</button>
 </div><script nonce="{{ g.csp_nonce }}">
 function l(){
     const btn = document.getElementById('loginBtn');
@@ -43,6 +43,7 @@ function l(){
         btn.innerText = 'Login';
     });
 }
+document.getElementById('loginBtn').addEventListener('click', l);
 document.getElementById('p').addEventListener('keypress', function(e){
     if(e.key === 'Enter') l();
 });
