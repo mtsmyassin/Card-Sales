@@ -278,8 +278,8 @@ class TestCanAccessPhoto:
 class TestRegressionNoHtmlInScript:
     def test_zreport_modal_is_outside_script_block(self):
         """
-        Regression guard: the zreportModal div must appear AFTER </script>.
-        This was the bug that caused 'SyntaxError: Unexpected token <' in the browser.
+        Regression guard: the zreportModal div must NOT appear inside a <script> block.
+        It should be standalone HTML, either before or after the app script.
         """
         import os
         import sys
@@ -305,11 +305,14 @@ class TestRegressionNoHtmlInScript:
 
         main_ui = re.sub(r"\{%\s*include\s+['\"]([^'\"]+)['\"]\s*%\}", _resolve, main_ui)
 
-        script_close = main_ui.rfind("</script>")
         modal_pos = main_ui.find('id="zreportModal"')
-        assert script_close != -1, "No </script> found in MAIN_UI"
         assert modal_pos != -1, "zreportModal not found in MAIN_UI"
-        assert script_close < modal_pos, (
-            f"BUG: zreportModal HTML (pos {modal_pos}) is INSIDE </script> (pos {script_close}). "
-            "This causes 'Unexpected token <' in the browser."
-        )
+        # Find the nearest <script> that opens before modal_pos
+        # and check that it has a closing </script> before modal_pos
+        last_script_open = main_ui.rfind("<script", 0, modal_pos)
+        if last_script_open != -1:
+            last_script_close = main_ui.rfind("</script>", last_script_open, modal_pos)
+            assert last_script_close != -1, (
+                f"BUG: zreportModal (pos {modal_pos}) is inside an unclosed <script> block "
+                f"(opened at pos {last_script_open}). This causes 'Unexpected token <' in the browser."
+            )
